@@ -1,0 +1,147 @@
+---
+name: "CI & CD"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+  pull_request:
+  release:
+    types:
+    - published
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  PY_VERSION: "3.11"  # Keep in sync with version in environment.yml
+
+jobs:
+  lint:
+    name: Check code style
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PY_VERSION }}
+    - name: Install linters
+      # Keep in sync with the corresponding versions in pyproject.toml
+      run: pip install ruff==0.11.0 numpydoc==1.8.0 mypy==1.15.0
+    - name: Check code formatting
+      run: ruff format --diff
+    - name: Lint code base
+      run: ruff check
+    - name: Check docstring formatting
+      run: numpydoc lint src/peppr/**/*.py
+    - name: Check typing
+      run: mypy src
+
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PY_VERSION }}
+      - name: Install build frontend
+        run: pip install build
+      - name: Build distribution
+        run: python -m build .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution
+          path: ./dist/*
+
+  test:
+    name: Run tests
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PY_VERSION }}
+      - name: Install peppr and test dependencies
+        run: pip install dist/*.whl[tests]
+      - name: Run tests
+        run: pytest
+
+  docs:
+    name: Build documentation
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PY_VERSION }}
+      - name: Install peppr and documentation dependencies
+        run: pip install dist/*.whl[docs]
+      - name: Build documentation
+        run: sphinx-build docs build/docs
+      - name: Compress documentation
+        run: |
+            cd build
+            zip -r ../dist/docs.zip docs
+            cd ..
+      - uses: actions/upload-artifact@v4
+        with:
+          name: documentation
+          path: dist//docs.zip
+
+  publish-dist:
+    name: Publish distribution to GitHub Releases and PyPI
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs:
+      - lint
+      - build
+      - test
+      - docs
+    runs-on: ubuntu-latest
+    environment:
+      name: publish
+      url: https://pypi.org/p/peppr
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: distribution
+        path: dist
+    - name: Upload to GitHub Releases
+      uses: softprops/action-gh-release@v2.2.1
+      with:
+        files: dist/*
+    - name: Upload to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-docs:
+    name: Publish documentation to GitHub Releases and documentation website
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs:
+      - lint
+      - build
+      - test
+      - docs
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: documentation
+        path: dist
+    - name: Upload to GitHub Releases
+      uses: softprops/action-gh-release@v2.2.1
+      with:
+        files: dist/docs.zip

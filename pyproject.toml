@@ -1,0 +1,129 @@
+[project]
+name = "peppr"
+requires-python = ">=3.11"
+description = "It's a package for evaluation of predicted poses, right?"
+readme = "README.rst"
+authors = [{name = "The pepp'r contributors"}]
+license = {"file" = "LICENSE.txt"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Natural Language :: English",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+dependencies = [
+  "biotite >= 1.2",
+  "numpy >= 1.25",
+  "pandas >= 2.0.0",
+  "rdkit >= 2024.09.1",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+docs = [
+  "pydata-sphinx-theme == 0.16.1",
+  "matplotlib >= 3.3",
+  "ipython < 8.29",  # jupyter-sphinx is not compatible with the newest IPython versions
+  "jupyter-sphinx >= 0.5.3",
+  "sphinx >= 7.0",
+  "sphinxcontrib-bibtex >= 2.3",
+  "sphinx-copybutton >= 0.5",
+  "sphinx-design >= 0.5",
+  "sphinx-notfound-page >= 1.0",
+]
+lint = [
+  "ruff == 0.11.0",
+  "numpydoc == 1.8.0",
+  "mypy == 1.15.0",
+]
+tests = [
+  "pytest",
+  "dockq",  # For reference values
+]
+
+[project.urls]
+#homepage = "https://www.peppr.org"
+repository = "https://github.com/aivant/peppr"
+#documentation = "https://www.peppr.org"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle isort and variable naming
+select = ["F", "E", "W", "I", "TID", "N"]
+ignore = [
+    # In docstrings long lines are often intentional
+    # Most other occasions are caught by the ruff formatter
+    "E501",
+    # Due to constants and class placeholders defined in functions
+    "N806",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Due to `from .module import *` imports in `__init__.py` modules
+"__init__.py" = ["F403", "TID252"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+# No separator lines between import sections
+no-lines-before = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder",
+]
+order-by-type = true
+known-first-party = ["peppr"]
+
+[tool.numpydoc_validation]
+# The description of each rule is documented at
+# https://numpydoc.readthedocs.io/en/latest/validation.html#built-in-validation-checks
+checks = [
+  "all",
+  # ... except:
+  "GL08",  # Properties do not have a docstring
+  "SS03",  # Sometimes the citation comes after the period
+  "SS05",  # Too error-prone; classes do not use infinite verbs
+  "SS06",  # Sometimes summaries are a bit longer
+  "ES01",  # Some functions are simple enough to not need an extended summary
+  "PR06",  # The types are quite descriptive (include shape, dtype, etc.)
+  # Intentionally not all docstrings contain these sections
+  "YD01",
+  "SA01",
+  "EX01",
+]
+exclude = [
+  '__init__$', # Package description is not Numpydoc formatted
+  '\._[_a-z0-9]+$',  # Do not validate private or special methods
+]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "tests",
+  "docs",
+  "environment.yml",
+  # .github, .gitignore, .gitattributes
+  ".git*",
+]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/peppr/version.py"
+
+[build-system]
+requires = [
+    "hatchling",
+    "hatch-vcs == 0.4",
+]
+build-backend = "hatchling.build"
