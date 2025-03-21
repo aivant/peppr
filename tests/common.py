@@ -54,7 +54,7 @@ def assemble_predictions(
     system_id: str,
 ) -> tuple[struc.AtomArray, struc.AtomArrayStack]:
     """
-    Assemble test reference and model system structures for a given system ID.
+    Assemble test reference and pose system structures for a given system ID.
 
     Parameters
     ----------
@@ -65,15 +65,15 @@ def assemble_predictions(
     -------
     reference : AtomArray
         Reference structure.
-    models : AtomArrayStack
-        Model structures.
+    poses : AtomArrayStack
+        Pose structures.
     """
     system_dir = Path(__file__).parent / "data" / "predictions" / system_id
     pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
     reference = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-    pdbx_file = pdbx.CIFFile.read(system_dir / "models.cif")
-    models = pdbx.get_structure(pdbx_file, model=None, include_bonds=True)
-    return reference, models
+    pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
+    poses = pdbx.get_structure(pdbx_file, model=None, include_bonds=True)
+    return reference, poses
 
 
 def get_reference_metric(system_id: str, metric_name) -> np.ndarray[np.floating]:
@@ -90,24 +90,24 @@ def get_reference_metric(system_id: str, metric_name) -> np.ndarray[np.floating]
 
     Returns
     -------
-    metric : np.ndarray, shape=(n_models, n_ligands) or shape=(n_models,), dtype=float
+    metric : np.ndarray, shape=(n_poses, n_ligands) or shape=(n_poses,), dtype=float
         The metric for the system.
-        The ``n_models`` dimension specifies the metric value for each predicted model.
+        The ``n_poses`` dimension specifies the metric value for each predicted pose.
         The ``n_ligands`` dimension separates the metric value for each small molecule
         ligand, if applicable.
     """
     metrics_table = pd.read_csv(Path(__file__).parent / "data" / "ref_metrics.csv")
     metrics_table = metrics_table.loc[metrics_table["system_id"] == system_id]
-    model_index = metrics_table["model_num"].to_numpy().astype(int)
+    pose_index = metrics_table["model_num"].to_numpy().astype(int)
     if metrics_table["ligand"].isna().all():
-        metric = np.full((np.max(model_index) + 1, 1), np.nan)
-        for i, value in zip(model_index, metrics_table[metric_name]):
+        metric = np.full((np.max(pose_index) + 1, 1), np.nan)
+        for i, value in zip(pose_index, metrics_table[metric_name]):
             metric[i] = value
     else:
         molecule_index = np.array(
             [int(label.split("_")[1]) for label in metrics_table["ligand"]]
         )
-        metric = np.full((np.max(model_index) + 1, np.max(molecule_index) + 1), np.nan)
-        for i, j, value in zip(model_index, molecule_index, metrics_table[metric_name]):
+        metric = np.full((np.max(pose_index) + 1, np.max(molecule_index) + 1), np.nan)
+        for i, j, value in zip(pose_index, molecule_index, metrics_table[metric_name]):
             metric[i, j] = value
     return metric

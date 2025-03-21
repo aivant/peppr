@@ -23,42 +23,42 @@ def evaluator(metrics):
 
 
 @pytest.fixture
-def evaluator_fed_with_single_models(evaluator):
+def evaluator_fed_with_single_poses(evaluator):
     evaluator = copy.deepcopy(evaluator)
     system_ids = list_test_predictions()
     for system_id in system_ids:
-        reference, models = assemble_predictions(system_id)
-        evaluator.feed(system_id, reference, models[0])
+        reference, poses = assemble_predictions(system_id)
+        evaluator.feed(system_id, reference, poses[0])
     return evaluator
 
 
 @pytest.fixture
-def evaluator_fed_with_multiple_models(evaluator):
+def evaluator_fed_with_multiple_poses(evaluator):
     evaluator = copy.deepcopy(evaluator)
     system_ids = list_test_predictions()
     for system_id in system_ids:
-        reference, models = assemble_predictions(system_id)
-        evaluator.feed(system_id, reference, models)
+        reference, poses = assemble_predictions(system_id)
+        evaluator.feed(system_id, reference, poses)
     return evaluator
 
 
-def test_tabulate_metrics_for_single(evaluator_fed_with_single_models):
+def test_tabulate_metrics_for_single(evaluator_fed_with_single_poses):
     """
     Check if :meth:`Evaluator.tabulate_metrics()` returns a dataframe with the correct
-    system IDs and column names, if a single model is fed for each system.
+    system IDs and column names, if a single pose is fed for each system.
     """
-    table = evaluator_fed_with_single_models.tabulate_metrics()
+    table = evaluator_fed_with_single_poses.tabulate_metrics()
 
     assert table.index.to_list() == list_test_predictions()
     assert table.columns.to_list() == ["CA-RMSD", "intra protein lDDT", "TM-score"]
 
 
-def test_tabulate_metrics_for_multi(evaluator_fed_with_multiple_models, selectors):
+def test_tabulate_metrics_for_multi(evaluator_fed_with_multiple_poses, selectors):
     """
     Check if :meth:`Evaluator.tabulate_metrics()` returns a dataframe with the correct
-    system IDs and column names, if multiple models are fed for each system.
+    system IDs and column names, if multiple poses are fed for each system.
     """
-    table = evaluator_fed_with_multiple_models.tabulate_metrics(selectors)
+    table = evaluator_fed_with_multiple_poses.tabulate_metrics(selectors)
 
     assert table.index.to_list() == list_test_predictions()
     assert table.columns.to_list() == [
@@ -87,7 +87,7 @@ def test_tabulate_metrics_with_unsuitable_metric(selectors):
         def name(self):
             return "Unsuitable"
 
-        def evaluate(self, reference, models):
+        def evaluate(self, reference, poses):
             return None
 
         def requires_hydrogen(self):
@@ -99,8 +99,8 @@ def test_tabulate_metrics_with_unsuitable_metric(selectors):
     evaluator = peppr.Evaluator([peppr.MonomerRMSD(5.0), UnsuitableMetric()])
     system_ids = list_test_predictions()
     for system_id in system_ids:
-        reference, models = assemble_predictions(system_id)
-        evaluator.feed(system_id, reference, models[0])
+        reference, poses = assemble_predictions(system_id)
+        evaluator.feed(system_id, reference, poses[0])
     table = evaluator.tabulate_metrics(selectors)
 
     # The first metric (MonomerRMSD) should work
@@ -109,16 +109,16 @@ def test_tabulate_metrics_with_unsuitable_metric(selectors):
     assert table.iloc[:, 1].isna().all()
 
 
-@pytest.mark.parametrize("single_model", [True, False])
+@pytest.mark.parametrize("single_pose", [True, False])
 def test_summarize_metrics(
-    single_model,
-    evaluator_fed_with_single_models,
-    evaluator_fed_with_multiple_models,
+    single_pose,
+    evaluator_fed_with_single_poses,
+    evaluator_fed_with_multiple_poses,
     selectors,
 ):
     """
     Check if :meth:`Evaluator.summarize_metrics()` returns a dictionary that maps
-    the expected metric names to floating point values, when fed with a single model
+    the expected metric names to floating point values, when fed with a single pose
     per system.
     """
     METRIC_NAMES = [
@@ -133,12 +133,12 @@ def test_summarize_metrics(
     ]
     SELECTOR_NAMES = ["mean", "Oracle"]
 
-    if single_model:
-        summary = evaluator_fed_with_single_models.summarize_metrics()
+    if single_pose:
+        summary = evaluator_fed_with_single_poses.summarize_metrics()
     else:
-        summary = evaluator_fed_with_multiple_models.summarize_metrics(selectors)
+        summary = evaluator_fed_with_multiple_poses.summarize_metrics(selectors)
 
-    if single_model:
+    if single_pose:
         assert set(summary.keys()) == set(METRIC_NAMES)
     else:
         assert set(summary.keys()) == set(
@@ -178,7 +178,7 @@ def test_summarize_metrics_with_nan():
         def thresholds(self):
             return OrderedDict([("bad", 0.0), ("good", 0.5)])
 
-        def evaluate(self, reference, models):
+        def evaluate(self, reference, poses):
             if self._works:
                 self._works = False
                 return self._rng.random()
@@ -195,8 +195,8 @@ def test_summarize_metrics_with_nan():
     evaluator = peppr.Evaluator([SometimesUnsuitableMetric()])
     system_ids = list_test_predictions()
     for system_id in system_ids:
-        reference, models = assemble_predictions(system_id)
-        evaluator.feed(system_id, reference, models[0])
+        reference, poses = assemble_predictions(system_id)
+        evaluator.feed(system_id, reference, poses[0])
     summary = evaluator.summarize_metrics()
 
     # Although the metric is NaN for half of the systems,
@@ -220,7 +220,7 @@ def test_tolerate_exceptions():
         def name(self):
             return "Broken"
 
-        def evaluate(self, reference, models):
+        def evaluate(self, reference, poses):
             raise ValueError("Expected failure")
 
         def requires_hydrogen(self):
@@ -231,9 +231,9 @@ def test_tolerate_exceptions():
 
     evaluator = peppr.Evaluator([BrokenMetric()], tolerate_exceptions=True)
     system_id = list_test_predictions()[0]
-    reference, models = assemble_predictions(system_id)
+    reference, poses = assemble_predictions(system_id)
     with pytest.warns(
         peppr.EvaluationWarning,
         match=f"Failed to evaluate Broken on '{system_id}': Expected failure",
     ):
-        evaluator.feed(system_id, reference, models[0])
+        evaluator.feed(system_id, reference, poses[0])

@@ -67,12 +67,12 @@ def test_metrics(metric, value_range, system_id):
     without error and returns an array with correct shape with values in a reasonable
     range.
     """
-    reference, models = assemble_predictions(system_id)
-    for model in models:
-        reference_order, model_order = peppr.find_matching_atoms(reference, model)
+    reference, poses = assemble_predictions(system_id)
+    for pose in poses:
+        reference_order, pose_order = peppr.find_matching_atoms(reference, pose)
         reference = reference[reference_order]
-        model = model[model_order]
-        value = metric.evaluate(reference, model)
+        pose = pose[pose_order]
+        value = metric.evaluate(reference, pose)
         assert value >= value_range[0]
         assert value <= value_range[1]
 
@@ -83,13 +83,13 @@ def test_no_modification(metric):
     No metric should modify the input structures.
     """
     # Choose any system that is suitable for all metrics, i.e. contains PPI and PLI
-    reference, models = assemble_predictions("7t4w__1__1.A__1.C")
-    model = models[0]
+    reference, poses = assemble_predictions("7t4w__1__1.A__1.C")
+    pose = poses[0]
     original_reference = reference.copy()
-    original_model = model.copy()
-    metric.evaluate(reference, model)
+    original_pose = pose.copy()
+    metric.evaluate(reference, pose)
     assert np.all(reference == original_reference)
-    assert np.all(model == original_model)
+    assert np.all(pose == original_pose)
 
 
 @pytest.mark.parametrize("metric", ALL_METRICS, ids=lambda metric: metric.name)
@@ -100,8 +100,8 @@ def test_unsuitable_system(metric):
     To check this, run all metrics on an empty system, which is never suitable.
     """
     reference = struc.AtomArray(0)
-    model = struc.AtomArray(0)
-    assert np.isnan(metric.evaluate(reference, model))
+    pose = struc.AtomArray(0)
+    assert np.isnan(metric.evaluate(reference, pose))
 
 
 def test_unique_names():
@@ -122,9 +122,9 @@ def test_ppi_lddt_score(system_id):
 
     ref_lddt = get_reference_metric(system_id, "ilddt")
 
-    reference, models = assemble_predictions(system_id)
+    reference, poses = assemble_predictions(system_id)
     evaluator = peppr.Evaluator([peppr.LDDTPPIScore()])
-    evaluator.feed(system_id, reference, models)
+    evaluator.feed(system_id, reference, poses)
     test_lddt = np.stack(evaluator.get_results()[0], axis=1)
 
     assert test_lddt.flatten().tolist() == pytest.approx(
@@ -156,7 +156,7 @@ def test_pli_metrics(system_id, metric, column_name, abs_tolerance, rel_toleranc
 
     ref_metric = get_reference_metric(system_id, column_name)
 
-    reference, models = assemble_predictions(system_id)
+    reference, poses = assemble_predictions(system_id)
     evaluator = peppr.Evaluator([metric])
     # The reference computes metrics per ligand,
     # so for comparison we do this here as well
@@ -168,8 +168,8 @@ def test_pli_metrics(system_id, metric, column_name, abs_tolerance, rel_toleranc
             | (reference.chain_id == f"LIG{ligand_i}")
         )
         masked_reference = reference[chain_mask]
-        masked_models = models[:, chain_mask]
-        evaluator.feed(system_id, masked_reference, masked_models)
+        masked_poses = poses[:, chain_mask]
+        evaluator.feed(system_id, masked_reference, masked_poses)
     test_metric = np.stack(evaluator.get_results()[0], axis=1)
     test_metric = _find_matching_ligand(ref_metric, test_metric)
 
@@ -178,27 +178,27 @@ def test_pli_metrics(system_id, metric, column_name, abs_tolerance, rel_toleranc
     )
 
 
-@pytest.mark.parametrize("move_structure", ["reference", "model"])
+@pytest.mark.parametrize("move_structure", ["reference", "pose"])
 @pytest.mark.parametrize("system_id", list_test_predictions("pli"))
 def test_intra_ligand_lddt_score(system_id, move_structure):
     """
     In the intra ligand lDDT the score should not depend on the relative position of the
     ligands in the system, as the lDDT is computed per each ligand.
-    Hence moving the ligands towards each other in the reference or model should not
+    Hence moving the ligands towards each other in the reference or pose should not
     change the lDDT score.
     """
-    reference, models = assemble_predictions(system_id)
+    reference, poses = assemble_predictions(system_id)
     metric = peppr.IntraLigandLDDTScore()
     # Explicitly do not use the `Evaluator` here,
     # as moving ligand might change the atom mapping
-    original_lddt = np.array([metric.evaluate(reference, model) for model in models])
+    original_lddt = np.array([metric.evaluate(reference, pose) for pose in poses])
 
     # Move the ligands (and proteins as well) towards (or rather into) each other
     if move_structure == "reference":
         reference = _place_at_origin(reference)
-    elif move_structure == "model":
-        models = _place_at_origin(models)
-    moved_lddt = np.array([metric.evaluate(reference, model) for model in models])
+    elif move_structure == "pose":
+        poses = _place_at_origin(poses)
+    moved_lddt = np.array([metric.evaluate(reference, pose) for pose in poses])
 
     assert original_lddt.tolist() == moved_lddt.tolist()
 
@@ -212,12 +212,12 @@ def _find_matching_ligand(ref_metrics, test_metrics):
 
     Parameters
     ----------
-    ref_metrics, test_metrics : np.ndarray, shape=(n_models, n_ligands), dtype=float
+    ref_metrics, test_metrics : np.ndarray, shape=(n_poses, n_ligands), dtype=float
         The metrics.
 
     Returns
     -------
-    reordered_test_metrics : np.ndarray, shape=(n_models, n_ligands), dtype=float
+    reordered_test_metrics : np.ndarray, shape=(n_poses, n_ligands), dtype=float
         The reordered test metrics that match the reference metrics as closely as
         possible.
     """
@@ -256,24 +256,24 @@ def test_ligand_rmsd_with_no_contacts():
     """
     LigandRMSD metric should return NaN when the reference only contains two chains and they are not in contact.
 
-    We first load a system, only keep two chains and move the native ligand away to make sure they native receptor
-    and native ligand are not in contact. Then we compute the LigandRMSD and check if it
+    We first load a system, only keep two chains and move the reference ligand away to make sure they reference receptor
+    and reference ligand are not in contact. Then we compute the LigandRMSD and check if it
     is NaN.
 
     :param data_dir: pytest fixture, path to the directory containing the test data
     """
-    reference, models = assemble_predictions("7yn2__1__1.A_1.B__1.C")
-    model = models[0]
-    reference_order, model_order = peppr.find_matching_atoms(reference, model)
+    reference, poses = assemble_predictions("7yn2__1__1.A_1.B__1.C")
+    pose = poses[0]
+    reference_order, pose_order = peppr.find_matching_atoms(reference, pose)
     reference = reference[reference_order]
-    model = model[model_order]
+    pose = pose[pose_order]
 
     # Assert that the reference contains only two protein chains
     assert set(reference.chain_id[~reference.hetero]) == {"0", "1"}
 
     # Assert that LigandRMSD is not NaN before translation
     metric = peppr.LigandRMSD()
-    lrmsd = metric.evaluate(reference, model)
+    lrmsd = metric.evaluate(reference, pose)
     assert not np.isnan(lrmsd)
 
     # Traslate chain 0 of the reference so that it is not in contact with chain 1
@@ -282,5 +282,5 @@ def test_ligand_rmsd_with_no_contacts():
     )
 
     # Assert that LigandRMSD is NaN after translation
-    lrmsd = metric.evaluate(reference, model)
+    lrmsd = metric.evaluate(reference, pose)
     assert np.isnan(lrmsd)

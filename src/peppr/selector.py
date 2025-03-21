@@ -14,7 +14,7 @@ class Selector(ABC):
     """
     The base class for all pose selectors.
 
-    Its purpose is to aggregate metric values for multiple models into a single scalar
+    Its purpose is to aggregate metric values for multiple poses into a single scalar
     value.
 
     Attributes

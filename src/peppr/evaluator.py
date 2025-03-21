@@ -16,7 +16,7 @@ from peppr.selector import Selector
 class MatchWarning(UserWarning):
     """
     This warning is raised, if a the :class:`Evaluator` fails to match atoms between
-    the reference and model structures.
+    the reference and pose structures.
     """
 
     pass
@@ -24,7 +24,7 @@ class MatchWarning(UserWarning):
 
 class EvaluationWarning(UserWarning):
     """
-    This warning is raised, if a :class:`Metric` fails to evaluate a model.
+    This warning is raised, if a :class:`Metric` fails to evaluate a pose.
     """
 
     pass
@@ -41,7 +41,7 @@ class Evaluator(Mapping):
     Parameters
     ----------
     metrics : Iterable of Metric
-        The metrics to evaluate the models against.
+        The metrics to evaluate the poses against.
         These will make up the columns of the resulting dataframe from
         :meth:`tabulate_metrics()`.
     tolerate_exceptions : bool, optional
@@ -53,7 +53,7 @@ class Evaluator(Mapping):
     Attributes
     ----------
     metrics : tuple of Metric
-        The metrics to evaluate the models against.
+        The metrics to evaluate the poses against.
     system_ids : tuple of str
         The IDs of the systems that were fed into the evaluator.
     """
@@ -83,7 +83,7 @@ class Evaluator(Mapping):
         self,
         system_id: str,
         reference: struc.AtomArray,
-        models: Sequence[struc.AtomArray] | struc.AtomArrayStack | struc.AtomArray,
+        poses: Sequence[struc.AtomArray] | struc.AtomArrayStack | struc.AtomArray,
     ) -> None:
         """
         Evaluate the poses of a system against the reference structure for all metrics.
@@ -95,14 +95,14 @@ class Evaluator(Mapping):
         reference : AtomArray
             The reference structure of the system.
             Each separate instance/molecule must have a distinct `chain_id`.
-        models : AtomArrayStack or list of AtomArray or AtomArray
-            The model(s) to evaluate.
-            It is expected that the models are sorted from highest to lowest confidence,
+        poses : AtomArrayStack or list of AtomArray or AtomArray
+            The pose(s) to evaluate.
+            It is expected that the poses are sorted from highest to lowest confidence,
             (relevant for :class:`Selector` instances).
 
         Notes
         -----
-        `reference` and `models` must fulfill the following requirements:
+        `reference` and `poses` must fulfill the following requirements:
 
         - The system must have an associated `biotite.structure.BondList`,
           i.e. the ``bonds`` attribute must not be ``None``.
@@ -116,48 +116,48 @@ class Evaluator(Mapping):
         is handled automatically.
         """
         reference = standardize(reference)
-        if isinstance(models, struc.AtomArray):
-            models = [standardize(models)]
-        elif isinstance(models, struc.AtomArrayStack):
-            models = list(standardize(models))
+        if isinstance(poses, struc.AtomArray):
+            poses = [standardize(poses)]
+        elif isinstance(poses, struc.AtomArrayStack):
+            poses = list(standardize(poses))
         else:
-            models = [standardize(model) for model in models]
-        if len(models) == 0:
-            raise ValueError("No models provided")
+            poses = [standardize(pose) for pose in poses]
+        if len(poses) == 0:
+            raise ValueError("No poses provided")
 
-        result_for_system = np.full((len(self._metrics), len(models)), np.nan)
-        for j, model in enumerate(models):
+        result_for_system = np.full((len(self._metrics), len(poses)), np.nan)
+        for j, pose in enumerate(poses):
             try:
-                reference_order, model_order = find_matching_atoms(
-                    reference, model, min_sequence_identity=self._min_sequence_identity
+                reference_order, pose_order = find_matching_atoms(
+                    reference, pose, min_sequence_identity=self._min_sequence_identity
                 )
                 matched_reference = reference[reference_order]
-                matched_model = model[model_order]
+                matched_pose = pose[pose_order]
             except Exception as e:
                 if self._tolerate_exceptions:
                     warnings.warn(
-                        f"Failed to match reference and model in system '{system_id}': {e}",
+                        f"Failed to match reference and pose in system '{system_id}': {e}",
                         MatchWarning,
                     )
                     continue
                 else:
                     raise
             # Sanity check if something went wrong in the matching
-            if not np.array_equal(matched_reference.element, matched_model.element):
+            if not np.array_equal(matched_reference.element, matched_pose.element):
                 if self._tolerate_exceptions:
                     warnings.warn(
-                        f"'{system_id}' models could not be matched to reference",
+                        f"'{system_id}' poses could not be matched to reference",
                         EvaluationWarning,
                     )
                 else:
                     raise ValueError(
-                        f"'{system_id}' models could not be matched to reference"
+                        f"'{system_id}' poses could not be matched to reference"
                     )
 
             for i, metric in enumerate(self._metrics):
                 try:
                     result_for_system[i, j] = metric.evaluate(
-                        matched_reference, matched_model
+                        matched_reference, matched_pose
                     )
                 except Exception as e:
                     if self._tolerate_exceptions:
@@ -175,14 +175,14 @@ class Evaluator(Mapping):
         """
         Return the raw results of the evaluation.
 
-        This includes each metric evaluated on each model of each system.
+        This includes each metric evaluated on each pose of each system.
 
         Returns
         -------
         list of list of np.ndarray
             The raw results of the evaluation.
             The outer list iterates over the metrics, the inner list iterates over
-            the systems and the array represents the values for each model.
+            the systems and the array represents the values for each pose.
         """
         return copy.deepcopy(self._results)
 
@@ -195,9 +195,9 @@ class Evaluator(Mapping):
         Parameters
         ----------
         selectors : list of Selector, optional
-            The selectors to use for selecting the best pose of a multi-model
+            The selectors to use for selecting the best pose of a multi-pose
             prediction.
-            This parameter is not necessary if only single-model predictions were fed
+            This parameter is not necessary if only single-pose predictions were fed
             into the :class:`Evaluator`.
 
         Returns
@@ -263,9 +263,9 @@ class Evaluator(Mapping):
         Parameters
         ----------
         selectors : list of Selector, optional
-            The selectors to use for selecting the best pose of a multi-model
+            The selectors to use for selecting the best pose of a multi-pose
             prediction.
-            This parameter is not necessary if only single-model predictions were fed
+            This parameter is not necessary if only single-pose predictions were fed
             into the :class:`Evaluator`.
 
         Returns
@@ -337,7 +337,7 @@ class Evaluator(Mapping):
                         condensed_values.append(np.nan)
                     elif len(array) > 1:
                         raise ValueError(
-                            "At least one selector is required for multi-model predictions"
+                            "At least one selector is required for multi-pose predictions"
                         )
                     else:
                         condensed_values.append(array[0])

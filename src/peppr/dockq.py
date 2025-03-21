@@ -49,27 +49,27 @@ class DockQ:
     """
     Result of a *DockQ* calculation.
 
-    If multiple models were used to calculate *DockQ*, the attributes are arrays.
+    If multiple poses were used to calculate *DockQ*, the attributes are arrays.
 
     Attributes
     ----------
     fnat : float or ndarray, dtype=float
-        The fraction of native contacts found in the model relative to the total
-        number of native contacts.
+        The fraction of reference contacts found in the pose relative to the total
+        number of reference contacts.
     fnonnat : float or ndarray, dtype=float
-        The fraction of non-native contacts found in the model relative to the total
-        number of model contacts.
+        The fraction of non-reference contacts found in the pose relative to the total
+        number of pose contacts.
     irmsd : float or ndarray, dtype=float
         The interface RMSD.
     lrmsd : float or ndarray, dtype=float
         The ligand RMSD.
     score : float or ndarray, dtype=float
         The DockQ score.
-    n_models : int or None
-        The number of models for which the *DockQ* was calculated.
+    n_poses : int or None
+        The number of poses for which the *DockQ* was calculated.
         `None`, if the *DockQ* was calculated for an `AtomArray`.
-    model_receptor_index, model_ligand_index, native_receptor_index, native_ligand_index : int or None
-        The indices of the model and native chain that were included for *DockQ*
+    pose_receptor_index, pose_ligand_index, reference_receptor_index, reference_ligand_index : int or None
+        The indices of the pose and reference chain that were included for *DockQ*
         computation.
         Only set, if called from `global_dockq()`.
     """
@@ -79,72 +79,72 @@ class DockQ:
     irmsd: float | NDArray[np.floating]
     lrmsd: float | NDArray[np.floating]
     score: float | NDArray[np.floating] = field(init=False)
-    n_models: int | None = field(init=False)
-    model_receptor_index: int | None = None
-    model_ligand_index: int | None = None
-    native_receptor_index: int | None = None
-    native_ligand_index: int | None = None
+    n_poses: int | None = field(init=False)
+    pose_receptor_index: int | None = None
+    pose_ligand_index: int | None = None
+    reference_receptor_index: int | None = None
+    reference_ligand_index: int | None = None
 
     def __post_init__(self) -> None:
         score = np.mean(
             [self.fnat, _scale(self.irmsd, 1.5), _scale(self.lrmsd, 8.5)], axis=0
         )
-        n_models = None if np.isscalar(score) else len(score)
+        n_poses = None if np.isscalar(score) else len(score)
         super().__setattr__("score", score)
-        super().__setattr__("n_models", n_models)
+        super().__setattr__("n_poses", n_poses)
 
-    def for_model(self, model_index: int) -> "DockQ":
+    def for_pose(self, pose_index: int) -> "DockQ":
         """
-        Get the DockQ results for a specific model index.
+        Get the DockQ results for a specific pose index.
 
         Parameters
         ----------
-        model_index : int
-            The index of the model for which the DockQ results should be retrieved.
+        pose_index : int
+            The index of the pose for which the DockQ results should be retrieved.
 
         Returns
         -------
         DockQ
-            The DockQ results for the specified model index.
+            The DockQ results for the specified pose index.
 
         Raises
         ------
         IndexError
-            If the `GlobalDockQ` object was computed for a single model,
-            i.e. `n_models` is `None`.
+            If the `GlobalDockQ` object was computed for a single pose,
+            i.e. `n_poses` is `None`.
         """
-        if self.n_models is None:
-            raise IndexError("DockQ was computed for a single model")
+        if self.n_poses is None:
+            raise IndexError("DockQ was computed for a single pose")
         return DockQ(
-            self.fnat[model_index].item(),  # type: ignore[index]
-            self.fnonnat[model_index].item(),  # type: ignore[index]
-            self.irmsd[model_index].item(),  # type: ignore[index]
-            self.lrmsd[model_index].item(),  # type: ignore[index]
-            model_receptor_index=self.model_receptor_index,
-            model_ligand_index=self.model_ligand_index,
-            native_receptor_index=self.native_receptor_index,
-            native_ligand_index=self.native_ligand_index,
+            self.fnat[pose_index].item(),  # type: ignore[index]
+            self.fnonnat[pose_index].item(),  # type: ignore[index]
+            self.irmsd[pose_index].item(),  # type: ignore[index]
+            self.lrmsd[pose_index].item(),  # type: ignore[index]
+            pose_receptor_index=self.pose_receptor_index,
+            pose_ligand_index=self.pose_ligand_index,
+            reference_receptor_index=self.reference_receptor_index,
+            reference_ligand_index=self.reference_ligand_index,
         )
 
 
 def dockq(
-    native_receptor: struc.AtomArray,
-    native_ligand: struc.AtomArray,
-    model_receptor: struc.AtomArray | struc.AtomArrayStack,
-    model_ligand: struc.AtomArray | struc.AtomArrayStack,
+    reference_receptor: struc.AtomArray,
+    reference_ligand: struc.AtomArray,
+    pose_receptor: struc.AtomArray | struc.AtomArrayStack,
+    pose_ligand: struc.AtomArray | struc.AtomArrayStack,
     as_peptide: bool = False,
 ) -> DockQ:
     """
-    Compute *DockQ* for a single pair of receptor and ligand in both, the model and
-    native structure.
+    Compute *DockQ* for a single pair of receptor and ligand in both, the pose and
+    reference structure.
 
     Parameters
     ----------
-    native_receptor, native_ligand : AtomArray
-        The native receptor and ligand.
-    model_receptor, model_ligand : AtomArray or AtomArrayStack
-        The model receptor and ligand.
-        Multiple models can be provided.
+    reference_receptor, reference_ligand : AtomArray
+        The reference receptor and ligand.
+    pose_receptor, pose_ligand : AtomArray or AtomArrayStack
+        The pose receptor and ligand.
+        Multiple poses can be provided.
     as_peptide : bool
         If set to true, the chains are treated as CAPRI peptides.
 
@@ -152,23 +152,23 @@ def dockq(
     -------
     DockQ
         The DockQ result.
-        If multiple models are provided, the `DockQ` attributes are arrays.
+        If multiple poses are provided, the `DockQ` attributes are arrays.
 
     Notes
     -----
     If the ligand is a small molecule, an associated `BondList` is required in
-    `model_ligand` and `native_ligand` for mapping the atoms between them.
+    `pose_ligand` and `reference_ligand` for mapping the atoms between them.
 
     Examples
     --------
 
     Single chains as expected as input.
 
-    >>> model_receptor = model_complex[model_complex.chain_id == "C"]
-    >>> model_ligand = model_complex[model_complex.chain_id == "B"]
-    >>> native_receptor = native_complex[native_complex.chain_id == "C"]
-    >>> native_ligand = native_complex[native_complex.chain_id == "B"]
-    >>> dockq_result = dockq(model_receptor, model_ligand, native_receptor, native_ligand)
+    >>> pose_receptor = pose_complex[pose_complex.chain_id == "C"]
+    >>> pose_ligand = pose_complex[pose_complex.chain_id == "B"]
+    >>> reference_receptor = reference_complex[reference_complex.chain_id == "C"]
+    >>> reference_ligand = reference_complex[reference_complex.chain_id == "B"]
+    >>> dockq_result = dockq(pose_receptor, pose_ligand, reference_receptor, reference_ligand)
     >>> print(f"{dockq_result.fnat:.2f}")
     0.50
     >>> print(f"{dockq_result.irmsd:.2f}")
@@ -183,39 +183,39 @@ def dockq(
             [
                 is_small_molecule(chain)
                 for chain in (
-                    model_receptor,
-                    model_ligand,
-                    native_receptor,
-                    native_ligand,
+                    pose_receptor,
+                    pose_ligand,
+                    reference_receptor,
+                    reference_ligand,
                 )
             ]
         ):
             raise ValueError("'as_peptide' is true, but the chains are not peptides")
 
-    if is_small_molecule(model_ligand):
+    if is_small_molecule(pose_ligand):
         # For small molecules DockQ is only based on the pocket-aligned ligand RMSD
         lrmsd_ = pocket_aligned_lrmsd(
-            native_receptor, native_ligand, model_receptor, model_ligand
+            reference_receptor, reference_ligand, pose_receptor, pose_ligand
         )
         zero = 0 if isinstance(lrmsd_, float) else np.zeros(len(lrmsd_))
         return DockQ(zero, zero, zero, lrmsd_)
 
     else:
-        lrmsd_ = lrmsd(native_receptor, native_ligand, model_receptor, model_ligand)
+        lrmsd_ = lrmsd(reference_receptor, reference_ligand, pose_receptor, pose_ligand)
 
         fnat_, fnonnat_ = fnat(
-            native_receptor,
-            native_ligand,
-            model_receptor,
-            model_ligand,
+            reference_receptor,
+            reference_ligand,
+            pose_receptor,
+            pose_ligand,
             as_peptide,
         )
 
         irmsd_ = irmsd(
-            native_receptor,
-            native_ligand,
-            model_receptor,
-            model_ligand,
+            reference_receptor,
+            reference_ligand,
+            pose_receptor,
+            pose_ligand,
             as_peptide,
         )
 
@@ -223,98 +223,98 @@ def dockq(
 
 
 def pocket_aligned_lrmsd(
-    native_receptor: struc.AtomArray,
-    native_ligand: struc.AtomArray,
-    model_receptor: struc.AtomArray | struc.AtomArrayStack,
-    model_ligand: struc.AtomArray | struc.AtomArrayStack,
+    reference_receptor: struc.AtomArray,
+    reference_ligand: struc.AtomArray,
+    pose_receptor: struc.AtomArray | struc.AtomArrayStack,
+    pose_ligand: struc.AtomArray | struc.AtomArrayStack,
 ) -> float | NDArray[np.floating]:
     """
     Compute the pocket-aligned RMSD part of the DockQ score for small molecules.
 
     Parameters
     ----------
-    native_receptor, native_ligand : AtomArray
-        The native receptor and ligand.
-    model_receptor, model_ligand : AtomArray
-        The model receptor and ligand.
+    reference_receptor, reference_ligand : AtomArray
+        The reference receptor and ligand.
+    pose_receptor, pose_ligand : AtomArray
+        The pose receptor and ligand.
 
     Returns
     -------
     float or ndarray, dtype=float
         The pocket-aligned RMSD.
     """
-    native_contacts = get_contact_residues(
-        native_receptor,
-        native_ligand,
+    reference_contacts = get_contact_residues(
+        reference_receptor,
+        reference_ligand,
         cutoff=10.0,
     )
-    if len(native_contacts) == 0:
+    if len(reference_contacts) == 0:
         # if there're no contacts between the two chains, no lrmsd is calculated
         return (
-            np.full(shape=len(model_ligand), fill_value=np.nan)
-            if isinstance(model_ligand, struc.AtomArrayStack)
+            np.full(shape=len(pose_ligand), fill_value=np.nan)
+            if isinstance(pose_ligand, struc.AtomArrayStack)
             else np.nan
         )
     # Create mask which is True for all backbone atoms in contact receptor residues
     interface_mask = struc.get_residue_masks(
-        native_receptor, native_contacts[:, 0]
-    ).any(axis=0) & np.isin(native_receptor.atom_name, BACKBONE_ATOMS)
+        reference_receptor, reference_contacts[:, 0]
+    ).any(axis=0) & np.isin(reference_receptor.atom_name, BACKBONE_ATOMS)
     # Use interface backbone coordinates for pocket-aligned superimposition
     _, transform = struc.superimpose(
-        native_receptor.coord[interface_mask],
-        model_receptor.coord[..., interface_mask, :],
+        reference_receptor.coord[interface_mask],
+        pose_receptor.coord[..., interface_mask, :],
     )
     # Use the superimposed coordinates for RMSD calculation between ligand atoms
-    lrmsd = struc.rmsd(native_ligand.coord, transform.apply(model_ligand.coord))
+    lrmsd = struc.rmsd(reference_ligand.coord, transform.apply(pose_ligand.coord))
     return lrmsd.item() if np.isscalar(lrmsd) else lrmsd  # type: ignore[union-attr]
 
 
 def lrmsd(
-    native_receptor: struc.AtomArray,
-    native_ligand: struc.AtomArray,
-    model_receptor: struc.AtomArray | struc.AtomArrayStack,
-    model_ligand: struc.AtomArray | struc.AtomArrayStack,
+    reference_receptor: struc.AtomArray,
+    reference_ligand: struc.AtomArray,
+    pose_receptor: struc.AtomArray | struc.AtomArrayStack,
+    pose_ligand: struc.AtomArray | struc.AtomArrayStack,
 ) -> float | NDArray[np.floating]:
     """
     Compute the ligand RMSD part of the DockQ score.
 
     Parameters
     ----------
-    native_receptor, native_ligand : AtomArray
-        The native receptor and ligand.
-    model_receptor, model_ligand : AtomArray
-        The model receptor and ligand.
+    reference_receptor, reference_ligand : AtomArray
+        The reference receptor and ligand.
+    pose_receptor, pose_ligand : AtomArray
+        The pose receptor and ligand.
 
     Returns
     -------
     float or ndarray, dtype=float
         The ligand RMSD.
     """
-    receptor_relevant_mask = np.isin(model_receptor.atom_name, BACKBONE_ATOMS)
-    if is_small_molecule(model_ligand):
+    receptor_relevant_mask = np.isin(pose_receptor.atom_name, BACKBONE_ATOMS)
+    if is_small_molecule(pose_ligand):
         # For small molecules include all heavy atoms
-        ligand_relevant_mask = np.full(model_ligand.array_length(), True)
+        ligand_relevant_mask = np.full(pose_ligand.array_length(), True)
     else:
-        ligand_relevant_mask = np.isin(model_ligand.atom_name, BACKBONE_ATOMS)
+        ligand_relevant_mask = np.isin(pose_ligand.atom_name, BACKBONE_ATOMS)
 
-    model_receptor_coord = model_receptor.coord[..., receptor_relevant_mask, :]
-    model_ligand_coord = model_ligand.coord[..., ligand_relevant_mask, :]
-    native_receptor_coord = native_receptor.coord[receptor_relevant_mask]
-    native_ligand_coord = native_ligand.coord[ligand_relevant_mask]
+    pose_receptor_coord = pose_receptor.coord[..., receptor_relevant_mask, :]
+    pose_ligand_coord = pose_ligand.coord[..., ligand_relevant_mask, :]
+    reference_receptor_coord = reference_receptor.coord[receptor_relevant_mask]
+    reference_ligand_coord = reference_ligand.coord[ligand_relevant_mask]
     _, transform = struc.superimpose(
-        native_receptor_coord,
-        model_receptor_coord,
+        reference_receptor_coord,
+        pose_receptor_coord,
     )
-    superimposed_ligand_coord = transform.apply(model_ligand_coord)
-    lrmsd = struc.rmsd(native_ligand_coord, superimposed_ligand_coord)
+    superimposed_ligand_coord = transform.apply(pose_ligand_coord)
+    lrmsd = struc.rmsd(reference_ligand_coord, superimposed_ligand_coord)
     return lrmsd.item() if np.isscalar(lrmsd) else lrmsd  # type: ignore[union-attr]
 
 
 def irmsd(
-    native_receptor: struc.AtomArray,
-    native_ligand: struc.AtomArray,
-    model_receptor: struc.AtomArray | struc.AtomArrayStack,
-    model_ligand: struc.AtomArray | struc.AtomArrayStack,
+    reference_receptor: struc.AtomArray,
+    reference_ligand: struc.AtomArray,
+    pose_receptor: struc.AtomArray | struc.AtomArrayStack,
+    pose_ligand: struc.AtomArray | struc.AtomArrayStack,
     as_peptide: bool = False,
 ) -> float | NDArray[np.floating]:
     """
@@ -322,10 +322,10 @@ def irmsd(
 
     Parameters
     ----------
-    native_receptor, native_ligand : AtomArray
-        The native receptor and ligand.
-    model_receptor, model_ligand : AtomArray or AtomArrayStack
-        The model receptor and ligand.
+    reference_receptor, reference_ligand : AtomArray
+        The reference receptor and ligand.
+    pose_receptor, pose_ligand : AtomArray or AtomArrayStack
+        The pose receptor and ligand.
     as_peptide : bool
         If set to true, the chains are treated as CAPRI peptides.
 
@@ -336,65 +336,65 @@ def irmsd(
     """
     if as_peptide:
         cutoff = 8.0
-        receptor_mask = _mask_either_or(native_receptor, "CB", "CA")
-        ligand_mask = _mask_either_or(native_ligand, "CB", "CA")
+        receptor_mask = _mask_either_or(reference_receptor, "CB", "CA")
+        ligand_mask = _mask_either_or(reference_ligand, "CB", "CA")
     else:
         cutoff = 10.0
         receptor_mask = None
         ligand_mask = None
-    native_contacts = get_contact_residues(
-        native_receptor,
-        native_ligand,
+    reference_contacts = get_contact_residues(
+        reference_receptor,
+        reference_ligand,
         cutoff,
         receptor_mask,
         ligand_mask,
     )
 
-    if len(native_contacts) == 0:
+    if len(reference_contacts) == 0:
         # if there're no contacts between the two chains,
         # no irmsd is calculated
         return (
-            np.full(shape=len(model_ligand), fill_value=np.nan)
-            if isinstance(model_ligand, struc.AtomArrayStack)
+            np.full(shape=len(pose_ligand), fill_value=np.nan)
+            if isinstance(pose_ligand, struc.AtomArrayStack)
             else np.nan
         )
 
     # Create mask which is True for all backbone atoms in contact residues
     receptor_backbone_interface_mask = struc.get_residue_masks(
-        native_receptor, native_contacts[:, 0]
-    ).any(axis=0) & np.isin(native_receptor.atom_name, BACKBONE_ATOMS)
+        reference_receptor, reference_contacts[:, 0]
+    ).any(axis=0) & np.isin(reference_receptor.atom_name, BACKBONE_ATOMS)
     ligand_backbone_interface_mask = struc.get_residue_masks(
-        native_ligand, native_contacts[:, 1]
-    ).any(axis=0) & np.isin(native_ligand.atom_name, BACKBONE_ATOMS)
+        reference_ligand, reference_contacts[:, 1]
+    ).any(axis=0) & np.isin(reference_ligand.atom_name, BACKBONE_ATOMS)
 
     # Get the coordinates of interface backbone atoms
-    model_interface_coord = np.concatenate(
+    pose_interface_coord = np.concatenate(
         [
-            model_receptor.coord[..., receptor_backbone_interface_mask, :],
-            model_ligand.coord[..., ligand_backbone_interface_mask, :],
+            pose_receptor.coord[..., receptor_backbone_interface_mask, :],
+            pose_ligand.coord[..., ligand_backbone_interface_mask, :],
         ],
         axis=-2,
     )
-    native_interface_coord = np.concatenate(
+    reference_interface_coord = np.concatenate(
         [
-            native_receptor.coord[receptor_backbone_interface_mask],
-            native_ligand.coord[ligand_backbone_interface_mask],
+            reference_receptor.coord[receptor_backbone_interface_mask],
+            reference_ligand.coord[ligand_backbone_interface_mask],
         ],
         axis=-2,
     )
     # Use these coordinates for superimposition and RMSD calculation
     superimposed_interface_coord, _ = struc.superimpose(
-        native_interface_coord, model_interface_coord
+        reference_interface_coord, pose_interface_coord
     )
-    rmsd = struc.rmsd(native_interface_coord, superimposed_interface_coord)
+    rmsd = struc.rmsd(reference_interface_coord, superimposed_interface_coord)
     return rmsd.item() if np.isscalar(rmsd) else rmsd  # type: ignore[union-attr]
 
 
 def fnat(
-    native_receptor: struc.AtomArray,
-    native_ligand: struc.AtomArray,
-    model_receptor: struc.AtomArray | struc.AtomArrayStack,
-    model_ligand: struc.AtomArray | struc.AtomArrayStack,
+    reference_receptor: struc.AtomArray,
+    reference_ligand: struc.AtomArray,
+    pose_receptor: struc.AtomArray | struc.AtomArrayStack,
+    pose_ligand: struc.AtomArray | struc.AtomArrayStack,
     as_peptide: bool = False,
 ) -> tuple[float | NDArray[np.floating], float | NDArray[np.floating]]:
     """
@@ -402,50 +402,50 @@ def fnat(
 
     Parameters
     ----------
-    native_receptor, native_ligand : AtomArray
-        The native receptor and ligand.
-    model_receptor, model_ligand : AtomArray or AtomArrayStack
-        The model receptor and ligand.
+    reference_receptor, reference_ligand : AtomArray
+        The reference receptor and ligand.
+    pose_receptor, pose_ligand : AtomArray or AtomArrayStack
+        The pose receptor and ligand.
     as_peptide : bool
         If set to true, the chains are treated as CAPRI peptides.
 
     Returns
     -------
     fnat : float or ndarray, dtype=float
-        The percentage of native contacts that are also found in the model.
+        The percentage of reference contacts that are also found in the pose.
     fnonnat : float or ndarray, dtype=float
-        The percentage of model contacts that are not found in the native structure.
+        The percentage of pose contacts that are not found in the reference structure.
     """
     cutoff = 4.0 if as_peptide else 5.0
 
-    native_contacts = _as_set(
-        get_contact_residues(native_receptor, native_ligand, cutoff)
+    reference_contacts = _as_set(
+        get_contact_residues(reference_receptor, reference_ligand, cutoff)
     )
-    if len(native_contacts) == 0:
+    if len(reference_contacts) == 0:
         # if there're no contacts between the two chains, fnat and fnonnat are not defined
         nan_values = (
-            np.full(shape=len(model_ligand), fill_value=np.nan)
-            if isinstance(model_ligand, struc.AtomArrayStack)
+            np.full(shape=len(pose_ligand), fill_value=np.nan)
+            if isinstance(pose_ligand, struc.AtomArrayStack)
             else np.nan
         )
         return nan_values, nan_values
 
-    if isinstance(model_receptor, struc.AtomArray):
+    if isinstance(pose_receptor, struc.AtomArray):
         return _calc_fnat_single_model(
-            model_receptor,
-            model_ligand,
-            native_contacts,
+            pose_receptor,
+            pose_ligand,
+            reference_contacts,
             cutoff,
         )
     else:
         fnat = []
         fnonnat = []
-        # Multiple models in an AtomArrayStack -> calculate fnat for each model
-        for receptor, ligand in zip(model_receptor, model_ligand):
+        # Multiple poses in an AtomArrayStack -> calculate fnat for each pose
+        for receptor, ligand in zip(pose_receptor, pose_ligand):
             fnat_single, fnonnat_single = _calc_fnat_single_model(
                 receptor,
                 ligand,
-                native_contacts,
+                reference_contacts,
                 cutoff,
             )
             fnat.append(fnat_single)
@@ -517,7 +517,7 @@ def get_contact_residues(
 def _calc_fnat_single_model(
     receptor: struc.AtomArray,
     ligand: struc.AtomArray,
-    native_contacts: set[tuple[int, int]],
+    reference_contacts: set[tuple[int, int]],
     cutoff: float,
 ) -> tuple[float | NDArray[np.floating], float | NDArray[np.floating]]:
     """
@@ -526,32 +526,32 @@ def _calc_fnat_single_model(
     Parameters
     ----------
     receptor, ligand : AtomArray
-        The model receptor and ligand.
-    native_contacts : ndarray, shape=(n,2), dtype=int
-        The native contacts.
+        The pose receptor and ligand.
+    reference_contacts : ndarray, shape=(n,2), dtype=int
+        The reference contacts.
     cutoff : float
         The distance cutoff for contact.
 
     Returns
     -------
     fnat : float
-        The percentage of native contacts that are also found in the model.
+        The percentage of reference contacts that are also found in the pose.
     fnonnat : float
-        The percentage of model contacts that are not found in the native structure.
+        The percentage of pose contacts that are not found in the reference structure.
     """
-    model_contacts = _as_set(get_contact_residues(receptor, ligand, cutoff))
-    n_model = len(model_contacts)
-    n_native = len(native_contacts)
-    n_true_positive = len(model_contacts & native_contacts)
-    n_false_positive = len(model_contacts - native_contacts)
+    pose_contacts = _as_set(get_contact_residues(receptor, ligand, cutoff))
+    n_pose = len(pose_contacts)
+    n_reference = len(reference_contacts)
+    n_true_positive = len(pose_contacts & reference_contacts)
+    n_false_positive = len(pose_contacts - reference_contacts)
 
-    if n_native == 0:
+    if n_reference == 0:
         # Deviation from original DockQ implementation, which returns 0 in this case
         # However, this is misleading as the score is simply not properly defined
         # in this case, as the structure is not a complex
-        raise NoContactError("The native chains do not have any contacts")
-    fnat = n_true_positive / n_native
-    fnonnat = n_false_positive / n_model if n_model != 0 else 0
+        raise NoContactError("The reference chains do not have any contacts")
+    fnat = n_true_positive / n_reference
+    fnonnat = n_false_positive / n_pose if n_pose != 0 else 0
     return fnat, fnonnat
 
 

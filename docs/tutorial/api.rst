@@ -42,7 +42,7 @@ Here we will have look at the protein-ligand complex TODO.
     system_dir = path_to_systems / "7v34__1__1.A__1.C_1.D_1.G"
     pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
     ref = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-    pdbx_file = pdbx.CIFFile.read(system_dir / "models.cif")
+    pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
     pose = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
     print(type(ref))
     print(type(pose))
@@ -127,7 +127,7 @@ one, so you do not have to.
         system_id = system_dir.name
         pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
         ref = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-        pdbx_file = pdbx.CIFFile.read(system_dir / "models.cif")
+        pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
         pose = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
         evaluator.feed(system_id, ref, pose)
 
@@ -177,7 +177,7 @@ same atoms.
     system_dir = path_to_systems / "7v34__1__1.A__1.C_1.D_1.G"
     pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
     ref = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-    pdbx_file = pdbx.CIFFile.read(system_dir / "models.cif")
+    pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
     # This time we load all poses from the file as AtomArrayStack
     pose = pdbx.get_structure(pdbx_file, include_bonds=True)
     print(type(ref))

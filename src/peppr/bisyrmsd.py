@@ -31,7 +31,7 @@ _BACKBONE_ATOMS = (
 
 def bisy_rmsd(
     reference: struc.AtomArray,
-    model: struc.AtomArray,
+    pose: struc.AtomArray,
     inclusion_radius: float = 4.0,
     outlier_distance: float = 3.0,
     max_iterations: int = 5,
@@ -43,14 +43,14 @@ def bisy_rmsd(
 
     Parameters
     ----------
-    reference, model : AtomArray
-        The reference and model PLI complex.
+    reference, pose : AtomArray
+        The reference and pose of the PLI complex.
     inclusion_radius : float, optional
         All residues where at least one heavy atom is within this radius of a heavy
         ligand atom, are considered part of the binding site.
         The default value is taken from [1]_.
     outlier_distance : float, optional
-        The binding sites of the reference and model are superimposed iteratively.
+        The binding sites of the reference and pose are superimposed iteratively.
         In each iteration, atoms with a distance of more than this value are considered
         outliers and are removed in the next iteration.
         The default value is taken from [1]_.
@@ -78,31 +78,31 @@ def bisy_rmsd(
         # No receptor present
         return np.nan
     reference_ligand_chains = []
-    model_ligand_chains = []
+    pose_ligand_chains = []
     for start_i, stop_i in itertools.pairwise(
         struc.get_chain_starts(reference, add_exclusive_stop=True)
     ):
         reference_chain = reference[start_i:stop_i]
         if is_small_molecule(reference_chain):
             reference_ligand_chains.append(reference_chain)
-            model_ligand_chains.append(model[start_i:stop_i])
+            pose_ligand_chains.append(pose[start_i:stop_i])
     if len(reference_ligand_chains) == 0:
         # No ligand present
         return np.nan
 
     reference_ligand_coord = [chain.coord for chain in reference_ligand_chains]
-    superimposed_model_ligand_coord = [
+    superimposed_pose_ligand_coord = [
         _superimpose_binding_site(
             reference[receptor_mask],
-            model[receptor_mask],
+            pose[receptor_mask],
             reference_ligand_chain,
             inclusion_radius,
             outlier_distance,
             max_iterations,
             min_anchors,
-        ).apply(model_ligand_chain.coord)
-        for reference_ligand_chain, model_ligand_chain in zip(
-            reference_ligand_chains, model_ligand_chains
+        ).apply(pose_ligand_chain.coord)
+        for reference_ligand_chain, pose_ligand_chain in zip(
+            reference_ligand_chains, pose_ligand_chains
         )
     ]
 
@@ -111,7 +111,7 @@ def bisy_rmsd(
         [
             struc.rmsd(ref_coord, mod_coord).item()
             for ref_coord, mod_coord in zip(
-                reference_ligand_coord, superimposed_model_ligand_coord, strict=True
+                reference_ligand_coord, superimposed_pose_ligand_coord, strict=True
             )
         ]
     ).item()
@@ -119,7 +119,7 @@ def bisy_rmsd(
 
 def _superimpose_binding_site(
     reference_receptor: struc.AtomArray,
-    model_receptor: struc.AtomArray,
+    pose_receptor: struc.AtomArray,
     reference_ligand: struc.AtomArray,
     inclusion_radius: float,
     outlier_distance: float,
@@ -127,13 +127,13 @@ def _superimpose_binding_site(
     min_anchors: int,
 ) -> struc.AffineTransformation:
     """
-    Get a transformation that superimposes the binding site of the model receptor onto
+    Get a transformation that superimposes the binding site of the pose receptor onto
     the reference receptor.
 
     Parameters
     ----------
-    reference_receptor, model_receptor : AtomArray
-        The reference and model receptor.
+    reference_receptor, pose_receptor : AtomArray
+        The reference and pose receptor.
     reference_ligand : AtomArray
         The reference ligand.
         The binding site is determined by the residues in contact with the ligand atoms.
@@ -141,7 +141,7 @@ def _superimpose_binding_site(
         All residues where at least one heavy atom is within this radius of a heavy
         ligand atom, are considered part of the binding site.
     outlier_distance : float, optional
-        The binding sites of the reference and model are superimposed iteratively.
+        The binding sites of the reference and pose are superimposed iteratively.
         In each iteration, atoms with a distance of more than this value are considered
         outliers and are removed in the next iteration.
         To disable outlier removal, set this value to ``inf``.
@@ -155,7 +155,7 @@ def _superimpose_binding_site(
     Returns
     -------
     AffineTransformation
-        The transformation that superimposes the binding site of the model receptor onto
+        The transformation that superimposes the binding site of the pose receptor onto
         the reference receptor.
     """
     receptor_contacts = np.unique(
@@ -171,7 +171,7 @@ def _superimpose_binding_site(
         )
         transform = _superimpose_without_outliers(
             reference_receptor.coord[interface_mask],
-            model_receptor.coord[interface_mask],
+            pose_receptor.coord[interface_mask],
             outlier_distance,
             max_iterations,
             min_anchors,
@@ -183,28 +183,28 @@ def _superimpose_binding_site(
         ) & np.isin(reference_receptor.atom_name, _BACKBONE_ATOMS)
         _, transform = struc.superimpose(
             reference_receptor.coord[interface_mask],
-            model_receptor.coord[interface_mask],
+            pose_receptor.coord[interface_mask],
         )
     return transform
 
 
 def _superimpose_without_outliers(
     reference_coord: NDArray[np.floating],
-    model_coord: NDArray[np.floating],
+    pose_coord: NDArray[np.floating],
     outlier_distance: float,
     max_iterations: int,
     min_anchors: int,
 ) -> struc.AffineTransformation:
     """
-    Get a transformation that superimposes the given model coordinates onto the
+    Get a transformation that superimposes the given pose coordinates onto the
     reference coordinates.
 
     Outliers are iteratively removed until no outliers are left.
 
     Parameters
     ----------
-    reference_coord, model_coord : ndarray, shape=(n,3)
-        The reference and model coordinates.
+    reference_coord, pose_coord : ndarray, shape=(n,3)
+        The reference and pose coordinates.
     outlier_distance : float
         In each iteration, atoms with a distance of more than this value are considered
         outliers and are removed in the next iteration.
@@ -218,7 +218,7 @@ def _superimpose_without_outliers(
     Returns
     -------
     biotite.structure.AffineTransformation
-        The transformation that superimposes the model onto the reference.
+        The transformation that superimposes the pose onto the reference.
     """
     if max_iterations < 1:
         raise ValueError("Maximum number of iterations must be at least 1")
@@ -231,9 +231,9 @@ def _superimpose_without_outliers(
         # Run superimposition
         inlier_mask = updated_inlier_mask
         filtered_reference_coord = reference_coord[..., inlier_mask, :]
-        filtered_model_coord = model_coord[..., inlier_mask, :]
+        filtered_pose_coord = pose_coord[..., inlier_mask, :]
         superimposed_coord, transform = struc.superimpose(
-            filtered_reference_coord, filtered_model_coord
+            filtered_reference_coord, filtered_pose_coord
         )
 
         # Find outliers
@@ -249,7 +249,7 @@ def _superimpose_without_outliers(
         if np.count_nonzero(updated_inlier_mask) < min_anchors:
             # Less than min_anchors anchors would be left
             # -> revert to superimposition of all coordinates
-            _, transform = struc.superimpose(reference_coord, model_coord)
+            _, transform = struc.superimpose(reference_coord, pose_coord)
             break
 
     return transform

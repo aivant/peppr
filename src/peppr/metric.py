@@ -41,8 +41,8 @@ class Metric(ABC):
     """
     The base class for all evaluation metrics.
 
-    The central :meth:`evaluate()` method takes a reference and model structures as
-    input and returns a sclar score.
+    The central :meth:`evaluate()` method takes a for a system reference and pose
+    structures as input and returns a sclar score.
 
     Attributes
     ----------
@@ -70,9 +70,9 @@ class Metric(ABC):
         return OrderedDict()
 
     @abstractmethod
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         """
-        Apply this metric on the given predicted model with respect to the given
+        Apply this metric on the given predicted pose with respect to the given
         reference.
 
         **ABSTRACT:** Must be overridden by subclasses.
@@ -82,19 +82,19 @@ class Metric(ABC):
         reference : AtomArray, shape=(n,)
             The reference structure of the system.
             Each separate instance/molecule must have a distinct `chain_id`.
-        model : AtomArray, shape=(n,)
-            The predicted model.
+        pose : AtomArray, shape=(n,)
+            The predicted pose.
             Must have the same length and atom order as the `reference`.
 
         Returns
         -------
         np.ndarray, shape=(m,) or None
-            The metric computed for each model.
+            The metric computed for each pose.
             *NaN*, if the structure is not suitable for this metric.
 
         Notes
         -----
-        Missing atoms in either the reference or the model can be identified with
+        Missing atoms in either the reference or the pose can be identified with
         *NaN* values.
         """
         raise NotImplementedError
@@ -118,7 +118,7 @@ class Metric(ABC):
 class MonomerRMSD(Metric):
     r"""
     Compute the *root mean squared deviation* (RMSD) between each peptide chain in the
-    reference and the model and take the mean weighted by the number of heavy atoms.
+    reference and the pose and take the mean weighted by the number of heavy atoms.
 
     Parameters
     ----------
@@ -147,15 +147,15 @@ class MonomerRMSD(Metric):
             [(f"<{self._threshold}", 0), (f">{self._threshold}", self._threshold)]
         )
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
-        def superimpose_and_rmsd(reference_chain, model_chain):  # type: ignore[no-untyped-def]
-            model_chain, _ = struc.superimpose(reference_chain, model_chain)
-            return struc.rmsd(reference_chain, model_chain)
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        def superimpose_and_rmsd(reference_chain, pose_chain):  # type: ignore[no-untyped-def]
+            pose_chain, _ = struc.superimpose(reference_chain, pose_chain)
+            return struc.rmsd(reference_chain, pose_chain)
 
         mask = ~reference.hetero
         if self._ca_only:
             mask &= reference.atom_name == "CA"
-        return _run_for_each_monomer(reference[mask], model[mask], superimpose_and_rmsd)
+        return _run_for_each_monomer(reference[mask], pose[mask], superimpose_and_rmsd)
 
     def smaller_is_better(self) -> bool:
         return True
@@ -171,19 +171,19 @@ class MonomerTMScore(Metric):
     def name(self) -> str:
         return "TM-score"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
-        def superimpose_and_tm_score(reference, model):  # type: ignore[no-untyped-def]
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        def superimpose_and_tm_score(reference, pose):  # type: ignore[no-untyped-def]
             # Use 'superimpose_structural_homologs()' instead of 'superimpose()',
             # as it optimizes the TM-score instead of the RMSD
             try:
-                super, _, ref_i, model_i = struc.superimpose_structural_homologs(
-                    reference, model, max_iterations=1
+                super, _, ref_i, pose_i = struc.superimpose_structural_homologs(
+                    reference, pose, max_iterations=1
                 )
-                return struc.tm_score(reference, super, ref_i, model_i)
+                return struc.tm_score(reference, super, ref_i, pose_i)
             except ValueError as e:
                 if "No anchors found" in str(e):
                     # The structures are too dissimilar for structure-based
-                    # superimposition, i.e. the model is very bad
+                    # superimposition, i.e. the pose is very bad
                     return 0.0
                 else:
                     raise
@@ -191,8 +191,8 @@ class MonomerTMScore(Metric):
         # TM-score is only defined for peptide chains
         mask = struc.filter_amino_acids(reference) & ~reference.hetero
         reference = reference[mask]
-        model = model[mask]
-        return _run_for_each_monomer(reference, model, superimpose_and_tm_score)
+        pose = pose[mask]
+        return _run_for_each_monomer(reference, pose, superimpose_and_tm_score)
 
     def smaller_is_better(self) -> bool:
         return False
@@ -208,14 +208,14 @@ class MonomerLDDTScore(Metric):
     def name(self) -> str:
         return "intra protein lDDT"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         protein_mask = ~reference.hetero
         if not protein_mask.any():
             # No protein present
             return np.nan
         reference = reference[protein_mask]
-        model = model[protein_mask]
-        return _run_for_each_monomer(reference, model, struc.lddt)
+        pose = pose[protein_mask]
+        return _run_for_each_monomer(reference, pose, struc.lddt)
 
     def smaller_is_better(self) -> bool:
         return False
@@ -231,7 +231,7 @@ class IntraLigandLDDTScore(Metric):
     def name(self) -> str:
         return "intra ligand lDDT"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         def within_same_molecule(contacts: np.ndarray) -> np.ndarray:
             # Find the index of the chain/molecule for each atom
             chain_indices = struc.get_chain_positions(
@@ -245,10 +245,10 @@ class IntraLigandLDDTScore(Metric):
             # No ligands present
             return np.nan
         reference = reference[ligand_mask]
-        model = model[ligand_mask]
+        pose = pose[ligand_mask]
         return struc.lddt(
             reference,
-            model,
+            pose,
             exclude_same_residue=False,
             filter_function=within_same_molecule,
         ).item()
@@ -271,8 +271,8 @@ class LDDTPLIScore(Metric):
     def name(self) -> str:
         return "protein-ligand lDDT"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
-        def lddt_pli(reference, model):  # type: ignore[no-untyped-def]
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        def lddt_pli(reference, pose):  # type: ignore[no-untyped-def]
             ligand_mask = reference.hetero
             polymer_mask = ~ligand_mask
             binding_site_contacts = np.unique(
@@ -285,7 +285,7 @@ class LDDTPLIScore(Metric):
             ).any(axis=0)
             return struc.lddt(
                 reference,
-                model,
+                pose,
                 atom_mask=ligand_mask,
                 partner_mask=binding_site_mask,
                 inclusion_radius=6.0,
@@ -293,7 +293,7 @@ class LDDTPLIScore(Metric):
                 symmetric=True,
             )
 
-        return _average_over_ligands(reference, model, lddt_pli)
+        return _average_over_ligands(reference, pose, lddt_pli)
 
     def smaller_is_better(self) -> bool:
         return False
@@ -309,14 +309,14 @@ class LDDTPPIScore(Metric):
     def name(self) -> str:
         return "protein-protein lDDT"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         protein_mask = ~reference.hetero
         if not protein_mask.any():
             # This is not a PPI system
             return np.nan
         reference = reference[protein_mask]
-        model = model[protein_mask]
-        return struc.lddt(reference, model, exclude_same_chain=True)
+        pose = pose[protein_mask]
+        return struc.lddt(reference, pose, exclude_same_chain=True)
 
     def smaller_is_better(self) -> bool:
         return False
@@ -351,14 +351,14 @@ class GlobalLDDTScore(Metric):
         else:
             return "global all-atom lDDT"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         if self._backbone_only:
             mask = ~reference.hetero & np.isin(reference.atom_name, ["CA", "C3'"])
             reference = reference[mask]
-            model = model[mask]
+            pose = pose[mask]
         if reference.array_length() == 0:
             return np.nan
-        return struc.lddt(reference, model).item()
+        return struc.lddt(reference, pose).item()
 
     def smaller_is_better(self) -> bool:
         return False
@@ -400,8 +400,8 @@ class DockQScore(Metric):
             ]
         )
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
-        def run_dockq(reference_chain1, reference_chain2, model_chain1, model_chain2):  # type: ignore[no-untyped-def]
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        def run_dockq(reference_chain1, reference_chain2, pose_chain1, pose_chain2):  # type: ignore[no-untyped-def]
             if not self._include_pli and (
                 is_small_molecule(reference_chain1)
                 or is_small_molecule(reference_chain2)
@@ -415,11 +415,11 @@ class DockQScore(Metric):
                 return np.nan
             return dockq(
                 *_select_receptor_and_ligand(
-                    reference_chain1, reference_chain2, model_chain1, model_chain2
+                    reference_chain1, reference_chain2, pose_chain1, pose_chain2
                 )
             ).score
 
-        return _run_for_each_chain_pair(reference, model, run_dockq)
+        return _run_for_each_chain_pair(reference, pose, run_dockq)
 
     def smaller_is_better(self) -> bool:
         return False
@@ -440,33 +440,33 @@ class LigandRMSD(Metric):
     def name(self) -> str:
         return "LRMSD"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         mask = struc.filter_amino_acids(reference) & ~reference.hetero
         reference = reference[mask]
-        model = model[mask]
+        pose = pose[mask]
 
         def lrmsd_on_interfaces_only(
             reference_chain1: struc.AtomArray,
             reference_chain2: struc.AtomArray,
-            model_chain1: struc.AtomArray,
-            model_chain2: struc.AtomArray,
+            pose_chain1: struc.AtomArray,
+            pose_chain2: struc.AtomArray,
         ) -> float | np.floating | NDArray[np.floating]:
-            native_contacts = get_contact_residues(
+            reference_contacts = get_contact_residues(
                 reference_chain1,
                 reference_chain2,
                 cutoff=10.0,
             )
 
-            if len(native_contacts) == 0:
+            if len(reference_contacts) == 0:
                 return np.nan
             else:
                 return lrmsd(
                     *_select_receptor_and_ligand(
-                        reference_chain1, reference_chain2, model_chain1, model_chain2
+                        reference_chain1, reference_chain2, pose_chain1, pose_chain2
                     )
                 )
 
-        return _run_for_each_chain_pair(reference, model, lrmsd_on_interfaces_only)
+        return _run_for_each_chain_pair(reference, pose, lrmsd_on_interfaces_only)
 
     def smaller_is_better(self) -> bool:
         return True
@@ -485,12 +485,12 @@ class InterfaceRMSD(Metric):
     def name(self) -> str:
         return "iRMSD"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         mask = struc.filter_amino_acids(reference) & ~reference.hetero
         reference = reference[mask]
-        model = model[mask]
+        pose = pose[mask]
         # iRMSD is independent of the selection of receptor and ligand chain
-        return _run_for_each_chain_pair(reference, model, irmsd)
+        return _run_for_each_chain_pair(reference, pose, irmsd)
 
     def smaller_is_better(self) -> bool:
         return True
@@ -510,13 +510,13 @@ class ContactFraction(Metric):
     def name(self) -> str:
         return "fnat"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         mask = struc.filter_amino_acids(reference) & ~reference.hetero
         reference = reference[mask]
-        model = model[mask]
+        pose = pose[mask]
         # Fnat is independent of the selection of receptor and ligand chain
         # Caution: `fnat()` returns both fnat and fnonnat -> select first element
-        return _run_for_each_chain_pair(reference, model, lambda *args: fnat(*args)[0])
+        return _run_for_each_chain_pair(reference, pose, lambda *args: fnat(*args)[0])
 
     def smaller_is_better(self) -> bool:
         return False
@@ -536,8 +536,8 @@ class PocketAlignedLigandRMSD(Metric):
     def name(self) -> str:
         return "PLI-LRMSD"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
-        def run_lrmd(reference_chain1, reference_chain2, model_chain1, model_chain2):  # type: ignore[no-untyped-def]
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        def run_lrmd(reference_chain1, reference_chain2, pose_chain1, pose_chain2):  # type: ignore[no-untyped-def]
             n_small_molecules = sum(
                 is_small_molecule(chain)
                 for chain in [reference_chain1, reference_chain2]
@@ -547,11 +547,11 @@ class PocketAlignedLigandRMSD(Metric):
                 return np.nan
             return pocket_aligned_lrmsd(
                 *_select_receptor_and_ligand(
-                    reference_chain1, reference_chain2, model_chain1, model_chain2
+                    reference_chain1, reference_chain2, pose_chain1, pose_chain2
                 )
             )
 
-        return _run_for_each_chain_pair(reference, model, run_lrmd)
+        return _run_for_each_chain_pair(reference, pose, run_lrmd)
 
     def smaller_is_better(self) -> bool:
         return True
@@ -571,7 +571,7 @@ class BiSyRMSD(Metric):
         ligand atom, are considered part of the binding site.
         The default value is taken from [1]_.
     outlier_distance : float, optional
-        The binding sites of the reference and model are superimposed iteratively.
+        The binding sites of the reference and pose are superimposed iteratively.
         In each iteration, atoms with a distance of more than this value are considered
         outliers and are removed in the next iteration.
         The default value is taken from [1]_.
@@ -615,10 +615,10 @@ class BiSyRMSD(Metric):
             [(f"<{self._threshold}", 0), (f">{self._threshold}", self._threshold)]
         )
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         return bisy_rmsd(
             reference,
-            model,
+            pose,
             inclusion_radius=self._inclusion_radius,
             outlier_distance=self._outlier_distance,
             max_iterations=self._max_iterations,
@@ -687,7 +687,7 @@ class BondLengthViolations(Metric):
             ]
         )
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         """
         Calculate the percentage of bonds that are outside acceptable ranges.
 
@@ -695,7 +695,7 @@ class BondLengthViolations(Metric):
         ----------
         reference : AtomArray
             Not used in this metric as we compare against ideal bond lengths.
-        model : AtomArray
+        pose : AtomArray
             The structure to evaluate.
 
         Returns
@@ -703,20 +703,20 @@ class BondLengthViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
-        if model.bonds is None:
+        if pose.bonds is None:
             return np.nan
 
         total_checked = 0
         valid_bonds = 0
 
         # Get all bonds and iterate through the bond tuples
-        for i, j, _ in model.bonds.as_array():
-            atom1_type = model.element[i]
-            atom2_type = model.element[j]
+        for i, j, _ in pose.bonds.as_array():
+            atom1_type = pose.element[i]
+            atom2_type = pose.element[j]
 
             if (atom1_type, atom2_type) in self._reference_bonds:
                 total_checked += 1
-                bond_length = struc.distance(model[i], model[j])
+                bond_length = struc.distance(pose[i], pose[j])
                 ideal_lengths = self._reference_bonds[(atom1_type, atom2_type)]
                 if np.any(np.abs(bond_length - ideal_lengths) <= self._tolerance):
                     valid_bonds += 1
@@ -732,17 +732,17 @@ class BondLengthViolations(Metric):
 
 class ClashCount(Metric):
     """
-    Count the number of clashes between atoms in the model.
+    Count the number of clashes between atoms in the pose.
     """
 
     @property
     def name(self) -> str:
         return "Number of clashes"
 
-    def evaluate(self, reference: struc.AtomArray, model: struc.AtomArray) -> float:
-        if model.array_length() == 0:
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        if pose.array_length() == 0:
             return np.nan
-        return len(find_clashes(model))
+        return len(find_clashes(pose))
 
     def smaller_is_better(self) -> bool:
         return True
@@ -750,22 +750,22 @@ class ClashCount(Metric):
 
 def _run_for_each_monomer(
     reference: struc.AtomArray,
-    model: struc.AtomArray,
+    pose: struc.AtomArray,
     function: Callable[[struc.AtomArray, struc.AtomArray], float],
 ) -> float:
     """
-    Run the given function for each monomer in the reference and model.
+    Run the given function for each monomer in the reference and pose.
 
     Parameters
     ----------
     reference : AtomArray, shape=(n,)
         The reference structure of the system.
-    model : AtomArray, shape=(n,)
-        The predicted model.
+    pose : AtomArray, shape=(n,)
+        The predicted pose.
         Must have the same length and atom order as the `reference`.
     function : Callable
         The function to run for each monomer.
-        Takes the reference and model as input and returns a scalar value.
+        Takes the reference and pose as input and returns a scalar value.
 
     Returns
     -------
@@ -777,8 +777,8 @@ def _run_for_each_monomer(
     chain_starts = struc.get_chain_starts(reference, add_exclusive_stop=True)
     for start_i, stop_i in itertools.pairwise(chain_starts):
         reference_chain = reference[start_i:stop_i]
-        model_chain = model[start_i:stop_i]
-        values.append(function(reference_chain, model_chain))
+        pose_chain = pose[start_i:stop_i]
+        values.append(function(reference_chain, pose_chain))
     values = np.array(values)
 
     if len(values) == 0:
@@ -795,25 +795,25 @@ def _run_for_each_monomer(
 
 def _run_for_each_chain_pair(
     reference: struc.AtomArray,
-    model: struc.AtomArray,
+    pose: struc.AtomArray,
     function: Callable[
         [struc.AtomArray, struc.AtomArray, struc.AtomArray, struc.AtomArray], float
     ],
 ) -> float:
     """
-    Run the given function for each chain pair combination in the reference and model
+    Run the given function for each chain pair combination in the reference and pose
     and return the average value.
 
     Parameters
     ----------
     reference : AtomArray, shape=(n,)
         The reference structure of the system.
-    model : AtomArray, shape=(n,)
-        The predicted model.
+    pose : AtomArray, shape=(n,)
+        The predicted pose.
         Must have the same length and atom order as the `reference`.
-    function : Callable[(reference_chain1, reference_chain2, model_chain1, model_chain2), float]
+    function : Callable[(reference_chain1, reference_chain2, pose_chain1, pose_chain2), float]
         The function to run for each interface.
-        Takes the reference and model chains in contact as input and returns a scalar
+        Takes the reference and pose chains in contact as input and returns a scalar
         value.
         The function may also return *NaN*, if its result should be ignored.
 
@@ -827,17 +827,15 @@ def _run_for_each_chain_pair(
     reference_chains = [
         reference[start:stop] for start, stop in itertools.pairwise(chain_starts)
     ]
-    model_chains = [
-        model[start:stop] for start, stop in itertools.pairwise(chain_starts)
-    ]
+    pose_chains = [pose[start:stop] for start, stop in itertools.pairwise(chain_starts)]
     results = []
     for chain_i, chain_j in itertools.combinations(range(len(reference_chains)), 2):
         results.append(
             function(
                 reference_chains[chain_i],
                 reference_chains[chain_j],
-                model_chains[chain_i],
-                model_chains[chain_j],
+                pose_chains[chain_i],
+                pose_chains[chain_j],
             )
         )
     if len(results) == 0:
@@ -847,23 +845,23 @@ def _run_for_each_chain_pair(
 
 def _average_over_ligands(
     reference: struc.AtomArray,
-    model: struc.AtomArray,
+    pose: struc.AtomArray,
     function: Callable[[struc.AtomArray, struc.AtomArray], float],
 ) -> float:
     """
-    Run the given function for each ligand in the reference and model.
+    Run the given function for each ligand in the reference and pose.
     and return the average value.
 
     Parameters
     ----------
     reference : AtomArray, shape=(n,)
         The reference structure of the system.
-    model : AtomArray, shape=(n,)
-        The predicted model.
+    pose : AtomArray, shape=(n,)
+        The predicted pose.
         Must have the same length and atom order as the `reference`.
-    function : Callable[[reference_ligand, model_ligand], float]
+    function : Callable[[reference_ligand, pose_ligand], float]
         The function to run for each ligand.
-        Takes the reference and model ligand as input and returns a scalar
+        Takes the reference and pose ligand as input and returns a scalar
         value.
 
     Returns
@@ -872,7 +870,7 @@ def _average_over_ligands(
         The average return value of `function`, weighted by the number of atoms.
         If the input structure contains no ligand atoms, *NaN* is returned.
     """
-    values = _run_for_each_ligand(reference, model, function)
+    values = _run_for_each_ligand(reference, pose, function)
     if len(values) == 0:
         # No ligands in the structure
         return np.nan
@@ -882,7 +880,7 @@ def _average_over_ligands(
 
 def _run_for_each_ligand(
     reference: struc.AtomArray,
-    model: struc.AtomArray,
+    pose: struc.AtomArray,
     function: Callable[[struc.AtomArray, struc.AtomArray], Any],
 ) -> list[Any]:
     """
@@ -893,12 +891,12 @@ def _run_for_each_ligand(
     ----------
     reference : AtomArray, shape=(n,)
         The reference structure of the system.
-    model : AtomArray, shape=(n,)
-        The predicted model.
+    pose : AtomArray, shape=(n,)
+        The predicted pose.
         Must have the same length and atom order as the `reference`.
-    function : Callable[[reference_ligand, model_ligand], float]
+    function : Callable[[reference_ligand, pose_ligand], float]
         The function to run.
-        Takes the reference and model system as input and returns a scalar
+        Takes the reference and pose system as input and returns a scalar
         value.
 
     Returns
@@ -920,15 +918,15 @@ def _run_for_each_ligand(
     for ligand_mask in ligand_masks:
         # Evaluate each isolated ligand in complex separately
         complex_mask = ligand_mask | polymer_mask
-        values.append(function(reference[complex_mask], model[complex_mask]))
+        values.append(function(reference[complex_mask], pose[complex_mask]))
     return values
 
 
 def _select_receptor_and_ligand(
     reference_chain1: struc.AtomArray,
     reference_chain2: struc.AtomArray,
-    model_chain1: struc.AtomArray,
-    model_chain2: struc.AtomArray,
+    pose_chain1: struc.AtomArray,
+    pose_chain2: struc.AtomArray,
 ) -> tuple[struc.AtomArray, struc.AtomArray, struc.AtomArray, struc.AtomArray]:
     """
     Select the receptor and ligand for the given interface.
@@ -939,19 +937,19 @@ def _select_receptor_and_ligand(
     ----------
     reference_chain1, reference_chain2 : AtomArray, shape=(n,)
         The reference chains.
-    model_chain1, model_chain2 : AtomArray, shape=(n,)
-        The model chains.
+    pose_chain1, pose_chain2 : AtomArray, shape=(n,)
+        The pose chains.
 
     Returns
     -------
-    reference_receptor, reference_ligand, model_receptor, model_ligand : AtomArray
+    reference_receptor, reference_ligand, pose_receptor, pose_ligand : AtomArray
         The selected receptor and ligand.
     """
     if is_small_molecule(reference_chain1):
-        return (reference_chain2, reference_chain1, model_chain2, model_chain1)
+        return (reference_chain2, reference_chain1, pose_chain2, pose_chain1)
     elif is_small_molecule(reference_chain2):
-        return (reference_chain1, reference_chain2, model_chain1, model_chain2)
+        return (reference_chain1, reference_chain2, pose_chain1, pose_chain2)
     elif reference_chain1.array_length() >= reference_chain2.array_length():
-        return (reference_chain1, reference_chain2, model_chain1, model_chain2)
+        return (reference_chain1, reference_chain2, pose_chain1, pose_chain2)
     else:
-        return (reference_chain2, reference_chain1, model_chain2, model_chain1)
+        return (reference_chain2, reference_chain1, pose_chain2, pose_chain1)

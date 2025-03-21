@@ -62,26 +62,26 @@ def data_dir():
 
 def test_perfect_docking(data_dir):
     """
-    Using the same complex as model and native structure should result in a
+    Using the same complex as pose and reference structure should result in a
     perfect DockQ score.
     """
     pdb_file = pdb.PDBFile.read(data_dir / "1A2K" / "model.pdb")
-    native = pdb.get_structure(pdb_file, model=1)
-    native = native[struc.filter_amino_acids(native)]
-    # The model complex is simply the same complex as native,
+    reference = pdb.get_structure(pdb_file, model=1)
+    reference = reference[struc.filter_amino_acids(reference)]
+    # The model is simply the same complex as reference,
     # but rotated to make the test less trivial
-    model = struc.rotate(native, [0, 0, np.pi / 2])
+    pose = struc.rotate(reference, [0, 0, np.pi / 2])
 
-    native_receptor = native[native.chain_id == "B"]
-    native_ligand = native[native.chain_id == "C"]
-    model_receptor = model[model.chain_id == "B"]
-    model_ligand = model[model.chain_id == "C"]
+    reference_receptor = reference[reference.chain_id == "B"]
+    reference_ligand = reference[reference.chain_id == "C"]
+    pose_receptor = pose[pose.chain_id == "B"]
+    pose_ligand = pose[pose.chain_id == "C"]
 
     dockq_result = peppr.dockq(
-        native_receptor,
-        native_ligand,
-        model_receptor,
-        model_ligand,
+        reference_receptor,
+        reference_ligand,
+        pose_receptor,
+        pose_ligand,
     )
 
     assert dockq_result.fnat == pytest.approx(1.0, abs=1e-5)
@@ -100,34 +100,34 @@ def test_dockq_with_no_contacts(data_dir):
     DockQ should return NaN for fnat, fnonnat, irmsd and score when the
     two chains are not in contact.
 
-    We first move the native ligand away to make sure they native receptor
-    and native ligand are not in contact. Then we run dockq and check if the
+    We first move the reference ligand away to make sure they reference receptor
+    and reference ligand are not in contact. Then we run dockq and check if the
     attributes are NaN.
 
     :param data_dir: pytest fixture, path to the directory containing the test data
     """
-    model_receptor, model_ligand = _get_protein_receptor_and_ligand(
+    pose_receptor, pose_ligand = _get_protein_receptor_and_ligand(
         data_dir / "1A2K" / "model.pdb", "C", "B"
     )
-    native_receptor, native_ligand = _get_protein_receptor_and_ligand(
+    reference_receptor, reference_ligand = _get_protein_receptor_and_ligand(
         data_dir / "1A2K" / "native.pdb", "C", "B"
     )
-    # move native ligand to far away
-    native_ligand = struc.translate(native_ligand, [200, 200, 200])
+    # move reference ligand to far away
+    reference_ligand = struc.translate(reference_ligand, [200, 200, 200])
 
-    # align model and native and then run dockq
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_receptor, model_receptor
+    # align pose and reference and then run dockq
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_receptor, pose_receptor
     )
-    native_receptor = native_receptor[native_indices]
-    model_receptor = model_receptor[model_indices]
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_ligand, model_ligand
+    reference_receptor = reference_receptor[reference_indices]
+    pose_receptor = pose_receptor[pose_indices]
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_ligand, pose_ligand
     )
-    native_ligand = native_ligand[native_indices]
-    model_ligand = model_ligand[model_indices]
+    reference_ligand = reference_ligand[reference_indices]
+    pose_ligand = pose_ligand[pose_indices]
     dockq_result = peppr.dockq(
-        native_receptor, native_ligand, model_receptor, model_ligand
+        reference_receptor, reference_ligand, pose_receptor, pose_ligand
     )
 
     # fnat, fnonnat, irmsd and score are nan when the
@@ -146,34 +146,34 @@ def test_contact_parity(data_dir):
     Exchanging which chain is the receptor and which is the ligand should not
     change the contacts and in consequence not fnat/fnonnat, too.
     """
-    model_chain_1, model_chain_2 = _get_protein_receptor_and_ligand(
+    pose_chain_1, pose_chain_2 = _get_protein_receptor_and_ligand(
         data_dir / "1A2K" / "model.pdb", "B", "C"
     )
-    native_chain_1, native_chain_2 = _get_protein_receptor_and_ligand(
+    reference_chain_1, reference_chain_2 = _get_protein_receptor_and_ligand(
         data_dir / "1A2K" / "native.pdb", "B", "C"
     )
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_chain_1, model_chain_1
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_chain_1, pose_chain_1
     )
-    native_chain_1 = native_chain_1[native_indices]
-    model_chain_1 = model_chain_1[model_indices]
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_chain_2, model_chain_2
+    reference_chain_1 = reference_chain_1[reference_indices]
+    pose_chain_1 = pose_chain_1[pose_indices]
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_chain_2, pose_chain_2
     )
-    native_chain_2 = native_chain_2[native_indices]
-    model_chain_2 = model_chain_2[model_indices]
+    reference_chain_2 = reference_chain_2[reference_indices]
+    pose_chain_2 = pose_chain_2[pose_indices]
 
     dockq_result_1 = peppr.dockq(
-        native_chain_1,
-        native_chain_2,
-        model_chain_1,
-        model_chain_2,
+        reference_chain_1,
+        reference_chain_2,
+        pose_chain_1,
+        pose_chain_2,
     )
     dockq_result_2 = peppr.dockq(
-        native_chain_2,
-        native_chain_1,
-        model_chain_2,
-        model_chain_1,
+        reference_chain_2,
+        reference_chain_1,
+        pose_chain_2,
+        pose_chain_1,
     )
 
     assert dockq_result_1.fnat == pytest.approx(dockq_result_2.fnat, abs=1e-5)
@@ -203,47 +203,49 @@ def test_reference_consistency(
     """
     ref_impl = pytest.importorskip("DockQ.DockQ")
 
-    model_receptor, model_ligand = _get_protein_receptor_and_ligand(
+    pose_receptor, pose_ligand = _get_protein_receptor_and_ligand(
         data_dir / entry / "model.pdb", receptor_chain, ligand_chain
     )
-    native_receptor, native_ligand = _get_protein_receptor_and_ligand(
+    reference_receptor, reference_ligand = _get_protein_receptor_and_ligand(
         data_dir / entry / "native.pdb", receptor_chain, ligand_chain
     )
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_receptor, model_receptor, min_sequence_identity=0.9
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_receptor, pose_receptor, min_sequence_identity=0.9
     )
-    native_receptor = native_receptor[native_indices]
-    model_receptor = model_receptor[model_indices]
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_ligand, model_ligand, min_sequence_identity=0.9
+    reference_receptor = reference_receptor[reference_indices]
+    pose_receptor = pose_receptor[pose_indices]
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_ligand, pose_ligand, min_sequence_identity=0.9
     )
-    native_ligand = native_ligand[native_indices]
-    model_ligand = model_ligand[model_indices]
+    reference_ligand = reference_ligand[reference_indices]
+    pose_ligand = pose_ligand[pose_indices]
 
     # Ensure the reference DockQ implementation gets the same atom matching
-    model_tmp_file = tmp_path / "model.cif"
-    _write_dockq_compatible_cif(model_tmp_file, model_receptor, model_ligand)
-    native_tmp_file = tmp_path / "native.cif"
-    _write_dockq_compatible_cif(native_tmp_file, native_receptor, native_ligand)
-    model = ref_impl.load_PDB(str(model_tmp_file))
-    native = ref_impl.load_PDB(str(native_tmp_file))
+    pose_tmp_file = tmp_path / "pose.cif"
+    _write_dockq_compatible_cif(pose_tmp_file, pose_receptor, pose_ligand)
+    reference_tmp_file = tmp_path / "reference.cif"
+    _write_dockq_compatible_cif(
+        reference_tmp_file, reference_receptor, reference_ligand
+    )
+    pose = ref_impl.load_PDB(str(pose_tmp_file))
+    reference = ref_impl.load_PDB(str(reference_tmp_file))
     chain_map = {receptor_chain: receptor_chain, ligand_chain: ligand_chain}
     ref_dockq_all_combinations, _ = ref_impl.run_on_all_native_interfaces(
-        model, native, chain_map=chain_map, capri_peptide=as_peptide
+        pose, reference, chain_map=chain_map, capri_peptide=as_peptide
     )
     # Key is a tuple, and both tuple orders are possible
     # There is only one result due to mapping constraints given as input
     ref_dockq = next(iter(ref_dockq_all_combinations.values()))
 
-    if native_receptor.array_length() == native_ligand.array_length():
+    if reference_receptor.array_length() == reference_ligand.array_length():
         # There is ambiguity which chain is selected as receptor
         # in the reference implementation
         # Hence choose the closer one
         test_dockq_variants = [
             peppr.dockq(nat_receptor, nat_ligand, mod_receptor, mod_ligand, as_peptide)
             for nat_receptor, nat_ligand, mod_receptor, mod_ligand in [
-                (native_receptor, native_ligand, model_receptor, model_ligand),
-                (native_ligand, native_receptor, model_ligand, model_receptor),
+                (reference_receptor, reference_ligand, pose_receptor, pose_ligand),
+                (reference_ligand, reference_receptor, pose_ligand, pose_receptor),
             ]
         ]
         test_dockq = test_dockq_variants[
@@ -256,7 +258,7 @@ def test_reference_consistency(
         ]
     else:
         test_dockq = peppr.dockq(
-            native_receptor, native_ligand, model_receptor, model_ligand, as_peptide
+            reference_receptor, reference_ligand, pose_receptor, pose_ligand, as_peptide
         )
 
     assert test_dockq.fnat == pytest.approx(ref_dockq["fnat"], abs=1e-3)
@@ -274,37 +276,39 @@ def test_reference_consistency_small_molecule(tmp_path, data_dir):
     ref_impl = pytest.importorskip("DockQ.DockQ")
 
     (
-        model_receptor,
-        model_ligand,
+        pose_receptor,
+        pose_ligand,
     ) = _get_receptor_and_small_molecule(data_dir / "6J6J" / "model.pdb", "A")
     (
-        native_receptor,
-        native_ligand,
+        reference_receptor,
+        reference_ligand,
     ) = _get_receptor_and_small_molecule(data_dir / "6J6J" / "native.pdb", "A")
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_receptor, model_receptor
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_receptor, pose_receptor
     )
-    native_receptor = native_receptor[native_indices]
-    model_receptor = model_receptor[model_indices]
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_ligand, model_ligand
+    reference_receptor = reference_receptor[reference_indices]
+    pose_receptor = pose_receptor[pose_indices]
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_ligand, pose_ligand
     )
-    native_ligand = native_ligand[native_indices]
-    model_ligand = model_ligand[model_indices]
+    reference_ligand = reference_ligand[reference_indices]
+    pose_ligand = pose_ligand[pose_indices]
     test_dockq = peppr.dockq(
-        native_receptor, native_ligand, model_receptor, model_ligand
+        reference_receptor, reference_ligand, pose_receptor, pose_ligand
     )
 
     # Ensure the reference DockQ implementation gets the same atom matching
-    model_tmp_file = tmp_path / "model.cif"
-    _write_dockq_compatible_cif(model_tmp_file, model_receptor, model_ligand)
-    native_tmp_file = tmp_path / "native.cif"
-    _write_dockq_compatible_cif(native_tmp_file, native_receptor, native_ligand)
-    model = ref_impl.load_PDB(str(model_tmp_file), small_molecule=True)
-    native = ref_impl.load_PDB(str(native_tmp_file), small_molecule=True)
+    pose_tmp_file = tmp_path / "model.cif"
+    _write_dockq_compatible_cif(pose_tmp_file, pose_receptor, pose_ligand)
+    reference_tmp_file = tmp_path / "reference.cif"
+    _write_dockq_compatible_cif(
+        reference_tmp_file, reference_receptor, reference_ligand
+    )
+    pose = ref_impl.load_PDB(str(pose_tmp_file), small_molecule=True)
+    reference = ref_impl.load_PDB(str(reference_tmp_file), small_molecule=True)
     chain_map = {"R": "R", "L": "L"}
     ref_dockq_all_combinations, _ = ref_impl.run_on_all_native_interfaces(
-        model, native, chain_map=chain_map
+        pose, reference, chain_map=chain_map
     )
     # Key is a tuple, and both tuple orders are possible
     # There is only one result due to mapping constraints given as input
@@ -321,31 +325,31 @@ def test_multi_model(data_dir):
     """
     N_DUPLICATES = 5
 
-    model_receptor, model_ligand = _get_protein_receptor_and_ligand(
+    pose_receptor, pose_ligand = _get_protein_receptor_and_ligand(
         data_dir / "1A2K" / "model.pdb", "C", "B"
     )
-    native_receptor, native_ligand = _get_protein_receptor_and_ligand(
+    reference_receptor, reference_ligand = _get_protein_receptor_and_ligand(
         data_dir / "1A2K" / "native.pdb", "C", "B"
     )
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_receptor, model_receptor
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_receptor, pose_receptor
     )
-    native_receptor = native_receptor[native_indices]
-    model_receptor = model_receptor[model_indices]
-    native_indices, model_indices = peppr.find_matching_atoms(
-        native_ligand, model_ligand
+    reference_receptor = reference_receptor[reference_indices]
+    pose_receptor = pose_receptor[pose_indices]
+    reference_indices, pose_indices = peppr.find_matching_atoms(
+        reference_ligand, pose_ligand
     )
-    native_ligand = native_ligand[native_indices]
-    model_ligand = model_ligand[model_indices]
+    reference_ligand = reference_ligand[reference_indices]
+    pose_ligand = pose_ligand[pose_indices]
     ref_dockq = peppr.dockq(
-        native_receptor, native_ligand, model_receptor, model_ligand
+        reference_receptor, reference_ligand, pose_receptor, pose_ligand
     )
 
     # Put duplicates of the same model into a stack
-    model_receptor = struc.stack([model_receptor] * N_DUPLICATES)
-    model_ligand = struc.stack([model_ligand] * N_DUPLICATES)
+    pose_receptor = struc.stack([pose_receptor] * N_DUPLICATES)
+    pose_ligand = struc.stack([pose_ligand] * N_DUPLICATES)
     test_dockq = peppr.dockq(
-        native_receptor, native_ligand, model_receptor, model_ligand
+        reference_receptor, reference_ligand, pose_receptor, pose_ligand
     )
 
     for attr in ["fnat", "fnonnat", "irmsd", "lrmsd", "score"]:

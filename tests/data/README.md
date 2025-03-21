@@ -2,7 +2,7 @@
 
 # `predictions`
 
-Reference and predicted model structures fro both PPI and PLI test systems.
+Reference and predicted pose structures fro both PPI and PLI test systems.
 
 # `ref_metrics.csv`
 
@@ -18,29 +18,28 @@ to better test atom matching.
 # `dockq`
 
 This directory contains test structures for tests of the `DockQScore` metric.
-Corresponding structures are in the same subdirectory containing the respective model
-and native complex.
+Corresponding structures are in the same subdirectory containing the respective pose and reference complex.
 
 - **1A2K**:
-  Native structure originates from PDB.
+  Reference structure originates from PDB.
   Originates from PINDER.
 - **6S0A**:
-  Native structure originates from PDB.
-  Model was docked with *DockGPT*.
+  Reference structure originates from PDB.
+  Pose was docked with *DockGPT*.
   Originates from PINDER.
 - **5O2Z**:
-  Native structure originates from PDB.
-  Model was docked with *DiffDock*.
+  Reference structure originates from PDB.
+  Pose was docked with *DiffDock*.
   Originates from PINDER.
 - **2E31**:
-  Native structure originates from PDB.
-  Model was docked with *GeoDock*.
+  Reference structure originates from PDB.
+  Pose was docked with *GeoDock*.
   Originates from PINDER.
 - **6X1G**:
-  Native structure originates from PDB.
-  Model was docked with *HDock*.
+  Reference structure originates from PDB.
+  Pose was docked with *HDock*.
   Originates from PINDER.
 - **6J6J**:
   Streptavidin bound to biotin.
-  Native (`6J6J`) and model (`1SWK`) structure originate from PDB.
-  The model is actually just a mutant structure
+  Reference (`6J6J`) and pose (`1SWK`) structure originate from PDB.
+  The moposedel is actually just a mutant structure
