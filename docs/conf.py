@@ -24,7 +24,6 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinx.ext.todo",
     "sphinx.ext.intersphinx",
-    "sphinxcontrib.bibtex",
     "sphinx_design",
     "sphinx_copybutton",
     "numpydoc",
@@ -32,9 +31,6 @@ extensions = [
 
 numpydoc_show_class_members = False
 linkcode_resolve = viewcode.linkcode_resolve
-
-bibtex_bibfiles = ["references.bib"]
-bibtex_default_style = "ieee"
 
 intersphinx_mapping = {
     "biotite": ("https://www.biotite-python.org/latest/", None),
