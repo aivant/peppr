@@ -24,6 +24,7 @@ dependencies = [
   "numpy >= 1.25",
   "pandas >= 2.0.0",
   "rdkit >= 2024.09.1",
+  "click >= 8.0.0",
 ]
 dynamic = ["version"]
 
@@ -53,6 +54,9 @@ tests = [
 repository = "https://github.com/aivant/peppr"
 #documentation = "https://www.peppr.org"
 
+[project.scripts]
+peppr = "peppr.cli:cli"
+
 [tool.ruff.lint]
 # pyflakes, pycodestyle isort and variable naming
 select = ["F", "E", "W", "I", "TID", "N"]
@@ -67,6 +71,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Due to `from .module import *` imports in `__init__.py` modules
 "__init__.py" = ["F403", "TID252"]
+# Due star imports for the sake of brevity
+"cli.py" = ["F403", "F405"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -102,6 +108,7 @@ checks = [
 ]
 exclude = [
   '__init__$', # Package description is not Numpydoc formatted
+  'cli', # 'click' commands have no parameter description, as this is done in the decorator
   '\._[_a-z0-9]+$',  # Do not validate private or special methods
 ]
 
