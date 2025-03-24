@@ -1,12 +1,17 @@
-| ``peppr`` is a package for evaluation of predicted poses, right?
+It's a package for evaluation of predicted poses, right?
+
+|
 
 Yes, indeed!
-It supports computing all *CASP*/*CAPRI* metrics and more on your structure
-predictions.
-It is even easily extensible to add custom metrics, the possibilities are (almost)
-unlimited!
-Either use the command line interface or the Python API based on ``AtomArray`` objects
-from the `Biotite <https://www.biotite-python.org>`_ library.
+It allows you to compute a variety of metrics on your structure predictions
+for assessing their quality.
+It supports
+
+- all *CASP*/*CAPRI* metrics and more
+- small molecules to huge protein complexes
+- easy extension with custom metrics
+- a command line interface and a Python API
+
 
 Installation
 ------------
@@ -20,9 +25,9 @@ Installation
 Usage example
 -------------
 
-.. code-block:: python
+.. code-block:: console
 
-    import peppr
+    $ peppr run dockq reference.cif poses.cif
 
 Available metrics
 -----------------
