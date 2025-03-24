@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PY_VERSION: "3.11"  # Keep in sync with version in environment.yml
+  PY_VERSION: "3.11"  # Keep in sync with minimum version in pyproject.toml
 
 jobs:
   lint:
@@ -27,15 +27,14 @@ jobs:
     - uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PY_VERSION }}
-    - name: Install linters
-      # Keep in sync with the corresponding versions in pyproject.toml
-      run: pip install ruff==0.11.0 numpydoc==1.8.0 mypy==1.15.0
+    - name: Install package and linting dependencies
+      run: pip install .[lint]
     - name: Check code formatting
       run: ruff format --diff
     - name: Lint code base
       run: ruff check
     - name: Check docstring formatting
-      run: numpydoc lint src/peppr/**/*.py
+      run: numpydoc lint src/peppr/*.py
     - name: Check typing
       run: mypy src
 
@@ -71,7 +70,10 @@ jobs:
         with:
           python-version: ${{ env.PY_VERSION }}
       - name: Install peppr and test dependencies
-        run: pip install dist/*.whl[tests]
+        # Indirection to install the wheel from glob pattern with extra dependencies
+        run: |
+          WHL=(dist/*.whl)
+          pip install $WHL"[tests]"
       - name: Run tests
         run: pytest
 
@@ -80,6 +82,8 @@ jobs:
     needs:
       - build
     runs-on: ubuntu-latest
+    env:
+      TMPDIR: /tmp/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -90,7 +94,9 @@ jobs:
         with:
           python-version: ${{ env.PY_VERSION }}
       - name: Install peppr and documentation dependencies
-        run: pip install dist/*.whl[docs]
+        run: |
+          WHL=(dist/*.whl)
+          pip install $WHL"[docs]"
       - name: Build documentation
         run: sphinx-build docs build/docs
       - name: Compress documentation
