@@ -2,6 +2,7 @@ import glob
 import json
 import pickle
 import sys
+from io import FileIO
 from pathlib import Path
 import biotite.structure as struc
 import biotite.structure.io.mol as mol
@@ -38,14 +39,14 @@ _METRICS = {
     context_settings=dict(help_option_names=["-h", "--help"]),
 )
 @click.version_option(__version__)
-def cli():
+def cli() -> None:
     pass
 
 
 @cli.command()
 @click.argument("EVALUATOR", type=click.File("wb", lazy=True))
 @click.argument("METRIC", type=click.Choice(_METRICS.keys()), nargs=-1, required=True)
-def create(evaluator: click.File, metric: str) -> None:
+def create(evaluator: click.File, metric: tuple[str, ...]) -> None:
     """
     Initialize a new peppr evaluation.
 
@@ -76,7 +77,7 @@ def create(evaluator: click.File, metric: str) -> None:
     required=True,
 )
 def evaluate(
-    evaluator: click.File, reference: Path, pose: Path, id: str | None
+    evaluator: click.File, reference: Path, pose: tuple[Path, ...], id: str | None
 ) -> None:
     """
     Evaluate a single system.
@@ -147,7 +148,7 @@ def evaluate_batch(evaluator: click.File, reference: str, pose: str) -> None:
 @click.argument("EVALUATOR", type=click.File("rb", lazy=True))
 @click.argument("TABLE", type=click.Path(exists=False, path_type=Path))
 @click.argument("SELECTOR", type=str, nargs=-1)
-def tabulate(evaluator: click.File, table: Path, selector: str) -> None:
+def tabulate(evaluator: click.File, table: Path, selector: tuple[str, ...]) -> None:
     """
     Tabulate metric results for each system.
 
@@ -168,7 +169,9 @@ def tabulate(evaluator: click.File, table: Path, selector: str) -> None:
 @click.argument("EVALUATOR", type=click.File("rb", lazy=True))
 @click.argument("SUMMARY", type=click.File("w", lazy=True))
 @click.argument("SELECTOR", type=str, nargs=-1)
-def summarize(evaluator: click.File, summary: click.File, selector: str) -> None:
+def summarize(
+    evaluator: click.File, summary: click.File, selector: tuple[str, ...]
+) -> None:
     """
     Aggregate metrics over all systems.
 
@@ -203,7 +206,7 @@ def run(metric: str, reference: Path, pose: Path) -> None:
     print(f"{result:.3f}", file=sys.stdout)
 
 
-def _evaluator_from_file(file: click.File) -> Evaluator:
+def _evaluator_from_file(file: FileIO) -> Evaluator:
     """
     Load a :class:`Evaluator` from the pickle representation in the given file.
 
@@ -220,7 +223,7 @@ def _evaluator_from_file(file: click.File) -> Evaluator:
     return pickle.load(file)
 
 
-def _evaluator_to_file(file: click.File, evaluator: Evaluator) -> None:
+def _evaluator_to_file(file: FileIO, evaluator: Evaluator) -> None:
     """
     Pickle the given :class:`Evaluator` and write it to the given file.
 

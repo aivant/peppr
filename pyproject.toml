@@ -112,6 +112,23 @@ exclude = [
   '\._[_a-z0-9]+$',  # Do not validate private or special methods
 ]
 
+[tool.mypy]
+packages = "peppr"
+strict = true
+ignore_missing_imports = true
+allow_redefinition = true
+disable_error_code = [
+    # Would sometimes require verbose type annotations within functions
+    "no-any-return",
+    # All RDKit functions are considered untyped
+    "no-untyped-call",
+    # As Biotite is not typed
+    "import-untyped",
+    # Avoid verbose ndarray annotations
+    "type-arg",
+    "arg-type",
+]
+
 [tool.hatch.build.targets.sdist]
 exclude = [
   "tests",

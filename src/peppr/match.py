@@ -87,8 +87,8 @@ def find_matching_atoms(
     )
 
     # Based on the matching chains, find corresponding atoms within each pair of chains
-    ref_atom_orders = [None] * len(reference_chains)
-    mod_atom_orders = [None] * len(reference_chains)
+    ref_atom_orders: list[np.ndarray | None] = [None] * len(reference_chains)
+    mod_atom_orders: list[np.ndarray | None] = [None] * len(reference_chains)
     for ref_i, mod_i in zip(np.arange(len(reference_chains)), mod_chain_order):
         if is_small_molecule(reference_chains[ref_i]):
             try:
