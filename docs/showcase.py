@@ -4,6 +4,7 @@ import biotite.structure as struc
 import biotite.structure.io.pdbx as pdbx
 import matplotlib
 import matplotlib.pyplot as plt
+import mpl_toolkits.axisartist as axisartist
 from matplotlib.colors import to_rgb
 import peppr
 
@@ -13,6 +14,11 @@ GREEN = to_rgb("#088b05")
 BLUE = to_rgb("#1772f0")
 VIOLET = to_rgb("#cb38aa")
 GRAY = to_rgb("#767676")
+LIGHT_RED = to_rgb("#ff8a76")
+LIGHT_GREEN = to_rgb("#76bc63")
+LIGHT_BLUE = to_rgb("#91a7ff")
+LIGHT_VIOLET = to_rgb("#f187d3")
+LIGHT_GRAY = to_rgb("#ababab")
 
 METRICS = [
     peppr.MonomerTMScore(),
@@ -61,18 +67,23 @@ def setup_pymol():
     pymol_interface.cmd.set_color("blue", BLUE)
     pymol_interface.cmd.set_color("violet", VIOLET)
     pymol_interface.cmd.set_color("gray", GRAY)
+    pymol_interface.cmd.set_color("lightred", LIGHT_RED)
+    pymol_interface.cmd.set_color("lightgreen", LIGHT_GREEN)
+    pymol_interface.cmd.set_color("lightblue", LIGHT_BLUE)
+    pymol_interface.cmd.set_color("lightviolet", LIGHT_VIOLET)
+    pymol_interface.cmd.set_color("lightgray", LIGHT_GRAY)
     pymol_interface.cmd.set_color("carbon", GRAY)
     pymol_interface.cmd.set_color("oxygen", RED)
     pymol_interface.cmd.set_color("nitrogen", BLUE)
 
 
-def create_metric_plot(metrics, reference, model, output_path):
+def create_metric_plot(metrics, reference, pose, output_path):
     setup_matplotlib()
 
     score_results = {}
     distance_results = {}
     for metric in metrics:
-        result = metric.evaluate(reference, model)
+        result = metric.evaluate(reference, pose)
         # For the showcase metrics, the ones which have ideally low values
         # are RMSD-based metrics
         if metric.smaller_is_better():
@@ -81,7 +92,13 @@ def create_metric_plot(metrics, reference, model, output_path):
             score_results[metric.name] = result
 
     fig, (score_ax, distance_ax) = plt.subplots(
-        ncols=2, figsize=(6, 3), constrained_layout=True, dpi=300
+        ncols=2,
+        figsize=(6, 3),
+        constrained_layout=True,
+        dpi=300,
+        # Use 'axisartist.Axes' to allow setting tick label alignment
+        # (https://matplotlib.org/stable/gallery/axisartist/demo_ticklabel_alignment.html)
+        subplot_kw=dict(axes_class=axisartist.Axes),
     )
 
     score_ax.bar(list(score_results.keys()), list(score_results.values()), color=RED)
@@ -89,56 +106,63 @@ def create_metric_plot(metrics, reference, model, output_path):
         list(distance_results.keys()), list(distance_results.values()), color=RED
     )
 
-    score_ax.tick_params(axis="x", labelrotation=-30)
-    distance_ax.tick_params(axis="x", labelrotation=-30)
+    for ax in [score_ax, distance_ax]:
+        ax.axis["bottom"].major_ticklabels.set_ha("left")
+        ax.axis["bottom"].major_ticklabels.set_rotation(-30)
+        ax.axis["top"].set_visible(False)
     score_ax.set_ylim(0, 1)
     distance_ax.set_ylim(0, 10)
     score_ax.set_ylabel("Score")
     distance_ax.set_ylabel("Distance (Å)")
     # Adjust axis positions
-    score_ax.spines.top.set_visible(False)
-    score_ax.spines.right.set_visible(False)
-    distance_ax.spines.top.set_visible(False)
-    distance_ax.spines.left.set_visible(False)
-    distance_ax.tick_params(
-        axis="y", left=False, labelleft=False, right=True, labelright=True
-    )
-    distance_ax.yaxis.set_label_position("right")
+    score_ax.axis["right"].set_visible(False)
+    distance_ax.axis["left"].set_visible(False)
+    distance_ax.axis["right"].major_ticklabels.set_visible(True)
+    distance_ax.axis["right"].major_ticks.set_visible(True)
+    distance_ax.axis["right"].label.set_visible(True)
 
     fig.savefig(output_path)
 
 
-def visualize_systems(reference, model, output_path):
+def visualize_systems(reference, pose, output_path):
     setup_pymol()
 
-    pymol_reference = pymol_interface.PyMOLObject.from_structure(reference)
-    pymol_model = pymol_interface.PyMOLObject.from_structure(model)
+    pymol_reference = pymol_interface.PyMOLObject.from_structure(
+        reference, delocalize_bonds=True
+    )
+    pymol_pose = pymol_interface.PyMOLObject.from_structure(pose, delocalize_bonds=True)
 
-    peptide_mask = struc.filter_amino_acids(model)
+    peptide_mask = struc.filter_amino_acids(pose)
     pymol_reference.show_as("cartoon")
     pymol_reference.show("sticks", ~peptide_mask)
     pymol_reference.color("gray")
     pymol_reference.set("stick_transparency", 0.5)
     pymol_reference.set("cartoon_transparency", 0.5)
 
-    peptide_mask = struc.filter_amino_acids(model)
-    pymol_model.show_as("cartoon", peptide_mask)
-    pymol_model.color("red", peptide_mask)
-    pymol_model.show_as("sticks", ~peptide_mask)
-    pymol_model.color("green", ~peptide_mask)
-    pymol_model.orient()
-    pymol_model.zoom()
-    # Use an angle where the ligand is better visible
-    pymol_interface.cmd.rotate("x", 180)
+    peptide_mask = struc.filter_amino_acids(pose)
+    pymol_pose.show_as("cartoon", peptide_mask)
+    pymol_pose.color("red", peptide_mask & (pose.chain_id == "0"))
+    pymol_pose.color("lightred", peptide_mask & (pose.chain_id == "1"))
+    pymol_pose.show_as("sticks", ~peptide_mask)
+    pymol_pose.color("green", ~peptide_mask)
+    pymol_pose.orient()
 
-    pymol_interface.cmd.png(output_path.as_posix(), width=1000, height=1000, ray=True)
+    # Tweak the camera
+    pymol_interface.cmd.turn("x", 180)
+    pymol_interface.cmd.move("x", -8)
+    pymol_interface.cmd.move("z", 90)
+
+    pymol_interface.cmd.png(output_path.as_posix(), width=1000, height=700, ray=True)
 
 
 if __name__ == "__main__":
     showcase_dir = Path(__file__).parent / "showcase"
 
     reference = load_structure(showcase_dir / "reference.cif")
-    model = load_structure(showcase_dir / "models.cif")
+    pose = load_structure(showcase_dir / "pose.cif")
+    reference_order, pose_order = peppr.find_matching_atoms(reference, pose)
+    reference = reference[reference_order]
+    pose = pose[pose_order]
 
-    create_metric_plot(METRICS, reference, model, showcase_dir / "metrics.png")
-    visualize_systems(reference, model, showcase_dir / "system.png")
+    create_metric_plot(METRICS, reference, pose, showcase_dir / "metrics.png")
+    visualize_systems(reference, pose, showcase_dir / "system.png")

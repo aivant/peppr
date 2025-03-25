@@ -51,6 +51,14 @@ pepp'r documentation
 
                     Show me how!
 
+        |
+
+        .. |vantai| image:: /static/assets/general/sponsor.svg
+            :width: 15%
+            :alt: VantAI
+
+        Powered by |vantai|
+
     .. grid-item::
 
         .. grid:: 1
@@ -60,7 +68,7 @@ pepp'r documentation
                 .. image:: /showcase/system.png
                     :alt: Evaluated system
                     :class: no-scaled-link
-                    :width: 80%
+                    :width: 100%
                     :align: center
 
             .. grid-item::
