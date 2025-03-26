@@ -2,7 +2,8 @@
 
 # `predictions`
 
-Reference and predicted pose structures fro both PPI and PLI test systems.
+Reference and predicted pose structures for PROTAC test systems, i.e. every system
+contains both, PPI and PLI.
 
 # `ref_metrics.csv`
 

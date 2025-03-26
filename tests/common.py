@@ -1,19 +1,13 @@
 from pathlib import Path
-from typing import Literal
 import biotite.structure as struc
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pandas as pd
 
 
-def list_test_predictions(category: Literal["ppi", "pli"] | None = None) -> list[str]:
+def list_test_predictions() -> list[str]:
     """
     List all system IDs for test systems with predictions.
-
-    Parameters
-    ----------
-    category : {'ppi', 'pli'}, optional
-        If set only return systems in the given category.
 
     Returns
     -------
@@ -27,12 +21,6 @@ def list_test_predictions(category: Literal["ppi", "pli"] | None = None) -> list
             if p.is_dir()
         ]
     )
-    if category is not None:
-        metrics_table = pd.read_csv(Path(__file__).parent / "data" / "ref_metrics.csv")
-        metrics_table = metrics_table[metrics_table["category"] == category]
-        system_ids = [
-            id for id in system_ids if id in metrics_table["system_id"].to_list()
-        ]
     return system_ids
 
 
@@ -71,9 +59,11 @@ def assemble_predictions(
     system_dir = Path(__file__).parent / "data" / "predictions" / system_id
     pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
     reference = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-    pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
-    poses = pdbx.get_structure(pdbx_file, model=None, include_bonds=True)
-    return reference, poses
+    poses = []
+    for pose_path in sorted(system_dir.glob("poses/*.cif")):
+        pdbx_file = pdbx.CIFFile.read(pose_path)
+        poses.append(pdbx.get_structure(pdbx_file, model=1, include_bonds=True))
+    return reference, struc.stack(poses)
 
 
 def get_reference_metric(system_id: str, metric_name) -> np.ndarray[np.floating]:
@@ -98,16 +88,9 @@ def get_reference_metric(system_id: str, metric_name) -> np.ndarray[np.floating]
     """
     metrics_table = pd.read_csv(Path(__file__).parent / "data" / "ref_metrics.csv")
     metrics_table = metrics_table.loc[metrics_table["system_id"] == system_id]
-    pose_index = metrics_table["model_num"].to_numpy().astype(int)
-    if metrics_table["ligand"].isna().all():
-        metric = np.full((np.max(pose_index) + 1, 1), np.nan)
-        for i, value in zip(pose_index, metrics_table[metric_name]):
-            metric[i] = value
-    else:
-        molecule_index = np.array(
-            [int(label.split("_")[1]) for label in metrics_table["ligand"]]
-        )
-        metric = np.full((np.max(pose_index) + 1, np.max(molecule_index) + 1), np.nan)
-        for i, j, value in zip(pose_index, molecule_index, metrics_table[metric_name]):
-            metric[i, j] = value
+    pose_index = metrics_table["pose_num"].to_numpy().astype(int)
+    molecule_index = metrics_table["ligand_num"] - 1
+    metric = np.full((np.max(pose_index) + 1, np.max(molecule_index) + 1), np.nan)
+    for i, j, value in zip(pose_index, molecule_index, metrics_table[metric_name]):
+        metric[i, j] = value
     return metric

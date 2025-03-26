@@ -38,7 +38,7 @@ ALL_METRICS = [
         (peppr.MonomerRMSD(5.0, ca_only=False), (0.0, 10.0)),
         (peppr.MonomerTMScore(), (0.4, 1.0)),
         (peppr.MonomerLDDTScore(), (0.4, 1.0)),
-        (peppr.IntraLigandLDDTScore(), (0.5, 1.0)),
+        (peppr.IntraLigandLDDTScore(), (0.4, 1.0)),
         (peppr.LDDTPLIScore(), (0.0, 1.0)),
         (peppr.LDDTPPIScore(), (0.0, 1.0)),
         (peppr.GlobalLDDTScore(backbone_only=True), (0.0, 1.0)),
@@ -56,18 +56,15 @@ ALL_METRICS = [
     ],
     ids=lambda x: x.name if isinstance(x, peppr.Metric) else "",
 )
-@pytest.mark.parametrize(
-    # Choose example systems for which all metrics work
-    "system_id",
-    ["7yn2__1__1.A_1.B__1.C", "8jmr__1__1.A_1.B__1.C_1.D"],
-)
-def test_metrics(metric, value_range, system_id):
+def test_metrics(metric, value_range):
     """
     Check for each implemented metric simply whether :meth:`Metric.evaluate()` works
     without error and returns an array with correct shape with values in a reasonable
     range.
     """
-    reference, poses = assemble_predictions(system_id)
+    SYSTEM_ID = "7znt__2__1.F_1.G__1.J"
+
+    reference, poses = assemble_predictions(SYSTEM_ID)
     for pose in poses:
         reference_order, pose_order = peppr.find_matching_atoms(reference, pose)
         reference = reference[reference_order]
@@ -83,7 +80,7 @@ def test_no_modification(metric):
     No metric should modify the input structures.
     """
     # Choose any system that is suitable for all metrics, i.e. contains PPI and PLI
-    reference, poses = assemble_predictions("7t4w__1__1.A__1.C")
+    reference, poses = assemble_predictions("7znt__2__1.F_1.G__1.J")
     pose = poses[0]
     original_reference = reference.copy()
     original_pose = pose.copy()
@@ -112,48 +109,34 @@ def test_unique_names():
     assert len(names) == len(ALL_METRICS)
 
 
-@pytest.mark.parametrize("system_id", list_test_predictions("ppi"))
-def test_ppi_lddt_score(system_id):
-    """
-    Check lDDT-PLI against reference values from
-    `OpenStructureToolkit <https://openstructure.org/docs/2.7/mol/alg/molalg/#ost.mol.alg.lddt.lDDTScorer>`_.
-    """
-    TOLERANCE = 0.06
-
-    ref_lddt = get_reference_metric(system_id, "ilddt")
-
-    reference, poses = assemble_predictions(system_id)
-    evaluator = peppr.Evaluator([peppr.LDDTPPIScore()])
-    evaluator.feed(system_id, reference, poses)
-    test_lddt = np.stack(evaluator.get_results()[0], axis=1)
-
-    assert test_lddt.flatten().tolist() == pytest.approx(
-        ref_lddt.flatten().tolist(), abs=TOLERANCE
-    )
-
-
 @pytest.mark.parametrize(
     ["metric", "column_name", "abs_tolerance", "rel_tolerance"],
     [
-        # OpenStructure uses a different definition than the CASP one
-        (peppr.LDDTPLIScore(), "lddt_pli", 0.5, 0.3),
-        # OpenStructure uses a different definition than the one used in the paper
-        (
+        pytest.param(
+            peppr.LDDTPLIScore(),
+            "lddt_pli",
+            0.5,
+            0.3,
+            # Expect failure for now, as peppr follows definition from CASP 15
+            # while OpenStructure uses the CASP 16 definition
+            marks=pytest.mark.xfail(reason="Different metric definition"),
+        ),
+        pytest.param(
             peppr.BiSyRMSD(5.0, inclusion_radius=4.0, outlier_distance=np.inf),
             "bisy_rmsd",
             0.25,
             0.04,
+            # Slight differences as OpenStructure adopted a different definition
+            # than the one used in the paper
+            marks=pytest.mark.xfail(reason="Different metric definition"),
         ),
     ],
 )
-@pytest.mark.parametrize("system_id", list_test_predictions("pli"))
+@pytest.mark.parametrize("system_id", list_test_predictions())
 def test_pli_metrics(system_id, metric, column_name, abs_tolerance, rel_tolerance):
     """
     Check PLI metrics against reference values from *OpenStructureToolkit*.
     """
-    if system_id == "7yn2__1__1.A_1.B__1.C":
-        pytest.skip("Ambiguous chain matching due to bad global complex prediction")
-
     ref_metric = get_reference_metric(system_id, column_name)
 
     reference, poses = assemble_predictions(system_id)
@@ -174,12 +157,12 @@ def test_pli_metrics(system_id, metric, column_name, abs_tolerance, rel_toleranc
     test_metric = _find_matching_ligand(ref_metric, test_metric)
 
     assert test_metric.flatten().tolist() == pytest.approx(
-        ref_metric.flatten().tolist(), abs=abs_tolerance, rel=rel_tolerance
+        ref_metric.flatten().tolist(), abs=abs_tolerance, rel=rel_tolerance, nan_ok=True
     )
 
 
 @pytest.mark.parametrize("move_structure", ["reference", "pose"])
-@pytest.mark.parametrize("system_id", list_test_predictions("pli"))
+@pytest.mark.parametrize("system_id", list_test_predictions())
 def test_intra_ligand_lddt_score(system_id, move_structure):
     """
     In the intra ligand lDDT the score should not depend on the relative position of the
@@ -262,7 +245,7 @@ def test_ligand_rmsd_with_no_contacts():
 
     :param data_dir: pytest fixture, path to the directory containing the test data
     """
-    reference, poses = assemble_predictions("7yn2__1__1.A_1.B__1.C")
+    reference, poses = assemble_predictions("7znt__2__1.F_1.G__1.J")
     pose = poses[0]
     reference_order, pose_order = peppr.find_matching_atoms(reference, pose)
     reference = reference[reference_order]

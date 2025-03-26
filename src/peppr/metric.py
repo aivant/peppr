@@ -280,6 +280,10 @@ class LDDTPLIScore(Metric):
                     reference[polymer_mask], reference[ligand_mask], cutoff=4.0
                 )[:, 0]
             )
+            # No contacts between the ligand and protein in reference -> no binding site
+            # -> metric is undefined
+            if len(binding_site_contacts) == 0:
+                return np.nan
             binding_site_mask = struc.get_residue_masks(
                 reference, binding_site_contacts
             ).any(axis=0)

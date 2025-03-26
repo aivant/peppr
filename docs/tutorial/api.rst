@@ -29,20 +29,20 @@ for a more in-depth introduction on its capabilities.
 
 For the scope of this tutorial we will load our reference structures and predicted poses
 from CIF files.
-The files can be downloaded
-`here <>`_.
+The files used in this tutorial are *proteolysis targeting chimera* (PROTAC) complexes
+predicted by `Neo-1 <https://www.vant.ai/neo-1>`_ and can be downloaded
+:download:`here </download/systems.zip>`.
 As input structures for ``peppr`` may comprise any number of peptide and nucleotide
 chains, as well as small molecules, they are called *system* throughout this package.
-Here we will have look at the protein-ligand complex TODO.
 
 .. jupyter-execute::
 
     import biotite.structure.io.pdbx as pdbx
 
-    system_dir = path_to_systems / "7v34__1__1.A__1.C_1.D_1.G"
+    system_dir = path_to_systems / "7jto__1__1.A_1.D__1.J_1.O"
     pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
     ref = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-    pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
+    pdbx_file = pdbx.CIFFile.read(system_dir / "poses" / "pose_0.cif")
     pose = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
     print(type(ref))
     print(type(pose))
@@ -51,8 +51,8 @@ There are two important things to note here:
 
 - ``model=1`` ensures that only one reference and one pose is loaded from the CIF file,
   as the file may also contain multiple models.
-  ``peppr`` is also able to evaluate multiple poses per system, but this is discussed
-  later.
+  You can omit it, if you want ``peppr`` to evaluate multiple poses per system, as
+  discussed later.
 - ``include_bonds=True`` instructs the parser also to load the bonds between atoms.
   If they are missing ``peppr`` will raise an exception when it sees this system.
   The full list of requirements on input systems is documented in the
@@ -127,7 +127,7 @@ one, so you do not have to.
         system_id = system_dir.name
         pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
         ref = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-        pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
+        pdbx_file = pdbx.CIFFile.read(system_dir / "poses" / "pose_0.cif")
         pose = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
         evaluator.feed(system_id, ref, pose)
 
@@ -174,14 +174,13 @@ same atoms.
 
 .. jupyter-execute::
 
-    system_dir = path_to_systems / "7v34__1__1.A__1.C_1.D_1.G"
+    system_dir = path_to_systems / "7jto__1__1.A_1.D__1.J_1.O"
     pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
-    ref = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-    pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
-    # This time we load all poses from the file as AtomArrayStack
-    pose = pdbx.get_structure(pdbx_file, include_bonds=True)
-    print(type(ref))
-    print(type(pose))
+    reference = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    poses = []
+    for pose_path in system_dir.glob("poses/*.cif"):
+        pdbx_file = pdbx.CIFFile.read(pose_path)
+        poses.append(pdbx.get_structure(pdbx_file, model=1, include_bonds=True))
 
 But for each metric only one value is finally reported, so how does the
 :class:`Evaluator` choose a single result for multiple poses?
@@ -192,7 +191,7 @@ an exception instead.
     :raises: ValueError
 
     evaluator = peppr.Evaluator([peppr.DockQScore()])
-    evaluator.feed("foo", ref, pose)
+    evaluator.feed("foo", reference, poses)
     evaluator.tabulate_metrics()
 
 The :class:`Evaluator` needs a way to select the desired value from the metric evaluated

@@ -4,8 +4,11 @@ One way to use ``peppr`` to compute a single metrics or run entire model evaluat
 via the command line interface.
 In ``peppr`` we call each input structure, which consists of a reference and one or more
 poses, a *system*.
-For this tutorial we assume that all systems we want to evaluate are located in a
-directory called ``$SYSTEMDIR``.
+This tutorial uses *proteolysis targeting chimera* (PROTAC) complexes predicted by
+`Neo-1 <https://www.vant.ai/neo-1>`_ as systems to be evaluated
+(download :download:`here </download/systems.zip>`) and assumes that they are located in
+a directory called ``$SYSTEMDIR``.
+
 
 .. jupyter-execute::
     :hide-code:
@@ -25,18 +28,18 @@ Each system subdirectory is formatted as follows:
 
 .. jupyter-execute::
 
-    ! ls --color=never $SYSTEMDIR/7v34__1__1.A__1.C_1.D_1.G
+    ! cd $SYSTEMDIR && find 7jto__1__1.A_1.D__1.J_1.O
 
 Quick computation of a single metric
 ------------------------------------
 Sometimes one only wants to know a single metric for a given prediction.
 This use case is fulfilled by the ``peppr run`` command.
 Let's say we want to know the *DockQ* score for the system
-``7v34__1__1.A__1.C_1.D_1.G``.
+``7jto__1__1.A_1.D__1.J_1.O``.
 
 .. jupyter-execute::
 
-    ! peppr run dockq $SYSTEMDIR/7v34__1__1.A__1.C_1.D_1.G/reference.cif $SYSTEMDIR/7v34__1__1.A__1.C_1.D_1.G/poses.cif
+    ! peppr run dockq $SYSTEMDIR/7jto__1__1.A_1.D__1.J_1.O/reference.cif $SYSTEMDIR/7jto__1__1.A_1.D__1.J_1.O/poses/pose_0.cif
 
 To get a list of all available metrics, consult the help output of ``peppr run``.
 
@@ -90,7 +93,7 @@ will be updated with the results.
 
 .. jupyter-execute::
 
-    ! peppr evaluate-batch $TMPDIR/peppr.pkl "$SYSTEMDIR/*/reference.cif" "$SYSTEMDIR/*/poses.cif"
+    ! peppr evaluate-batch $TMPDIR/peppr.pkl "$SYSTEMDIR/*/reference.cif" "$SYSTEMDIR/*/poses"
 
 .. warning::
 

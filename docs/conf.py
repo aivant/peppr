@@ -1,3 +1,4 @@
+import shutil
 import sys
 from pathlib import Path
 import peppr
@@ -9,9 +10,13 @@ DOC_PATH = Path(__file__).parent
 sys.path.insert(0, str(DOC_PATH))
 import viewcode  # noqa: E402
 
-#### Source code link ###
+#### Package systems for download ####
 
-# linkcode_resolve = viewcode.linkcode_resolve
+shutil.make_archive(
+    DOC_PATH / "download" / "systems",
+    "zip",
+    DOC_PATH.parent / "tests" / "data" / "predictions",
+)
 
 #### General ####
 

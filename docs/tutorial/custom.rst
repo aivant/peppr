@@ -118,10 +118,12 @@ Now that we have created our custom metric and selector, we can use them in the
             continue
         system_id = system_dir.name
         pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
-        ref = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-        pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
-        pose = pdbx.get_structure(pdbx_file, include_bonds=True)
-        evaluator.feed(system_id, ref, pose)
+        reference = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+        poses = []
+        for pose_path in system_dir.glob("poses/*.cif"):
+            pdbx_file = pdbx.CIFFile.read(pose_path)
+            poses.append(pdbx.get_structure(pdbx_file, model=1, include_bonds=True))
+        evaluator.feed(system_id, reference, poses)
 
     evaluator.tabulate_metrics(selectors=[WorstCaseSelector()])
 
