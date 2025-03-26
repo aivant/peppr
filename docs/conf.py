@@ -64,12 +64,15 @@ html_css_files = [
     "&display=swap",
 ]
 html_title = "pepp'r"
-html_logo = "static/assets/general/logo.svg"
 html_favicon = "static/assets/general/icon.png"
 # html_baseurl = "https://peppr.github.io"
 html_theme_options = {
     "header_links_before_dropdown": 7,
     "pygment_light_style": "friendly",
+    "logo": {
+        "image_light": "static/assets/general/logo.svg",
+        "image_dark": "static/assets/general/logo_dark.svg",
+    },
     "icon_links": [
         {
             "name": "GitHub",

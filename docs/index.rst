@@ -21,10 +21,16 @@ pepp'r documentation
     .. grid-item::
 
         .. image:: /static/assets/general/logo.svg
-            :alt: pepp'r
-            :class: no-scaled-link
-            :width: 75%
+            :class: only-light, no-scaled-link
             :align: center
+            :width: 75%
+            :alt: pepp'r
+
+        .. image:: /static/assets/general/logo_dark.svg
+            :class: only-dark, no-scaled-link
+            :align: center
+            :width: 75%
+            :alt: pepp'r
 
         .. raw:: html
 
@@ -53,11 +59,19 @@ pepp'r documentation
 
         |
 
-        .. |vantai| image:: /static/assets/general/sponsor.svg
+        Powered by
+
+        .. image:: /static/assets/general/sponsor.svg
+            :class: only-light
             :width: 15%
             :alt: VantAI
+            :target: https://www.vant.ai/
 
-        Powered by |vantai|
+        .. image:: /static/assets/general/sponsor_dark.svg
+            :class: only-dark
+            :width: 15%
+            :alt: VantAI
+            :target: https://www.vant.ai/
 
     .. grid-item::
 
@@ -66,16 +80,28 @@ pepp'r documentation
             .. grid-item::
 
                 .. image:: /showcase/system.png
+                    :class: only-light, no-scaled-link
                     :alt: Evaluated system
-                    :class: no-scaled-link
+                    :width: 100%
+                    :align: center
+
+                .. image:: /showcase/system.png
+                    :class: only-dark, no-scaled-link
+                    :alt: Evaluated system
                     :width: 100%
                     :align: center
 
             .. grid-item::
 
                 .. image:: /showcase/metrics.png
+                    :class: only-light, no-scaled-link
                     :alt: Metrics
-                    :class: no-scaled-link
+                    :width: 100%
+                    :align: center
+
+                .. image:: /showcase/metrics_dark.png
+                    :class: only-dark, no-scaled-link
+                    :alt: Metrics
                     :width: 100%
                     :align: center
 

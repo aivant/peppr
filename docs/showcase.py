@@ -42,7 +42,11 @@ def load_structure(cif_path):
     return system
 
 
-def setup_matplotlib():
+def setup_matplotlib(theme):
+    if theme == "light":
+        plt.style.use(["default"])
+    if theme == "dark":
+        plt.style.use(["dark_background"])
     matplotlib.rcParams["figure.dpi"] = 300
     matplotlib.rcParams["font.sans-serif"] = "Geologica"
 
@@ -77,8 +81,8 @@ def setup_pymol():
     pymol_interface.cmd.set_color("nitrogen", BLUE)
 
 
-def create_metric_plot(metrics, reference, pose, output_path):
-    setup_matplotlib()
+def create_metric_plot(metrics, reference, pose, output_path, theme):
+    setup_matplotlib(theme)
 
     score_results = {}
     distance_results = {}
@@ -121,7 +125,7 @@ def create_metric_plot(metrics, reference, pose, output_path):
     distance_ax.axis["right"].major_ticks.set_visible(True)
     distance_ax.axis["right"].label.set_visible(True)
 
-    fig.savefig(output_path)
+    fig.savefig(output_path, transparent=True)
 
 
 def visualize_systems(reference, pose, output_path):
@@ -164,5 +168,9 @@ if __name__ == "__main__":
     reference = reference[reference_order]
     pose = pose[pose_order]
 
-    create_metric_plot(METRICS, reference, pose, showcase_dir / "metrics.png")
-    visualize_systems(reference, pose, showcase_dir / "system.png")
+    for theme in ["light", "dark"]:
+        suffix = "_dark" if theme == "dark" else ""
+        create_metric_plot(
+            METRICS, reference, pose, showcase_dir / f"metrics{suffix}.png", theme
+        )
+        visualize_systems(reference, pose, showcase_dir / f"system{suffix}.png")

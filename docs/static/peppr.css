@@ -16,10 +16,13 @@ html[data-theme="light"] {
 }
 
 html[data-theme="dark"] {
+    --pst-color-text-base: #fafcfc;
+    --pst-color-background: #05070f;
+    --pst-color-on-background: #090d19;
     --pst-color-primary: #db3a35;
-    --pst-color-primary-highlight: #ffffff;
+    --pst-color-primary-highlight: #fafcfc;
     --pst-color-secondary: #088b05;
-    --pst-color-secondary-highlight: #ffffff;
+    --pst-color-secondary-highlight: #fafcfc;
     --pst-color-accent: #cb38aa;
     --pst-color-inline-code: #cb38aa;
     --pst-color-inline-code-links: #cb38aa;
