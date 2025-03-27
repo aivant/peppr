@@ -564,7 +564,9 @@ class PocketAlignedLigandRMSD(Metric):
 class BiSyRMSD(Metric):
     """
     Compute the *Binding-Site Superposed, Symmetry-Corrected Pose RMSD* (BiSyRMSD) for
-    the given PLI complex as defined in [1]_.
+    the given PLI complex.
+
+    The method and default parameters are described in [1]_.
 
     Parameters
     ----------
@@ -573,21 +575,17 @@ class BiSyRMSD(Metric):
     inclusion_radius : float, optional
         All residues where at least one heavy atom is within this radius of a heavy
         ligand atom, are considered part of the binding site.
-        The default value is taken from [1]_.
     outlier_distance : float, optional
         The binding sites of the reference and pose are superimposed iteratively.
         In each iteration, atoms with a distance of more than this value are considered
         outliers and are removed in the next iteration.
-        The default value is taken from [1]_.
         To disable outlier removal, set this value to ``inf``.
     max_iterations : int, optional
         The maximum number of iterations for the superimposition.
-        The default value is taken from [1]_.
     min_anchors : int, optional
         The minimum number of anchors to use for the superimposition.
         If less than this number of anchors are present, the superimposition is
         performed on all interface backbone atoms.
-        The default value is taken from [1]_.
 
     References
     ----------
