@@ -1,7 +1,7 @@
 html {
     --pst-font-family-base: "Geologica", "Sans-Serif";
-    --pst-font-family-heading: "Chelsea Market", "system-ui";
-    --pst-font-weight-heading: 700;
+    --pst-font-family-heading: "Arvo", "system-ui";
+    --pst-font-weight-heading: 400;
 }
 
 html[data-theme="light"] {

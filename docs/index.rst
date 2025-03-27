@@ -34,7 +34,9 @@ pepp'r documentation
 
         .. raw:: html
 
-            <h3>It's a package for evaluation of predicted poses, right?</h2>
+            <h3 style="font-family:'Chelsea Market'">
+                It's a package for evaluation of predicted poses, right?
+            </h3>
 
         Yes, indeed!
         It allows you to compute a variety of metrics on your structure predictions

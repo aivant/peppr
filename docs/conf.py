@@ -65,6 +65,7 @@ html_css_files = [
     # Get fonts from Google Fonts CDN
     "https://fonts.googleapis.com/css2"
     "?family=Geologica:wght@100..900"
+    "&family=Arvo:ital,wght@0,400;0,700;1,400;1,700"
     "&family=Chelsea+Market"
     "&display=swap",
 ]
