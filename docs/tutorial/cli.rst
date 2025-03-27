@@ -1,6 +1,6 @@
 Command line interface
 ======================
-One way to use ``peppr`` to compute a single metrics or run entire model evaluations is
+One way to use ``peppr`` to compute a single metric or run entire model evaluations is
 via the command line interface.
 In ``peppr`` we call each input structure, which consists of a reference and one or more
 poses, a *system*.
@@ -8,7 +8,6 @@ This tutorial uses *proteolysis targeting chimera* (PROTAC) complexes predicted 
 `Neo-1 <https://www.vant.ai/neo-1>`_ as systems to be evaluated
 (download :download:`here </download/systems.zip>`) and assumes that they are located in
 a directory called ``$SYSTEMDIR``.
-
 
 .. jupyter-execute::
     :hide-code:
@@ -29,6 +28,9 @@ Each system subdirectory is formatted as follows:
 .. jupyter-execute::
 
     ! cd $SYSTEMDIR && find 7jto__1__1.A_1.D__1.J_1.O
+
+Despite the tutorial using only *CIF* files, ``peppr`` also supports the *BinaryCIF*,
+*PDB* and *MOL/SDF* formats.
 
 Quick computation of a single metric
 ------------------------------------
@@ -62,8 +64,8 @@ three steps revolving around a binary ``peppr.pkl`` file:
 
     It is not guaranteed that the ``peppr.pkl`` file works across different
     platforms, Python versions and ``peppr`` versions.
-    Furthermore, it is not secure to read an ``peppr.pkl`` from untrusted sources.
-    Hence, it is advised to handle it as ephemeral file and rather use the reported
+    Furthermore, it is not secure to read a ``peppr.pkl`` file from untrusted sources.
+    Hence, it is advised to treat it as an ephemeral file and rather use the reported
     summary or table as persistent results.
 
 Evaluator creation
@@ -86,8 +88,12 @@ or we can feed the systems to the evaluator as a whole using ``peppr evaluate-ba
 Here we will use the latter.
 ``peppr evaluate-batch`` expects the references and poses to be provided as
 *glob patterns*.
-In our case the systems are spread across the subdirectories of ``$SYSTEMDIR``, so
+In our case, the systems are spread across the subdirectories of ``$SYSTEMDIR``, so
 these directories will be represented by a ``*`` in the glob pattern.
+As each system has only one reference, the reference pattern needs to target single
+files, while the pose pattern may either point also to single files
+(single pose per system) or to directories, where every file represents a pose for
+a single system.
 The command also needs the path to the previously created ``peppr.pkl`` file, which
 will be updated with the results.
 

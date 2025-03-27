@@ -88,7 +88,7 @@ and returns a scalar value.
 Some metrics may not be defined for a given system.
 For example, if like in the current system there is no protein-protein interface,
 the *interface RMSD* (iRMSD) is undefined.
-in such cases :meth:`Metric.evaluate()` returns *NaN*.
+In such cases, :meth:`Metric.evaluate()` returns *NaN*.
 
 .. jupyter-execute::
 
@@ -102,7 +102,7 @@ However, to evaluate a structure prediction model, one usually wants to run eval
 on many systems and eventually aggregate the results.
 This purpose is fulfilled by the :class:`Evaluator` class.
 Given the desired metrics, predictions can be fed into it one after the other.
-As a bonus the :class:`Evaluator` also takes care of finding the corresponding atoms
+As a bonus, the :class:`Evaluator` also takes care of finding the corresponding atoms
 between the reference structure and its poses, in case some atoms are missing in either
 one, so you do not have to.
 
@@ -121,7 +121,7 @@ one, so you do not have to.
         ]
     )
 
-    for system_dir in path_to_systems.iterdir():
+    for system_dir in sorted(path_to_systems.iterdir()):
         if not system_dir.is_dir():
             continue
         system_id = system_dir.name
@@ -131,8 +131,8 @@ one, so you do not have to.
         pose = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
         evaluator.feed(system_id, ref, pose)
 
-Eventually we can report the evaluation run as a table that every chosen metric for
-each system (indicated by the given system ID).
+Eventually we can report the evaluation run as a table that lists every chosen metric
+for each system (indicated by the given system ID).
 
 .. jupyter-execute::
 
@@ -150,7 +150,7 @@ dictionary mapping the metric names to their aggregated values.
 As you see for each metric the mean and median value are reported.
 You might also notice that in case of the :class:`DockQScore` also
 *incorrect*, *acceptable*, *medium* and *high* percentages are reported.
-For example the value for ``DockQ acceptable`` reads as
+For example, the value for ``DockQ acceptable`` reads as
 
 | A fraction of ``<x>`` of all applicable systems are within the *acceptable* threshold.
 
@@ -178,7 +178,7 @@ same atoms.
     pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
     reference = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
     poses = []
-    for pose_path in system_dir.glob("poses/*.cif"):
+    for pose_path in sorted(system_dir.glob("poses/*.cif")):
         pdbx_file = pdbx.CIFFile.read(pose_path)
         poses.append(pdbx.get_structure(pdbx_file, model=1, include_bonds=True))
 

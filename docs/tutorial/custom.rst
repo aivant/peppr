@@ -38,7 +38,7 @@ For the scope of this tutorial we will create an all-atom RMSD as metric.
         # This optionally enables binning for `Evaluator.summarize_metrics()`
         @property
         def thresholds(self):
-            return {"good": 0.0, "ok": 2.0, "bad": 5.0}
+            return {"good": 0.0, "ok": 10.0, "bad": 20.0}
 
         # The core of each metric
         def evaluate(self, reference, pose):
@@ -57,7 +57,8 @@ For the scope of this tutorial we will create an all-atom RMSD as metric.
 
 A few notes on the :meth:`evaluate()` method:
 The purpose of a :class:`Metric` is to be used in context of an :class:`Evaluator`.
-Hence, we can rely of the preprocessing already done by the :class:`Evaluator` to make
+As the :class:`Evaluator` already automatically preprocesses the input systems passed
+to :meth:`Evaluator.feed()`, we can rely on some properties of each system that make
 our life easier:
 
 - The input system will only contain heavy atoms (i.e. no hydrogen).
@@ -113,21 +114,21 @@ Now that we have created our custom metric and selector, we can use them in the
 
     evaluator = peppr.Evaluator([RMSD()])
 
-    for system_dir in path_to_systems.iterdir():
+    for system_dir in sorted(path_to_systems.iterdir()):
         if not system_dir.is_dir():
             continue
         system_id = system_dir.name
         pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
         reference = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
         poses = []
-        for pose_path in system_dir.glob("poses/*.cif"):
+        for pose_path in sorted(system_dir.glob("poses/*.cif")):
             pdbx_file = pdbx.CIFFile.read(pose_path)
             poses.append(pdbx.get_structure(pdbx_file, model=1, include_bonds=True))
         evaluator.feed(system_id, reference, poses)
 
     evaluator.tabulate_metrics(selectors=[WorstCaseSelector()])
 
-And finally we will also the bin thresholds for the RMSD metric in action.
+And finally, we will also the bin thresholds for the RMSD metric in action.
 
 .. jupyter-execute::
 

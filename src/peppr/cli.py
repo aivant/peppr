@@ -194,7 +194,7 @@ def summarize(
 @click.argument("POSE", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 def run(metric: str, reference: Path, pose: Path) -> None:
     """
-    Run a single metric on the given system.
+    Compute a single metric for the given system.
 
     The given METRIC is run on the given REFERENCE and POSE and the result is
     written to STDOUT.
