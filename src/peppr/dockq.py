@@ -86,7 +86,7 @@ class DockQ:
     reference_ligand_index: int | None = None
 
     def __post_init__(self) -> None:
-        score = np.mean(
+        score = np.nanmean(
             [self.fnat, _scale(self.irmsd, 1.5), _scale(self.lrmsd, 8.5)], axis=0
         )
         n_poses = None if np.isscalar(score) else len(score)
@@ -178,6 +178,12 @@ def dockq(
     >>> print(f"{dockq_result.score:.2f}")
     0.45
     """
+    undefined = (
+        np.nan
+        if isinstance(pose_receptor, struc.AtomArray)
+        else np.full(pose_receptor.stack_depth(), np.nan)
+    )
+
     if as_peptide:
         if any(
             [
@@ -197,12 +203,9 @@ def dockq(
         lrmsd_ = pocket_aligned_lrmsd(
             reference_receptor, reference_ligand, pose_receptor, pose_ligand
         )
-        zero = 0 if isinstance(lrmsd_, float) else np.zeros(len(lrmsd_))
-        return DockQ(zero, zero, zero, lrmsd_)
+        return DockQ(undefined, undefined, undefined, lrmsd_)
 
     else:
-        lrmsd_ = lrmsd(reference_receptor, reference_ligand, pose_receptor, pose_ligand)
-
         fnat_, fnonnat_ = fnat(
             reference_receptor,
             reference_ligand,
@@ -210,6 +213,9 @@ def dockq(
             pose_ligand,
             as_peptide,
         )
+        if np.isnan(fnat_).any():
+            # No contact between the chains -> DockQ is not defined
+            return DockQ(undefined, undefined, undefined, undefined)
 
         irmsd_ = irmsd(
             reference_receptor,
@@ -218,6 +224,8 @@ def dockq(
             pose_ligand,
             as_peptide,
         )
+
+        lrmsd_ = lrmsd(reference_receptor, reference_ligand, pose_receptor, pose_ligand)
 
         return DockQ(fnat_, fnonnat_, irmsd_, lrmsd_)
 

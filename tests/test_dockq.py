@@ -130,15 +130,10 @@ def test_dockq_with_no_contacts(data_dir):
         reference_receptor, reference_ligand, pose_receptor, pose_ligand
     )
 
-    # fnat, fnonnat, irmsd and score are nan when the
-    # two chains are not in contact
-
-    nan_attrs = ["fnat", "fnonnat", "irmsd", "score"]
+    # All metrics are NaN if two chains are not in contact
+    nan_attrs = ["fnat", "fnonnat", "irmsd", "lrmsd", "score"]
     for nan_attr in nan_attrs:
         assert np.isnan(getattr(dockq_result, nan_attr))
-
-    # expect lrmsd is still calculated when chains are not in contact
-    assert not np.isnan(dockq_result.lrmsd)
 
 
 def test_contact_parity(data_dir):
@@ -315,7 +310,11 @@ def test_reference_consistency_small_molecule(tmp_path, data_dir):
     ref_dockq = next(iter(ref_dockq_all_combinations.values()))
 
     assert test_dockq.lrmsd == pytest.approx(ref_dockq["LRMSD"], abs=1e-3)
-    assert test_dockq.score == pytest.approx(ref_dockq["DockQ"], abs=1e-3)
+    # TODO: The reference implementation assigns fnat=0 and iRMSD=0 for PLI-DockQ
+    #       Hence, a model compared to itself would get a score smaller than 1
+    #       Instead `peppr` uses fnat=NaN and iRMSD=NaN
+    #       Activate this assertion once the reference implementation is fixed
+    # assert test_dockq.score == pytest.approx(ref_dockq["DockQ"], abs=1e-3)
 
 
 def test_multi_model(data_dir):
