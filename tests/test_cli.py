@@ -181,9 +181,7 @@ def test_structure_formats(tmp_path, format):
     strucio.save_structure(path, system)
 
     # Use a metric that supports small molecules
-    result = CliRunner().invoke(
-        run, ["intra-ligand-lddt", path.as_posix(), path.as_posix()]
-    )
+    result = CliRunner().invoke(run, ["ligand-lddt", path.as_posix(), path.as_posix()])
     if result.exception:
         raise result.exception
     assert float(result.output) == pytest.approx(1.0)
