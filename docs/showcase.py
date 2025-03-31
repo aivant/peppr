@@ -10,15 +10,12 @@ import peppr
 
 # Colors are based on Lab color space at L = 50
 RED = to_rgb("#db3a35")
-GREEN = to_rgb("#088b05")
 BLUE = to_rgb("#1772f0")
-VIOLET = to_rgb("#cb38aa")
 GRAY = to_rgb("#767676")
-LIGHT_RED = to_rgb("#ff8a76")
-LIGHT_GREEN = to_rgb("#76bc63")
-LIGHT_BLUE = to_rgb("#91a7ff")
-LIGHT_VIOLET = to_rgb("#f187d3")
-LIGHT_GRAY = to_rgb("#ababab")
+LIGHT_PURPLE = to_rgb("#d95ca1")
+DARK_PURPLE = to_rgb("#9b5aa4")
+LIGHT_GREEN = to_rgb("#5abf95")
+DARK_GREEN = to_rgb("#3dae82")
 
 METRICS = [
     peppr.MonomerTMScore(),
@@ -66,16 +63,10 @@ def setup_pymol():
     pymol_interface.cmd.set("label_size", 30)
     pymol_interface.cmd.set("dash_gap", 0.3)
     pymol_interface.cmd.set("dash_width", 2.0)
-    pymol_interface.cmd.set_color("red", RED)
-    pymol_interface.cmd.set_color("green", GREEN)
-    pymol_interface.cmd.set_color("blue", BLUE)
-    pymol_interface.cmd.set_color("violet", VIOLET)
-    pymol_interface.cmd.set_color("gray", GRAY)
-    pymol_interface.cmd.set_color("lightred", LIGHT_RED)
+    pymol_interface.cmd.set_color("lightpurple", LIGHT_PURPLE)
+    pymol_interface.cmd.set_color("darkpurple", DARK_PURPLE)
     pymol_interface.cmd.set_color("lightgreen", LIGHT_GREEN)
-    pymol_interface.cmd.set_color("lightblue", LIGHT_BLUE)
-    pymol_interface.cmd.set_color("lightviolet", LIGHT_VIOLET)
-    pymol_interface.cmd.set_color("lightgray", LIGHT_GRAY)
+    pymol_interface.cmd.set_color("darkgreen", DARK_GREEN)
     pymol_interface.cmd.set_color("carbon", GRAY)
     pymol_interface.cmd.set_color("oxygen", RED)
     pymol_interface.cmd.set_color("nitrogen", BLUE)
@@ -105,9 +96,13 @@ def create_metric_plot(metrics, reference, pose, output_path, theme):
         subplot_kw=dict(axes_class=axisartist.Axes),
     )
 
-    score_ax.bar(list(score_results.keys()), list(score_results.values()), color=RED)
+    score_ax.bar(
+        list(score_results.keys()), list(score_results.values()), color=LIGHT_PURPLE
+    )
     distance_ax.bar(
-        list(distance_results.keys()), list(distance_results.values()), color=RED
+        list(distance_results.keys()),
+        list(distance_results.values()),
+        color=LIGHT_PURPLE,
     )
 
     for ax in [score_ax, distance_ax]:
@@ -145,10 +140,10 @@ def visualize_systems(reference, pose, output_path):
 
     peptide_mask = struc.filter_amino_acids(pose)
     pymol_pose.show_as("cartoon", peptide_mask)
-    pymol_pose.color("red", peptide_mask & (pose.chain_id == "0"))
-    pymol_pose.color("lightred", peptide_mask & (pose.chain_id == "1"))
+    pymol_pose.color("darkpurple", peptide_mask & (pose.chain_id == "0"))
+    pymol_pose.color("lightpurple", peptide_mask & (pose.chain_id == "1"))
     pymol_pose.show_as("sticks", ~peptide_mask)
-    pymol_pose.color("green", ~peptide_mask)
+    pymol_pose.color("darkgreen", ~peptide_mask)
     pymol_pose.orient()
 
     # Tweak the camera

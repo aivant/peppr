@@ -26,7 +26,7 @@ pepp'r documentation
             :width: 75%
             :alt: pepp'r
 
-        .. image:: /static/assets/general/logo_dark.svg
+        .. image:: /static/assets/general/logo.svg
             :class: only-dark, no-scaled-link
             :align: center
             :width: 75%
@@ -34,9 +34,7 @@ pepp'r documentation
 
         .. raw:: html
 
-            <h3 style="font-family:'Chelsea Market'">
-                It's a package for evaluation of predicted poses, right?
-            </h3>
+            <h3>It's a package for evaluation of predicted poses, right?</h3>
 
         Yes, indeed!
         It allows you to compute a variety of metrics on your structure predictions
