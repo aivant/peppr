@@ -99,15 +99,9 @@ jobs:
           pip install $WHL"[docs]"
       - name: Build documentation
         run: sphinx-build docs build/docs
-      - name: Compress documentation
-        run: |
-            cd build
-            zip -r ../dist/docs.zip docs
-            cd ..
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-pages-artifact@v3
         with:
-          name: documentation
-          path: dist//docs.zip
+          path: build/docs/
 
   publish-dist:
     name: Publish distribution to GitHub Releases and PyPI
@@ -117,10 +111,12 @@ jobs:
       - build
       - test
       - docs
-    runs-on: ubuntu-latest
     environment:
       name: publish
       url: https://pypi.org/p/peppr
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/download-artifact@v4
       with:
@@ -141,13 +137,23 @@ jobs:
       - build
       - test
       - docs
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
     runs-on: ubuntu-latest
     steps:
     - uses: actions/download-artifact@v4
       with:
-        name: documentation
+        name: github-pages
         path: dist
+    - name: Rename packaged docs
+      run: mv dist/artifact.tar dist/docs.tar
     - name: Upload to GitHub Releases
       uses: softprops/action-gh-release@v2.2.1
       with:
-        files: dist/docs.zip
+        files: dist/docs.tar
+    - name: Upload to GitHub Pages
+      uses: actions/deploy-pages@v4
