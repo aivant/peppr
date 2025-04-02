@@ -76,7 +76,7 @@ html_theme_options = {
     "pygment_light_style": "friendly",
     "logo": {
         "image_light": "static/assets/general/logo.svg",
-        "image_dark": "static/assets/general/logo_dark.svg",
+        "image_dark": "static/assets/general/logo.svg",
     },
     "icon_links": [
         {
