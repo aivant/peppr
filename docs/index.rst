@@ -46,9 +46,10 @@ pepp'r documentation
         - easy extension with custom metrics
         - a command line interface and a Python API
 
-        .. grid:: 3
+        .. grid:: 2
 
             .. grid-item::
+                :columns: 4
 
                 .. button-ref:: tutorial/index
                     :color: primary

@@ -1,5 +1,4 @@
 from pathlib import Path
-import biotite.interface.pymol as pymol_interface
 import biotite.structure as struc
 import biotite.structure.io.pdbx as pdbx
 import matplotlib
@@ -46,30 +45,6 @@ def setup_matplotlib(theme):
         plt.style.use(["dark_background"])
     matplotlib.rcParams["figure.dpi"] = 300
     matplotlib.rcParams["font.sans-serif"] = "Geologica"
-
-
-def setup_pymol():
-    # Set style of PyMOL images
-    pymol_interface.cmd.bg_color("white")
-    pymol_interface.cmd.set("depth_cue", 0)
-    pymol_interface.cmd.set("ray_shadows", 0)
-    pymol_interface.cmd.set("spec_reflect", 0)
-    pymol_interface.cmd.set("ray_trace_mode", 1)
-    pymol_interface.cmd.set("ray_trace_disco_factor", 1)
-    pymol_interface.cmd.set("cartoon_side_chain_helper", 1)
-    pymol_interface.cmd.set("valence", 0)
-    pymol_interface.cmd.set("cartoon_oval_length", 1.0)
-    pymol_interface.cmd.set("label_color", "black")
-    pymol_interface.cmd.set("label_size", 30)
-    pymol_interface.cmd.set("dash_gap", 0.3)
-    pymol_interface.cmd.set("dash_width", 2.0)
-    pymol_interface.cmd.set_color("lightpurple", LIGHT_PURPLE)
-    pymol_interface.cmd.set_color("darkpurple", DARK_PURPLE)
-    pymol_interface.cmd.set_color("lightgreen", LIGHT_GREEN)
-    pymol_interface.cmd.set_color("darkgreen", DARK_GREEN)
-    pymol_interface.cmd.set_color("carbon", GRAY)
-    pymol_interface.cmd.set_color("oxygen", RED)
-    pymol_interface.cmd.set_color("nitrogen", BLUE)
 
 
 def create_metric_plot(metrics, reference, pose, output_path, theme):
@@ -123,37 +98,6 @@ def create_metric_plot(metrics, reference, pose, output_path, theme):
     fig.savefig(output_path, transparent=True)
 
 
-def visualize_systems(reference, pose, output_path):
-    setup_pymol()
-
-    pymol_reference = pymol_interface.PyMOLObject.from_structure(
-        reference, delocalize_bonds=True
-    )
-    pymol_pose = pymol_interface.PyMOLObject.from_structure(pose, delocalize_bonds=True)
-
-    peptide_mask = struc.filter_amino_acids(pose)
-    pymol_reference.show_as("cartoon")
-    pymol_reference.show("sticks", ~peptide_mask)
-    pymol_reference.color("gray")
-    pymol_reference.set("stick_transparency", 0.5)
-    pymol_reference.set("cartoon_transparency", 0.5)
-
-    peptide_mask = struc.filter_amino_acids(pose)
-    pymol_pose.show_as("cartoon", peptide_mask)
-    pymol_pose.color("darkpurple", peptide_mask & (pose.chain_id == "0"))
-    pymol_pose.color("lightpurple", peptide_mask & (pose.chain_id == "1"))
-    pymol_pose.show_as("sticks", ~peptide_mask)
-    pymol_pose.color("darkgreen", ~peptide_mask)
-    pymol_pose.orient()
-
-    # Tweak the camera
-    pymol_interface.cmd.turn("x", 180)
-    pymol_interface.cmd.move("x", -8)
-    pymol_interface.cmd.move("z", 90)
-
-    pymol_interface.cmd.png(output_path.as_posix(), width=1000, height=700, ray=True)
-
-
 if __name__ == "__main__":
     showcase_dir = Path(__file__).parent / "showcase"
 
@@ -168,4 +112,3 @@ if __name__ == "__main__":
         create_metric_plot(
             METRICS, reference, pose, showcase_dir / f"metrics{suffix}.png", theme
         )
-        visualize_systems(reference, pose, showcase_dir / f"system{suffix}.png")
