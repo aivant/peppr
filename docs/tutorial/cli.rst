@@ -4,8 +4,8 @@ One way to use ``peppr`` to compute a single metric or run entire model evaluati
 via the command line interface.
 In ``peppr`` we call each input structure, which consists of a reference and one or more
 poses, a *system*.
-This tutorial uses *proteolysis targeting chimera* (PROTAC) complexes predicted by
-`Neo-1 <https://www.vant.ai/neo-1>`_ as systems to be evaluated
+This tutorial uses *proteolysis targeting chimera* (PROTAC) complexes predicted from the
+`PLINDER <https://github.com/plinder-org/plinder>`_ dataset as systems to be evaluated
 (download :download:`here </download/systems.zip>`) and assumes that they are located in
 a directory called ``$SYSTEMDIR``.
 

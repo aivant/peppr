@@ -30,8 +30,8 @@ for a more in-depth introduction on its capabilities.
 For the scope of this tutorial we will load our reference structures and predicted poses
 from CIF files.
 The files used in this tutorial are *proteolysis targeting chimera* (PROTAC) complexes
-predicted by `Neo-1 <https://www.vant.ai/neo-1>`_ and can be downloaded
-:download:`here </download/systems.zip>`.
+predicted from the `PLINDER <https://github.com/plinder-org/plinder>`_ dataset and can
+be downloaded :download:`here </download/systems.zip>`.
 As input structures for ``peppr`` may comprise any number of peptide and nucleotide
 chains, as well as small molecules, they are called *system* throughout this package.
 
