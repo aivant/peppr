@@ -15,7 +15,7 @@ Try
 
 |
 
-    It's a Package for Evaluation of predicted Poses, Right?
+    It's a Package for Evaluation of Predicted Poses, Right?
 
 |
 
