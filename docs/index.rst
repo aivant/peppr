@@ -34,7 +34,7 @@ pepp'r documentation
 
         .. raw:: html
 
-            <h3>It's a package for evaluation of predicted poses, right?</h3>
+            <h3>It's a <b>p</b>ackage for <b>e</b>valuation of <b>p</b>redicted <b>p</b>oses, <b>r</b>ight?</h3>
 
         Yes, indeed!
         It allows you to compute a variety of metrics on your structure predictions
