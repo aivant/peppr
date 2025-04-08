@@ -121,6 +121,7 @@ def test_tabulate(
         (peppr.MedianSelector(), "median"),
         (peppr.OracleSelector(), "oracle"),
         (peppr.TopSelector(2), "top2"),
+        (peppr.RandomSelector(2), "random2"),
     ],
 )
 def test_summarize(metrics, system_dir, tmp_path, selector, selector_name):

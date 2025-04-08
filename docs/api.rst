@@ -50,6 +50,7 @@ Selection of the desired metric result from multiple poses.
     MedianSelector
     OracleSelector
     TopSelector
+    RandomSelector
 
 Analysis functions
 ------------------

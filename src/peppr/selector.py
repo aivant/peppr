@@ -4,6 +4,7 @@ __all__ = [
     "MedianSelector",
     "OracleSelector",
     "TopSelector",
+    "RandomSelector",
 ]
 
 from abc import ABC, abstractmethod
