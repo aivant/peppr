@@ -25,3 +25,18 @@ def test_selectors(selector, expected_value):
     selected_value = selector.select(values, smaller_is_better=False)
 
     assert selected_value == expected_value
+
+
+def test_random_selector():
+    """
+    Check that the :class:`RandomSelector`, when ran multiple times, selects approximately the expected value for known
+    examples.
+    """
+    selector = peppr.RandomSelector(k=5)
+    values = np.linspace(0, 10, 10 + 1)
+
+    selected_values = [
+        selector.select(values, smaller_is_better=False) for _ in range(20)
+    ]
+
+    assert np.isclose(np.mean(selected_values), 5.0, rtol=0.5)
