@@ -129,3 +129,33 @@ class TopSelector(Selector):
             return np.nanmin(top_values)
         else:
             return np.nanmax(top_values)
+
+
+class RandomSelector(Selector):
+    """
+    Selector that returns the best value from `k` randomly chosen values.
+    Using this selector is equivalent to using the :class:`TopSelector` with
+    random confidence values.
+
+    Parameters
+    ----------
+    k : int
+        The best value is chosen from *k* randomly chosen predictions.
+    """
+
+    def __init__(self, k: int) -> None:
+        self._k = k
+
+    @property
+    def name(self) -> str:
+        return f"Random{self._k}"
+
+    def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
+        random_indices = np.random.choice(
+            range(len(values)), size=self._k, replace=False
+        )
+        top_values = values[random_indices]
+        if smaller_is_better:
+            return np.nanmin(top_values)
+        else:
+            return np.nanmax(top_values)
