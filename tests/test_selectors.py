@@ -32,7 +32,7 @@ def test_random_selector():
     Check that the :class:`RandomSelector`, when ran multiple times, selects approximately the expected value for known
     examples.
     """
-    selector = peppr.RandomSelector(k=5)
+    selector = peppr.Selector.RandomSelector(k=5)
     values = np.linspace(0, 10, 10 + 1)
 
     selected_values = [
