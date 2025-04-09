@@ -142,6 +142,9 @@ class RandomSelector(Selector):
     ----------
     k : int
         The best value is chosen from *k* randomly chosen predictions.
+    seed : int, optional
+        The seed for the random number generator.
+        Defaults to 42.
     """
 
     def __init__(self, k: int, seed: int = 42) -> None:
