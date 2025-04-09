@@ -144,15 +144,16 @@ class RandomSelector(Selector):
         The best value is chosen from *k* randomly chosen predictions.
     """
 
-    def __init__(self, k: int) -> None:
+    def __init__(self, k: int, seed: int = 42) -> None:
         self._k = k
+        self._rng = np.random.default_rng(seed)
 
     @property
     def name(self) -> str:
         return f"Random{self._k}"
 
     def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
-        random_indices = np.random.choice(
+        random_indices = self._rng.choice(
             range(len(values)), size=self._k, replace=False
         )
         top_values = values[random_indices]
