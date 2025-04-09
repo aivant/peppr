@@ -245,7 +245,7 @@ def _create_selector(selector_string: str) -> Selector:
 
     Parameters
     ----------
-    selector_string : {'mean', 'median', 'oracle' and 'top<n>'}
+    selector_string : {'mean', 'median', 'oracle', 'top<n>' and 'random<n>'}
         The string representation of the selector.
 
     Returns
@@ -261,6 +261,8 @@ def _create_selector(selector_string: str) -> Selector:
         return OracleSelector()
     elif selector_string.startswith("top"):
         return TopSelector(int(selector_string[3:]))
+    elif selector_string.startswith("random"):
+        return RandomSelector(int(selector_string[6:]))
     else:
         raise click.BadParameter(f"Selector '{selector_string}' is not supported")
 

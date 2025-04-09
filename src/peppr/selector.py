@@ -4,6 +4,7 @@ __all__ = [
     "MedianSelector",
     "OracleSelector",
     "TopSelector",
+    "RandomSelector",
 ]
 
 from abc import ABC, abstractmethod
@@ -125,6 +126,40 @@ class TopSelector(Selector):
 
     def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
         top_values = values[: self._k]
+        if smaller_is_better:
+            return np.nanmin(top_values)
+        else:
+            return np.nanmax(top_values)
+
+
+class RandomSelector(Selector):
+    """
+    Selector that returns the best value from `k` randomly chosen values.
+    Using this selector is equivalent to using the :class:`TopSelector` with
+    random confidence values.
+
+    Parameters
+    ----------
+    k : int
+        The best value is chosen from *k* randomly chosen predictions.
+    seed : int, optional
+        The seed for the random number generator.
+        Defaults to 42.
+    """
+
+    def __init__(self, k: int, seed: int = 42) -> None:
+        self._k = k
+        self._rng = np.random.default_rng(seed)
+
+    @property
+    def name(self) -> str:
+        return f"Random{self._k}"
+
+    def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
+        random_indices = self._rng.choice(
+            range(len(values)), size=self._k, replace=False
+        )
+        top_values = values[random_indices]
         if smaller_is_better:
             return np.nanmin(top_values)
         else:
