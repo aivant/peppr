@@ -267,3 +267,26 @@ def test_ligand_rmsd_with_no_contacts():
     # Assert that LigandRMSD is NaN after translation
     lrmsd = metric.evaluate(reference, pose)
     assert np.isnan(lrmsd)
+
+
+@pytest.mark.parametrize("metric", ALL_METRICS, ids=lambda metric: metric.name)
+def test_ligand_only_system(metric):
+    """
+    Check that metrics work correctly when given only ligand atoms.
+    This tests that metrics don't make assumptions about the presence of protein chains
+    that could break when working with ligand-only systems.
+    """
+    # Choose any system that is suitable for all metrics
+    reference, poses = assemble_predictions("7znt__2__1.F_1.G__1.J")
+    pose = poses[0]
+
+    # Keep only ligand atoms
+    reference = reference[reference.chain_id == "LIG0"]
+    pose = pose[pose.chain_id == "LIG0"]
+
+    # The metric should still work without raising an exception
+    value = metric.evaluate(reference, pose)
+
+    # For most metrics, we expect a valid numeric value or NaN
+    # (NaN is acceptable for metrics that can't handle the input)
+    assert np.isnan(value) or isinstance(value, (int, float))
