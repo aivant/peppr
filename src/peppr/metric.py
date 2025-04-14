@@ -275,6 +275,11 @@ class LDDTPLIScore(Metric):
         def lddt_pli(reference, pose):  # type: ignore[no-untyped-def]
             ligand_mask = reference.hetero
             polymer_mask = ~ligand_mask
+
+            if not polymer_mask.any():
+                # No protein present -> metric is undefined
+                return np.nan
+
             binding_site_contacts = np.unique(
                 get_contact_residues(
                     reference[polymer_mask], reference[ligand_mask], cutoff=4.0
