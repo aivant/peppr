@@ -26,7 +26,7 @@ def idealize_bonds(pose: struc.AtomArray) -> struc.AtomArray:
         The idealized structure.
     """
     # Generate an rdkit mol
-    mol = rdkit_interface.to_mol(pose)
+    mol = rdkit_interface.to_mol(pose, explicit_hydrogen=False)
     sanitize(mol)
 
     # Set a very high clash tolerance to effectively ignore clashes
