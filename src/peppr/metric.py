@@ -752,10 +752,7 @@ class BondAngleViolations(Metric):
         The tolerance in radians for acceptable deviation from ideal bond angles.
     """
 
-    def __init__(
-        self,
-        tolerance: float = np.deg2rad(15.0)
-    ) -> None:
+    def __init__(self, tolerance: float = np.deg2rad(15.0)) -> None:
         self._tolerance = tolerance
         super().__init__()
 

@@ -1,4 +1,8 @@
-__all__ = ["find_node_induced_subgraphs", "find_edge_induced_subgraphs", "graph_to_connected_triples"]
+__all__ = [
+    "find_node_induced_subgraphs",
+    "find_edge_induced_subgraphs",
+    "graph_to_connected_triples",
+]
 
 from typing import Any
 from collections import defaultdict
@@ -43,7 +47,9 @@ def find_node_induced_subgraphs(
     for source_to_target_nodes in gm.subgraph_isomorphisms_iter():
         source_nodes = source_to_target_nodes.keys()
         target_to_source_nodes = {v: k for k, v in source_to_target_nodes.items()}
-        matches[frozenset(source_nodes)].append((source_graph.subgraph(source_nodes), target_to_source_nodes))
+        matches[frozenset(source_nodes)].append(
+            (source_graph.subgraph(source_nodes), target_to_source_nodes)
+        )
 
     if one_isomorphism:
         out = [v[0] for v in matches.values()]
@@ -98,7 +104,9 @@ def find_edge_induced_subgraphs(
     matches = [
         x
         for subgraph in subgraphs
-        for x in find_node_induced_subgraphs(subgraph, target_graph, GraphMatcher, one_isomorphism)
+        for x in find_node_induced_subgraphs(
+            subgraph, target_graph, GraphMatcher, one_isomorphism
+        )
     ]
 
     return matches
