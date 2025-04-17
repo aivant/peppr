@@ -13,7 +13,7 @@ from networkx.algorithms import isomorphism
 def find_node_induced_subgraphs(
     source_graph: nx.Graph,
     target_graph: nx.Graph,
-    GraphMatcher: isomorphism.GraphMatcher = isomorphism.GraphMatcher,
+    graph_matcher_class: isomorphism.GraphMatcher = isomorphism.GraphMatcher,
     one_isomorphism: bool = True,
 ) -> list[tuple[nx.Graph, dict]]:
     """
@@ -27,7 +27,7 @@ def find_node_induced_subgraphs(
         The graph to search for subgraphs in
     target_graph : nx.Graph
         The graph pattern to match against
-    GraphMatcher : isomorphism.GraphMatcher, optional
+    graph_matcher_class : isomorphism.GraphMatcher, optional
         The graph matcher class to use for isomorphism checking
     one_isomorphism : bool, optional
         If True, return only one isomorphism per unique subgraph
@@ -39,7 +39,7 @@ def find_node_induced_subgraphs(
         subgraph of source_graph that is isomorphic to target_graph
     """
     # Instantiate the graph matcher object
-    gm = GraphMatcher(source_graph, target_graph)
+    gm = graph_matcher_class(source_graph, target_graph)
 
     # Collect all node-induced isomorphic subgraphs
     matches = defaultdict(list)
@@ -61,7 +61,7 @@ def find_node_induced_subgraphs(
 def find_edge_induced_subgraphs(
     source_graph: nx.Graph,
     target_graph: nx.Graph,
-    GraphMatcher: isomorphism.GraphMatcher = isomorphism.GraphMatcher,
+    graph_matcher_class: isomorphism.GraphMatcher = isomorphism.GraphMatcher,
     one_isomorphism: bool = True,
 ) -> list[tuple[nx.Graph, dict]]:
     """
@@ -75,7 +75,7 @@ def find_edge_induced_subgraphs(
         The graph to search for subgraphs in
     target_graph : nx.Graph
         The graph pattern to match against
-    GraphMatcher : isomorphism.GraphMatcher, optional
+    graph_matcher_class : isomorphism.GraphMatcher, optional
         The graph matcher class to use for isomorphism checking
     one_isomorphism : bool, optional
         If True, return only one isomorphism per unique subgraph
@@ -92,7 +92,7 @@ def find_edge_induced_subgraphs(
     matches = find_node_induced_subgraphs(
         source_graph=nx.line_graph(source_graph),
         target_graph=nx.line_graph(target_graph),
-        GraphMatcher=GraphMatcher,
+        graph_matcher_class=graph_matcher_class,
         one_isomorphism=one_isomorphism,
     )
 
@@ -104,14 +104,14 @@ def find_edge_induced_subgraphs(
         x
         for subgraph in subgraphs
         for x in find_node_induced_subgraphs(
-            subgraph, target_graph, GraphMatcher, one_isomorphism
+            subgraph, target_graph, graph_matcher_class, one_isomorphism
         )
     ]
 
     return matches
 
 
-def graph_to_connected_triples(graph: nx.Graph) -> list[list[Any]]:
+def graph_to_connected_triples(graph: nx.Graph) -> list[list[Any, Any, Any]]:
     """
     Given a graph, return a list of the node triples that are in
     all linear subgraphs with two edges (three nodes).
