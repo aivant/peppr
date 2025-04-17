@@ -21,7 +21,7 @@ def idealize_bonds(pose: struc.AtomArray) -> struc.AtomArray:
 
     Returns
     -------
-    pose_idealized : AtomArray
+    AtomArray
         The idealized structure.
     """
     # Generate an rdkit mol

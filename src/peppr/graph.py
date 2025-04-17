@@ -24,19 +24,19 @@ def find_node_induced_subgraphs(
     Parameters
     ----------
     source_graph : nx.Graph
-        The graph to search for subgraphs in
+        The graph to search for subgraphs in.
     target_graph : nx.Graph
-        The graph pattern to match against
+        The graph pattern to match against.
     graph_matcher_class : isomorphism.GraphMatcher, optional
-        The graph matcher class to use for isomorphism checking
+        The graph matcher class to use for isomorphism checking.
     one_isomorphism : bool, optional
-        If True, return only one isomorphism per unique subgraph
+        If True, return only one isomorphism per unique subgraph.
 
     Returns
     -------
     list[tuple[nx.Graph, dict]]
         List of tuples containing (subgraph, node mapping) where subgraph is a node-induced
-        subgraph of source_graph that is isomorphic to target_graph
+        subgraph of source_graph that is isomorphic to target_graph.
     """
     # Instantiate the graph matcher object
     gm = graph_matcher_class(source_graph, target_graph)
@@ -72,19 +72,19 @@ def find_edge_induced_subgraphs(
     Parameters
     ----------
     source_graph : nx.Graph
-        The graph to search for subgraphs in
+        The graph to search for subgraphs in.
     target_graph : nx.Graph
-        The graph pattern to match against
+        The graph pattern to match against.
     graph_matcher_class : isomorphism.GraphMatcher, optional
-        The graph matcher class to use for isomorphism checking
+        The graph matcher class to use for isomorphism checking.
     one_isomorphism : bool, optional
-        If True, return only one isomorphism per unique subgraph
+        If True, return only one isomorphism per unique subgraph.
 
     Returns
     -------
     list[tuple[nx.Graph, dict]]
         List of tuples containing (subgraph, node mapping) where subgraph is an edge-induced
-        subgraph of source_graph that is isomorphic to target_graph
+        subgraph of source_graph that is isomorphic to target_graph.
     """
     # Can't search directly in edge space first, because extra edges between
     # nodes may prevent a match
@@ -119,12 +119,12 @@ def graph_to_connected_triples(graph: nx.Graph) -> list[list[Any, Any, Any]]:
     Parameters
     ----------
     graph : nx.Graph
-        The input graph to find triples in
+        The input graph to find triples in.
 
     Returns
     -------
     list[list[Any]]
-        List of node triples that form linear subgraphs with two edges
+        List of node triples that form linear subgraphs with two edges.
     """
     # Make the subgraph to find
     triple_pattern = nx.path_graph(3)
