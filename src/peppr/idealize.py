@@ -29,7 +29,8 @@ def idealize_bonds(pose: struc.AtomArray) -> struc.AtomArray:
     mol = rdkit_interface.to_mol(pose, explicit_hydrogen=False)
     sanitize(mol)
 
-    # Set a very high clash tolerance to effectively ignore clashes
+    # Set `nonBondedThresh` very high and `ignoreInterfragInteractions=True`
+    # to effectively ignore clashes
     AllChem.MMFFOptimizeMolecule(
         mol=mol,
         mmffVariant="MMFF94",
