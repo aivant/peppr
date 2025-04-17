@@ -799,16 +799,8 @@ class BondAngleViolations(Metric):
         # Check the angle of all bonded triples
         G = reference.bonds.as_graph()
         bonded_triples = np.array(graph_to_connected_triples(G))
-        ref_angles = struc.angle(
-            reference.coord[bonded_triples[:, 0]],
-            reference.coord[bonded_triples[:, 1]],
-            reference.coord[bonded_triples[:, 2]],
-        )
-        pose_angles = struc.angle(
-            pose.coord[bonded_triples[:, 0]],
-            pose.coord[bonded_triples[:, 1]],
-            pose.coord[bonded_triples[:, 2]],
-        )
+        ref_angles = struc.index_angle(reference, bonded_triples)
+        pose_angles = struc.index_angle(pose, bonded_triples)
         angle_diffs = np.abs(ref_angles - pose_angles)
         valid_angles = (angle_diffs <= self._tolerance).sum()
         total_checked = len(bonded_triples)
