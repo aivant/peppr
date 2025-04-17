@@ -751,6 +751,7 @@ class BondAngleViolations(Metric):
         The tolerance in degrees for acceptable deviation from ideal bond angles.
         Default is 20 degrees.
     """
+
     def __init__(
         self,
         tolerance: float = 20.0,
