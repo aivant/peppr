@@ -742,7 +742,8 @@ class BondLengthViolations(Metric):
 
 class BondAngleViolations(Metric):
     """
-    Check for unusual bond lengths in the structure by comparing against reference values.
+    Check for unusual bond angles in the structure by comparing against
+    idealized bond geometry.
     Returns the percentage of bonds that are within acceptable ranges.
 
     Parameters
