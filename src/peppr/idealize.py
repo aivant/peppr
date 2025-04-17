@@ -31,12 +31,12 @@ def idealize_bonds(pose: struc.AtomArray) -> struc.AtomArray:
 
     # Set a very high clash tolerance to effectively ignore clashes
     AllChem.MMFFOptimizeMolecule(
-        mol,  # mol
-        "MMFF94",  # mmffVariant
-        50,  # maxIters
-        100.0,  # nonBondedThresh
-        -1,  # confId
-        True,  # ignoreInterfragInteractions
+        mol=mol,
+        mmffVariant="MMFF94",
+        maxIters=50,
+        nonBondedThresh=100.0,
+        confId=-1,
+        ignoreInterfragInteractions=True,
     )
 
     # Convert the optimized reference back to an AtomArray
