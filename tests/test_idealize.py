@@ -3,7 +3,6 @@ import biotite.structure as struc
 from peppr.idealize import idealize_bonds
 
 
-# define a "corrupted" pose
 def make_corrupted_pose() -> struc.AtomArray:
     """
     Makes a CO2 molecule clashing with a cyanide. Both
