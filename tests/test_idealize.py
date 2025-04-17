@@ -1,5 +1,5 @@
-import pytest
 import biotite.structure as struc
+import pytest
 from peppr.idealize import idealize_bonds
 
 
@@ -29,7 +29,7 @@ def corrupted_pose() -> struc.AtomArray:
 @pytest.fixture
 def clashing_pose() -> struc.AtomArray:
     """
-    Make a CO2 molecule and with cyanide with their carbons overlapping.
+    Make a CO2 and cyanide molecule with their carbons overlapping.
     The bond lengths and angles are realistic.
     """
     pose = struc.AtomArray(5)

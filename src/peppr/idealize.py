@@ -3,7 +3,6 @@ __all__ = ["idealize_bonds"]
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 from rdkit.Chem import AllChem
-
 from peppr.sanitize import sanitize
 
 

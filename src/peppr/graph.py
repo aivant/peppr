@@ -4,9 +4,8 @@ __all__ = [
     "graph_to_connected_triples",
 ]
 
-from typing import Any
 from collections import defaultdict
-
+from typing import Any
 import networkx as nx
 from networkx.algorithms import isomorphism
 

@@ -36,8 +36,8 @@ from peppr.dockq import (
     lrmsd,
     pocket_aligned_lrmsd,
 )
-from peppr.idealize import idealize_bonds
 from peppr.graph import graph_to_connected_triples
+from peppr.idealize import idealize_bonds
 
 
 class Metric(ABC):
