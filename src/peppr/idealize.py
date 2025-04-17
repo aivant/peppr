@@ -1,0 +1,45 @@
+__all__ = ["idealize_bonds"]
+
+import biotite.interface.rdkit as rdkit_interface
+import biotite.structure as struc
+from rdkit.Chem import AllChem
+
+from peppr.sanitize import sanitize
+
+
+def idealize_bonds(pose: struc.AtomArray) -> struc.AtomArray:
+    """
+    Idealize the bonds of a pose.
+
+    This function uses RDKit's MMFF94 force field to idealize the bond
+    lengths and angles of a pose. It is intended to make ideal reference
+    bond lengths and angles for a pose only. It ignores clashes!
+
+    Parameters
+    ----------
+    pose : AtomArray
+        The structure to idealize.
+
+    Returns
+    -------
+    pose_idealized : AtomArray
+        The idealized structure.
+    """
+    # Generate an rdkit mol
+    mol = rdkit_interface.to_mol(pose)
+    sanitize(mol)
+
+    # Set a very high clash tolerance to effectively ignore clashes
+    AllChem.MMFFOptimizeMolecule(
+        mol,  # mol
+        'MMFF94',  # mmffVariant
+        50,  # maxIters
+        100.0,  # nonBondedThresh
+        -1,  # confId
+        True  # ignoreInterfragInteractions
+    )
+
+    # Convert the optimized reference back to an AtomArray
+    pose_idealized = rdkit_interface.from_mol(mol, add_hydrogen=False)[0]
+
+    return pose_idealized

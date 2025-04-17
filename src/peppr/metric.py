@@ -14,6 +14,7 @@ __all__ = [
     "PocketAlignedLigandRMSD",
     "BiSyRMSD",
     "BondLengthViolations",
+    "BondAngleViolations",
     "ClashCount",
 ]
 
@@ -35,6 +36,8 @@ from peppr.dockq import (
     lrmsd,
     pocket_aligned_lrmsd,
 )
+from peppr.idealize import idealize_bonds
+from peppr.graph import graph_to_connected_triples
 
 
 class Metric(ABC):
@@ -732,6 +735,87 @@ class BondLengthViolations(Metric):
             return np.nan
 
         return 1 - (valid_bonds / total_checked)
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+
+class BondAngleViolations(Metric):
+    """
+    Check for unusual bond lengths in the structure by comparing against reference values.
+    Returns the percentage of bonds that are within acceptable ranges.
+
+    Parameters
+    ----------
+    tolerance : float, optional
+        The tolerance in degrees for acceptable deviation from ideal bond angles.
+        Default is 20 degrees.
+    """
+    def __init__(
+        self,
+        tolerance: float = 20.0,
+    ) -> None:
+        self._tolerance = tolerance * np.pi / 180.0
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "Bond-angle-violation"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        return OrderedDict(
+            [
+                ("poor", 0.0),
+                ("acceptable", 0.9),
+                ("good", 0.95),
+                ("excellent", 0.99),
+            ]
+        )
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """
+        Calculate the percentage of bonds that are outside acceptable ranges.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            Not used in this metric as we compare against ideal bond angles.
+        pose : AtomArray
+            The structure to evaluate.
+
+        Returns
+        -------
+        float
+            Percentage of bonds outside acceptable ranges (0.0 to 1.0).
+        """
+        if pose.bonds is None:
+            return np.nan
+
+        # Idealize the pose local geometry to make the reference
+        reference = idealize_bonds(pose)
+
+        # Check the angle of all bonded triples
+        G = reference.bonds.as_graph()
+        bonded_triples = np.array(graph_to_connected_triples(G))
+        ref_angles = struc.angle(
+            reference.coord[bonded_triples[:, 0]],
+            reference.coord[bonded_triples[:, 1]],
+            reference.coord[bonded_triples[:, 2]],
+        )
+        pose_angles = struc.angle(
+            pose.coord[bonded_triples[:, 0]],
+            pose.coord[bonded_triples[:, 1]],
+            pose.coord[bonded_triples[:, 2]],
+        )
+        angle_diffs = np.abs(ref_angles - pose_angles)
+        valid_angles = (angle_diffs <= self._tolerance).sum()
+        total_checked = len(bonded_triples)
+
+        if total_checked == 0:
+            return np.nan
+
+        return 1 - (valid_angles / total_checked)
 
     def smaller_is_better(self) -> bool:
         return True
