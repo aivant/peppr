@@ -2,7 +2,7 @@ __all__ = ["idealize_bonds"]
 
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
-from rdkit.Chem import AllChem
+from rdkit.Chem.rdForceFieldHelpers import MMFFOptimizeMolecule
 from peppr.sanitize import sanitize
 
 
@@ -30,7 +30,7 @@ def idealize_bonds(pose: struc.AtomArray) -> struc.AtomArray:
 
     # Set `nonBondedThresh` very high and `ignoreInterfragInteractions=True`
     # to effectively ignore clashes
-    AllChem.MMFFOptimizeMolecule(
+    MMFFOptimizeMolecule(
         mol=mol,
         mmffVariant="MMFF94",
         maxIters=50,
