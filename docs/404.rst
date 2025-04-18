@@ -1,0 +1,34 @@
+:orphan:
+:html_theme.sidebar_secondary.remove:
+
+.. raw:: html
+
+    <style>
+        .bd-main .bd-content .bd-article-container {
+            text-align: center;
+        }
+    </style>
+
+.. image:: /static/assets/general/icon_404.svg
+    :class: only-light, no-scaled-link
+    :width: 25%
+    :align: center
+
+.. image:: /static/assets/general/icon_404.svg
+    :class: only-dark, no-scaled-link
+    :width: 25%
+    :align: center
+
+|
+|
+
+404 - Pocket not found
+======================
+
+This page does not exist (anymore).
+
+.. button-link:: https://peppr.vant.ai/
+    :color: primary
+    :shadow:
+
+    Dock to homepage
