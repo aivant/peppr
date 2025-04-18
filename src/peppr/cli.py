@@ -31,6 +31,7 @@ _METRICS = {
     "pocket-lrmsd": PocketAlignedLigandRMSD(),
     "bisy-rmsd": BiSyRMSD(2.0),
     "bond-length-violations": BondLengthViolations(),
+    "bond-angle-violations": BondAngleViolations(),
     "clash-count": ClashCount(),
 }
 
