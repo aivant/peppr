@@ -3,6 +3,8 @@ from .clashes import *
 from .common import *
 from .dockq import *
 from .evaluator import *
+from .graph import *
+from .idealize import *
 from .match import *
 from .metric import *
 from .sanitize import *
