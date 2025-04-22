@@ -74,7 +74,10 @@ def test_tabulate(
     table_path = tmp_path / "table.csv"
 
     runner = CliRunner()
-    runner.invoke(create, [evaluator_path.as_posix()] + metrics)
+
+    result = runner.invoke(create, ["--strict", evaluator_path.as_posix()] + metrics)
+    if result.exception:
+        raise result.exception
 
     if use_batch:
         reference_pattern = f"{system_dir.as_posix()}/references/*.bcif"
@@ -82,9 +85,11 @@ def test_tabulate(
             pose_pattern = f"{system_dir.as_posix()}/poses/*"
         else:
             pose_pattern = f"{system_dir.as_posix()}/poses/*/pose_0.bcif"
-        runner.invoke(
+        result = runner.invoke(
             evaluate_batch, [evaluator_path.as_posix(), reference_pattern, pose_pattern]
         )
+        if result.exception:
+            raise result.exception
     else:
         for i in range(N_SYSTEMS):
             reference_path = (system_dir / "references" / f"system_{i}.bcif").as_posix()
@@ -97,9 +102,11 @@ def test_tabulate(
                 pose_paths = [
                     (system_dir / "poses" / f"system_{i}" / "pose_0.bcif").as_posix()
                 ]
-            runner.invoke(
+            result = runner.invoke(
                 evaluate, [evaluator_path.as_posix(), reference_path] + pose_paths
             )
+            if result.exception:
+                raise result.exception
 
     tabulate_args = [evaluator_path.as_posix(), table_path.as_posix()]
     if use_multi_pose:
@@ -134,16 +141,22 @@ def test_summarize(metrics, system_dir, tmp_path, selector, selector_name):
     summary_path = tmp_path / "summary.json"
 
     runner = CliRunner()
-    runner.invoke(create, [evaluator_path.as_posix()] + metrics)
+
+    result = runner.invoke(create, ["--strict", evaluator_path.as_posix()] + metrics)
+    if result.exception:
+        raise result.exception
+
     reference_pattern = f"{system_dir.as_posix()}/references/*.bcif"
     pose_pattern = f"{system_dir.as_posix()}/poses/*"
-    runner.invoke(
+    result = runner.invoke(
         evaluate_batch, [evaluator_path.as_posix(), reference_pattern, pose_pattern]
     )
+    if result.exception:
+        raise result.exception
+
     result = runner.invoke(
         summarize, [evaluator_path.as_posix(), summary_path.as_posix(), selector_name]
     )
-
     if result.exception:
         raise result.exception
     with open(summary_path) as f:
