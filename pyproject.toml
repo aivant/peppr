@@ -4,12 +4,12 @@ requires-python = ">=3.11"
 description = "It's a package for evaluation of predicted poses, right?"
 readme = "README.rst"
 authors = [{name = "The pepp'r contributors"}]
-license = {"file" = "LICENSE.txt"}
+license = "MIT"
+license-files = ["LICENSE.txt"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: BSD License",
     "Natural Language :: English",
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS",
