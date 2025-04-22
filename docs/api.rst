@@ -17,6 +17,7 @@ Metrics
 The metrics for pose evaluation.
 
 .. autosummary::
+    :template: detailed_class.rst
     :toctree: apidoc
     :caption: Metrics
 
@@ -42,6 +43,7 @@ Selectors
 Selection of the desired metric result from multiple poses.
 
 .. autosummary::
+    :template: detailed_class.rst
     :toctree: apidoc
     :caption: Selectors
 

@@ -85,13 +85,28 @@ and returns a scalar value.
 
     print(lddt_metric.evaluate(ref, pose))
 
+Note that :meth:`Metric.evaluate()` requires that the reference and pose have matching
+atoms, i.e. ``ref[i]`` and ``pose[i]`` should point to corresponding atoms.
+If this is not the case, you can use :func:`find_matching_atoms()` to get indices that
+bring the atoms into the correct order.
+
+.. jupyter-execute::
+
+    ref_indices, pose_indices = peppr.find_matching_atoms(ref, pose)
+    ref = ref[ref_indices]
+    pose = pose[pose_indices]
+
 Some metrics may not be defined for a given system.
-For example, if like in the current system there is no protein-protein interface,
-the *interface RMSD* (iRMSD) is undefined.
+For example, if we remove the second protein chain from the current system, the
+*interface RMSD* (iRMSD) is undefined.
 In such cases, :meth:`Metric.evaluate()` returns *NaN*.
 
 .. jupyter-execute::
 
+    # Remove one protein chain
+    mask = ref.chain_id != "1"
+    ref = ref[mask]
+    pose = pose[mask]
     irmsd_metric = peppr.InterfaceRMSD()
     print(irmsd_metric.evaluate(ref, pose))
 
