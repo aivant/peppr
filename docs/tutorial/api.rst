@@ -88,7 +88,7 @@ and returns a scalar value.
 Note that :meth:`Metric.evaluate()` requires that the reference and pose have matching
 atoms, i.e. ``ref[i]`` and ``pose[i]`` should point to corresponding atoms.
 If this is not the case, you can use :func:`find_matching_atoms()` to get indices that
-brings the atoms into the correct order.
+bring the atoms into the correct order.
 
 .. jupyter-execute::
 
