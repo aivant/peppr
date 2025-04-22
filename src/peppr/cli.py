@@ -45,9 +45,33 @@ def cli() -> None:
 
 
 @cli.command()
+@click.option(
+    "--min-identity",
+    "-i",
+    type=click.FloatRange(0, 1, min_open=True, max_open=True),
+    default=0.95,
+    help=(
+        "The minimum sequence identity between two polymer chains "
+        "to be considered the same entity"
+    ),
+)
+@click.option(
+    "--strict",
+    "-s",
+    type=bool,
+    is_flag=True,
+    help=(
+        "Exceptions during evaluation of any system lead to the program termination. "
+    ),
+)
 @click.argument("EVALUATOR", type=click.File("wb", lazy=True))
 @click.argument("METRIC", type=click.Choice(_METRICS.keys()), nargs=-1, required=True)
-def create(evaluator: click.File, metric: tuple[str, ...]) -> None:
+def create(
+    evaluator: click.File,
+    metric: tuple[str, ...],
+    min_identity: float | None,
+    strict: bool,
+) -> None:
     """
     Initialize a new peppr evaluation.
 
@@ -56,7 +80,9 @@ def create(evaluator: click.File, metric: tuple[str, ...]) -> None:
     The metrics that should be computed are given by the METRIC arguments.
     """
     metrics = [_METRICS[m] for m in metric]
-    ev = Evaluator(metrics, tolerate_exceptions=True)
+    ev = Evaluator(
+        metrics, tolerate_exceptions=not strict, min_sequence_identity=min_identity
+    )
     _evaluator_to_file(evaluator, ev)
 
 
