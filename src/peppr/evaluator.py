@@ -4,12 +4,13 @@ import copy
 import itertools
 import warnings
 from collections.abc import Iterable, Mapping
+from enum import Enum
 from typing import Iterator, Sequence
 import biotite.structure as struc
 import numpy as np
 import pandas as pd
 from peppr.common import standardize
-from peppr.match import find_matching_atoms
+from peppr.match import find_all_matches, find_optimal_match
 from peppr.metric import Metric
 from peppr.selector import Selector
 
@@ -45,6 +46,12 @@ class Evaluator(Mapping):
         The metrics to evaluate the poses against.
         These will make up the columns of the resulting dataframe from
         :meth:`tabulate_metrics()`.
+    match_method : MatchMethod, optional
+        The strategy to use for finding atom matches between the reference and pose.
+        This can be used to trade off speed and accuracy.
+    max_matches : int, optional
+        The maximum number of atom matches to try, if the `match_method` is set to
+        ``EXHAUSTIVE`` or ``INDIVIDUAL``.
     tolerate_exceptions : bool, optional
         If set to true, exceptions during :class:`Metric.evaluate()` are not propagated.
         Instead a warning is raised and the result is set to ``None``.
@@ -59,13 +66,47 @@ class Evaluator(Mapping):
         The IDs of the systems that were fed into the evaluator.
     """
 
+    class MatchMethod(Enum):
+        """
+        Method for finding atom matches between the fed reference and pose.
+        These methods represent a tradeoff between speed and accuracy.
+
+        - ``HEURISTIC``: Use a fast heuristic [1]_ that matches the reference and pose
+          by minimizing the RMSD between the centroids of each chain.
+          This method is fast and scales linearly with the number of chains, but
+          it is not guaranteed to find the optimal match in all cases, especially
+          when the pose and reference are quite distant from each other.
+        - ``EXHAUSTIVE``: Exhaustively iterate through all valid atom mappings
+          between the reference and pose and select the one that gives the lowest
+          all-atom RMSD.
+          This method is slower and prone to combinatorial explosion, but it finds
+          better matches in edge cases.
+        - ``INDIVIDUAL``: Like ``EXHAUSTIVE``, but instead of using the RMSD as
+          criterion for optimization, each individual :class:`Metric` is used.
+          As this requires exhaustive iteration over all mappings and computing the
+          each metric for all of them, this method is slower than ``EXHAUSTIVE``.
+          However, it guarantees to find the optimal match for each metric.
+
+        References
+        ----------
+        .. [1] *Protein complex prediction with AlphaFold-Multimer*, Section 7.3, https://doi.org/10.1101/2021.10.04.463034
+        """
+
+        HEURISTIC = "heuristic"
+        EXHAUSTIVE = "exhaustive"
+        INDIVIDUAL = "individual"
+
     def __init__(
         self,
         metrics: Iterable[Metric],
+        match_method: MatchMethod = MatchMethod.HEURISTIC,
+        max_matches: int | None = None,
         tolerate_exceptions: bool = False,
         min_sequence_identity: float = 0.95,
     ):
         self._metrics = tuple(metrics)
+        self._match_method = match_method
+        self._max_matches = max_matches
         self._results: list[list[np.ndarray]] = [[] for _ in range(len(metrics))]
         self._ids: list[str] = []
         self._tolerate_exceptions = tolerate_exceptions
@@ -155,8 +196,8 @@ class Evaluator(Mapping):
           Conversely, chains where the ``hetero`` annotation is ``False`` is always
           interpreted as protein or nucleic acid chain.
 
-        The optimal chain mapping and atom mapping in symmetric small molecules
-        is handled automatically.
+        The optimal atom matching is handled automatically based on the
+        :class:`MatchMethod`.
         """
         reference = standardize(reference)
         if isinstance(poses, struc.AtomArray):
@@ -168,48 +209,29 @@ class Evaluator(Mapping):
         if len(poses) == 0:
             raise ValueError("No poses provided")
 
-        result_for_system = np.full((len(self._metrics), len(poses)), np.nan)
-        for j, pose in enumerate(poses):
-            try:
-                reference_order, pose_order = find_matching_atoms(
-                    reference, pose, min_sequence_identity=self._min_sequence_identity
-                )
-                matched_reference = reference[reference_order]
-                matched_pose = pose[pose_order]
-            except Exception as e:
-                if self._tolerate_exceptions:
-                    warnings.warn(
-                        f"Failed to match reference and pose in system '{system_id}': {e}",
-                        MatchWarning,
-                    )
-                    continue
-                else:
-                    raise
-            # Sanity check if something went wrong in the matching
-            if not np.array_equal(matched_reference.element, matched_pose.element):
-                if self._tolerate_exceptions:
-                    warnings.warn(
-                        f"'{system_id}' poses could not be matched to reference",
-                        EvaluationWarning,
-                    )
-                else:
-                    raise ValueError(
-                        f"'{system_id}' poses could not be matched to reference"
-                    )
+        if self._match_method in (
+            Evaluator.MatchMethod.HEURISTIC,
+            Evaluator.MatchMethod.EXHAUSTIVE,
+        ):
+            use_heuristic = self._match_method == Evaluator.MatchMethod.HEURISTIC
+            result_for_system = np.stack(
+                [
+                    self._evaluate_using_rmsd(system_id, reference, pose, use_heuristic)
+                    for pose in poses
+                ],
+                axis=-1,
+            )
+        elif self._match_method == Evaluator.MatchMethod.INDIVIDUAL:
+            result_for_system = np.stack(
+                [
+                    self._evaluate_using_each_metric(system_id, reference, pose)
+                    for pose in poses
+                ],
+                axis=-1,
+            )
+        else:
+            raise ValueError(f"Unknown match strategy: {self._match_method}")
 
-            for i, metric in enumerate(self._metrics):
-                try:
-                    result_for_system[i, j] = metric.evaluate(
-                        matched_reference, matched_pose
-                    )
-                except Exception as e:
-                    if self._tolerate_exceptions:
-                        warnings.warn(
-                            f"Failed to evaluate {metric.name} on '{system_id}': {e}",
-                            EvaluationWarning,
-                        )
-                    else:
-                        raise
         for i, result in enumerate(result_for_system):
             self._results[i].append(result)
         self._ids.append(system_id)
@@ -367,6 +389,169 @@ class Evaluator(Mapping):
                 output_columns[column_name] = function(values).item()  # type: ignore[operator]
         return output_columns
 
+    def __getitem__(self, metric_name: str) -> list[np.ndarray]:
+        return self._results[self._metrics.index(metric_name)]
+
+    def __iter__(self) -> Iterator[list[np.ndarray]]:
+        return iter(self._results)
+
+    def __len__(self) -> int:
+        return len(self._results)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Evaluator):
+            return False
+        if len(self._metrics) != len(other._metrics):
+            return False
+        for metric, ref_metric in zip(self._metrics, other._metrics):
+            if metric.name != ref_metric.name:
+                return False
+        if self._tolerate_exceptions != other._tolerate_exceptions:
+            return False
+        if self._min_sequence_identity != other._min_sequence_identity:
+            return False
+        return True
+
+    def _evaluate_using_rmsd(
+        self,
+        system_id: str,
+        reference: struc.AtomArray,
+        pose: struc.AtomArray,
+        use_heuristic: bool,
+    ) -> np.ndarray:
+        """
+        Run the metrics on the given system using matching that aims to minimize the
+        RMSD between the reference and pose.
+        """
+        results = np.full(len(self._metrics), np.nan)
+
+        try:
+            reference_order, pose_order = find_optimal_match(
+                reference,
+                pose,
+                min_sequence_identity=self._min_sequence_identity,
+                use_heuristic=use_heuristic,
+                max_matches=self._max_matches,
+            )
+            matched_reference = reference[reference_order]
+            matched_pose = pose[pose_order]
+        except Exception as e:
+            self._raise_or_warn(
+                e,
+                MatchWarning(
+                    f"Failed to match reference and pose in system '{system_id}': {e}"
+                ),
+            )
+        # Sanity check if something went wrong in the matching
+        if not np.array_equal(matched_reference.element, matched_pose.element):
+            self._raise_or_warn(
+                ValueError(f"'{system_id}' poses could not be matched to reference"),
+                MatchWarning,
+            )
+
+        for i, metric in enumerate(self._metrics):
+            try:
+                results[i] = metric.evaluate(matched_reference, matched_pose)
+            except Exception as e:
+                self._raise_or_warn(
+                    e,
+                    EvaluationWarning(
+                        f"Failed to evaluate {metric.name} on '{system_id}': {e}"
+                    ),
+                )
+        return results
+
+    def _evaluate_using_each_metric(
+        self, system_id: str, reference: struc.AtomArray, pose: struc.AtomArray
+    ) -> np.ndarray:
+        """
+        Run the metrics on the given system using a separate matching for each metric,
+        that specifically optimizes the given metric.
+        """
+
+        class _FindAllMatchesError(Exception):
+            """
+            An exception class to be able to specifically catch exceptions in the
+            loop head calling `find_all_matches()`.
+
+            Parameters
+            ----------
+            wrapped_exception : Exception
+                The actual exception raised by `find_all_matches()`.
+            """
+
+            def __init__(self, wrapped_exception):  # type: ignore[no-untyped-def]
+                self.wrapped_exception = wrapped_exception
+
+        def _find_all_matches(*args, **kwargs):  # type: ignore[no-untyped-def]
+            try:
+                for e in find_all_matches(*args, **kwargs):
+                    yield e
+            except Exception as e:
+                raise _FindAllMatchesError(e)
+
+        results = np.full(len(self._metrics), np.nan)
+
+        for i, metric in enumerate(self._metrics):
+            try:
+                best_result = np.inf if metric.smaller_is_better() else -np.inf
+                for it, (reference_order, pose_order) in enumerate(
+                    _find_all_matches(
+                        reference,
+                        pose,
+                        min_sequence_identity=self._min_sequence_identity,
+                    )
+                ):
+                    if self._max_matches is not None and it >= self._max_matches:
+                        break
+                    matched_reference = reference[reference_order]
+                    matched_pose = pose[pose_order]
+                    # Sanity check if something went wrong in the matching
+                    if not np.array_equal(
+                        matched_reference.element, matched_pose.element
+                    ):
+                        self._raise_or_warn(
+                            ValueError(
+                                f"'{system_id}' poses could not be matched to reference"
+                            ),
+                            MatchWarning,
+                        )
+                        best_result = np.nan
+                        break
+                    try:
+                        result = metric.evaluate(matched_reference, matched_pose)
+                    except Exception as e:
+                        self._raise_or_warn(
+                            e,
+                            EvaluationWarning(
+                                f"Failed to evaluate {metric.name} on '{system_id}': "
+                                f"{e}"
+                            ),
+                        )
+                        best_result = np.nan
+                        break
+                    if metric.smaller_is_better():
+                        if result < best_result:
+                            best_result = result
+                    else:
+                        if result > best_result:
+                            best_result = result
+
+            except _FindAllMatchesError as e:
+                self._raise_or_warn(
+                    e.wrapped_exception,
+                    MatchWarning(
+                        f"Failed to match reference and pose in system '{system_id}': "
+                        f"{e}"
+                    ),
+                )
+                best_result = np.nan
+
+            if np.isfinite(best_result):
+                results[i] = best_result
+
+        return results
+
     def _tabulate_metrics(
         self, selectors: Iterable[Selector] | None = None
     ) -> dict[tuple[Metric, Selector | None], np.ndarray]:
@@ -398,25 +583,26 @@ class Evaluator(Mapping):
                     columns[metric, selector] = condensed_values  # type: ignore[assignment]
         return columns
 
-    def __getitem__(self, metric_name: str) -> list[np.ndarray]:
-        return self._results[self._metrics.index(metric_name)]
+    def _raise_or_warn(
+        self, exception: Exception, alternative_warning: Warning | type[Warning]
+    ) -> None:
+        """
+        Raise the given exception, if ``tolerate_exceptions`` is set to ``False``,
+        or raise a warning otherwise.
 
-    def __iter__(self) -> Iterator[list[np.ndarray]]:
-        return iter(self._results)
-
-    def __len__(self) -> int:
-        return len(self._results)
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Evaluator):
-            return False
-        if len(self._metrics) != len(other._metrics):
-            return False
-        for metric, ref_metric in zip(self._metrics, other._metrics):
-            if metric.name != ref_metric.name:
-                return False
-        if self._tolerate_exceptions != other._tolerate_exceptions:
-            return False
-        if self._min_sequence_identity != other._min_sequence_identity:
-            return False
-        return True
+        Parameters
+        ----------
+        exception : Exception
+            The exception to raise.
+        alternative_warning : Warning or type[Warning]
+            The warning to raise if ``tolerate_exceptions`` is set to ``False``.
+            If only :class:`Warning` type is given instead of an instance, the warning
+            message is taken from the `exception`.
+        """
+        if self._tolerate_exceptions:
+            if isinstance(alternative_warning, type):
+                warnings.warn(str(exception), alternative_warning)
+            else:
+                warnings.warn(alternative_warning)
+        else:
+            raise exception

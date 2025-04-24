@@ -87,12 +87,12 @@ and returns a scalar value.
 
 Note that :meth:`Metric.evaluate()` requires that the reference and pose have matching
 atoms, i.e. ``ref[i]`` and ``pose[i]`` should point to corresponding atoms.
-If this is not the case, you can use :func:`find_matching_atoms()` to get indices that
+If this is not the case, you can use :func:`find_optimal_match()` to get indices that
 bring the atoms into the correct order.
 
 .. jupyter-execute::
 
-    ref_indices, pose_indices = peppr.find_matching_atoms(ref, pose)
+    ref_indices, pose_indices = peppr.find_optimal_match(ref, pose)
     ref = ref[ref_indices]
     pose = pose[pose_indices]
 
@@ -234,6 +234,42 @@ that :class:`Selector`.
 .. jupyter-execute::
 
     evaluator.tabulate_metrics(selectors=[peppr.TopSelector(3), peppr.MedianSelector()])
+
+More speed or higher accuracy?
+------------------------------
+As brought up above, the :class:`Evaluator` needs to match common atoms between the
+reference and pose, before they are passed to the individual metrics.
+However, this is easier said than done, as the structure might contain symmetries due
+to multiple copies of the same molecule (e.g. homomeric complexes) or due to equivalent
+atoms within the same molecule (e.g. the two oxygen atoms of a carboxyl group).
+Each of these symmetries result in multiple possible atom mappings:
+For example in a homodimer, does chain ``A``  in the pose map to chain ``A`` in the
+reference or is the mapping to the equivalent chain ``B`` more optimal?
+To solve this problem the :class:`Evaluator` by default uses a heuristic method
+that aims to find a mapping that minimizes the *RMSD* between the reference and pose.
+This method is fast, scales well for large symmetric complexes and most often finds
+the best answer.
+However, as it is the nature of a heuristic, there are edge cases where the found
+mapping is not optimal.
+Furthermore, an atom mapping that optimizes the *RMSD* might not be the ideal mapping
+for e.g. the *lDDT* in rare cases.
+Therefore, the :class:`Evaluator.MatchMethod` can be used to choose the desired tradeoff
+between speed and accuracy.
+
+In short, the default :class:`Evaluator.MatchMethod.HEURISTIC` is a good choice for all
+use cases, that leave a small margin for error.
+If on the other hand correctness is prioritized, use
+:class:`Evaluator.MatchMethod.EXHAUSTIVE` or :class:`Evaluator.MatchMethod.INDIVIDUAL`
+instead, but try to avoid structures with many symmetries, as this may quickly lead
+to a combinatorial explosion.
+
+.. jupyter-execute::
+
+    evaluator = peppr.Evaluator(
+        [peppr.InterfaceRMSD()],
+        # Guarantees optimal atom mapping at potentially high computation costs
+        match_method=peppr.Evaluator.MatchMethod.INDIVIDUAL,
+    )
 
 A note on multiprocessing
 -------------------------

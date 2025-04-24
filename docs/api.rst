@@ -72,6 +72,17 @@ that are not directly implemented :mod:`biotite.structure`.
     fnat
     DockQ
 
+Atom Matching
+-------------
+.. autosummary::
+    :toctree: apidoc
+    :caption: Miscellaneous
+
+    find_optimal_match
+    find_all_matches
+    GraphMatchWarning
+    UnmappableEntityError
+
 Miscellaneous
 -------------
 
@@ -79,12 +90,10 @@ Miscellaneous
     :toctree: apidoc
     :caption: Miscellaneous
 
-    MatchWarning
-    GraphMatchWarning
-    EvaluationWarning
-    NoContactError
     sanitize
     standardize
-    find_matching_atoms
     is_small_molecule
     get_contact_residues
+    MatchWarning
+    EvaluationWarning
+    NoContactError

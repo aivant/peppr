@@ -149,3 +149,19 @@ For some metrics, such as ``rmsd`` and ``dockq``, there is also bins the values 
 sorted into.
 For example, ``CA-RMSD <2.0`` gives the percentage of systems with a *CA-RMSD* below
 2.0 Å.
+
+Increasing the accuracy
+-----------------------
+One of the main challenges ``peppr`` solves is the atom matching between the reference
+and pose in the first place.
+The default method is fast, though in rare cases might miss the mapping that would
+optimize the metric of interest.
+To employ a more precise but slower method, ``peppr create`` and ``peppr run`` accept
+the ``--match-method`` option.
+
+.. jupyter-execute::
+
+    ! peppr create $TMPDIR/peppr.pkl lddt-ppi lddt-pli --match-method exhaustive
+
+For more background, this topic is discussed more deeply in the
+:ref:`Python API <More speed or higher accuracy?>` tutorial.
