@@ -39,6 +39,7 @@ docs = [
   "sphinx-design >= 0.5",
   "sphinx-notfound-page >= 1.0",
   "numpydoc >= 1.8.0",
+  "mpire",
 ]
 lint = [
   "ruff == 0.11.0",

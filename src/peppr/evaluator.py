@@ -1,6 +1,7 @@
 __all__ = ["Evaluator", "MatchWarning", "EvaluationWarning"]
 
 import copy
+import itertools
 import warnings
 from collections.abc import Iterable, Mapping
 from typing import Iterator, Sequence
@@ -78,6 +79,48 @@ class Evaluator(Mapping):
     @property
     def system_ids(self) -> tuple[str, ...]:
         return tuple(self._ids)
+
+    @staticmethod
+    def combine(evaluators: Iterable["Evaluator"]) -> "Evaluator":
+        """
+        Combine multiple :class:`Evaluator` instances into a single one,
+        preserving the systems fed to each instance.
+
+        Parameters
+        ----------
+        evaluators : Iterable of Evaluator
+            The evaluators to combine.
+            The ``metrics``, ``tolerate_exceptions`` and ``min_sequence_identity``
+            must be the same for all evaluators.
+
+        Returns
+        -------
+        Evaluator
+            The evaluator combining the systems of all input `evaluators` in the order
+            of the input.
+        """
+        ref_evaluator = None
+        all_ids = []
+        all_results = []
+        for evaluator in evaluators:
+            if ref_evaluator is None:
+                ref_evaluator = evaluator
+            if evaluator != ref_evaluator:
+                raise ValueError(
+                    "All evaluators must be initialized with the same parameters"
+                )
+            all_ids.append(evaluator.system_ids)
+            all_results.append(evaluator.get_results())
+        if ref_evaluator is None:
+            raise ValueError("At least one evaluator must be provided")
+
+        combined_evaluator = copy.deepcopy(ref_evaluator)
+        combined_evaluator._ids = list(itertools.chain(*all_ids))
+        combined_evaluator._results = [
+            list(itertools.chain(*[results[i] for results in all_results]))
+            for i in range(len(combined_evaluator._metrics))
+        ]
+        return combined_evaluator
 
     def feed(
         self,
@@ -363,3 +406,17 @@ class Evaluator(Mapping):
 
     def __len__(self) -> int:
         return len(self._results)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Evaluator):
+            return False
+        if len(self._metrics) != len(other._metrics):
+            return False
+        for metric, ref_metric in zip(self._metrics, other._metrics):
+            if metric.name != ref_metric.name:
+                return False
+        if self._tolerate_exceptions != other._tolerate_exceptions:
+            return False
+        if self._min_sequence_identity != other._min_sequence_identity:
+            return False
+        return True
