@@ -270,34 +270,6 @@ class Evaluator(Mapping):
         pandas.DataFrame
             A table listing the value for each metric and system.
             The index is the system ID.
-
-        Examples
-        --------
-
-        >>> print(evaluator.tabulate_metrics())
-                                           RMSD      lDDT  TM-score
-        8ji2__1__1.B__1.J_1.K          2.987937  0.674205  0.883589
-        7t4w__1__1.A__1.C             16.762669  0.693087  0.380107
-        8jp0__1__1.A__1.B             26.281593  0.510061  0.316204
-        7yn2__1__1.A_1.B__1.C          6.657655  0.567117  0.725322
-        8oxu__2__1.C__1.E             14.977116  0.339707  0.296535
-        7ydq__1__1.A__1.B             26.111820  0.383841  0.360584
-        7wuy__1__1.B__1.HA_1.IA_1.OA  16.494774  0.665949  0.666633
-        7xh4__1__1.A__1.B_1.C          1.787062  0.748987  0.915388
-        7v34__1__1.A__1.C_1.D_1.G      4.472874  0.567491  0.822537
-        8jmr__1__1.A_1.B__1.C_1.D      5.058327  0.730324  0.868684
-        >>> print(evaluator.tabulate_metrics(OracleSelector()))
-                                      CA-RMSD (Oracle)  lDDT (Oracle)  TM-score (Oracle)
-        8ji2__1__1.B__1.J_1.K                 2.987937       0.674205           0.883589
-        7t4w__1__1.A__1.C                    16.762669       0.693087           0.380107
-        8jp0__1__1.A__1.B                    26.281593       0.510061           0.316204
-        7yn2__1__1.A_1.B__1.C                 6.657655       0.567117           0.725322
-        8oxu__2__1.C__1.E                    14.977116       0.339707           0.296535
-        7ydq__1__1.A__1.B                    26.111820       0.383841           0.360584
-        7wuy__1__1.B__1.HA_1.IA_1.OA         16.494774       0.665949           0.666633
-        7xh4__1__1.A__1.B_1.C                 1.787062       0.748987           0.915388
-        7v34__1__1.A__1.C_1.D_1.G             4.472874       0.567491           0.822537
-        8jmr__1__1.A_1.B__1.C_1.D             5.058327       0.730324           0.868684
         """
         columns = self._tabulate_metrics(selectors)
         # Convert (metric, selector)-tuples to strings
@@ -342,28 +314,6 @@ class Evaluator(Mapping):
             - the metric name (e.g. ``DockQ``)
             - the selector name, if a selector was used (e.g. ``Oracle``)
             - the threshold (if a threshold was used) (e.g. ``% acceptable``)
-
-        Examples
-        --------
-
-        >>> import pprint
-        >>> pprint.pprint(evaluator.summarize_metrics())
-        {'CA-RMSD <5.0': 0.3,
-         'CA-RMSD >5.0': 0.7,
-         'CA-RMSD mean': 12.159182685504375,
-         'TM-score mean': 0.6235582438144873,
-         'lDDT mean': 0.5880769924413414}
-        >>> pprint.pprint(evaluator.summarize_metrics([MeanSelector(), OracleSelector()]))
-        {'CA-RMSD <5.0 (Oracle)': 0.3,
-         'CA-RMSD <5.0 (mean)': 0.3,
-         'CA-RMSD >5.0 (Oracle)': 0.7,
-         'CA-RMSD >5.0 (mean)': 0.7,
-         'CA-RMSD mean (Oracle)': 12.159182685504375,
-         'CA-RMSD mean (mean)': 12.159182685504375,
-         'TM-score mean (Oracle)': 0.6235582438144873,
-         'TM-score mean (mean)': 0.6235582438144873,
-         'lDDT mean (Oracle)': 0.5880769924413414,
-         'lDDT mean (mean)': 0.5880769924413414}
         """
         columns = self._tabulate_metrics(selectors)
         output_columns = {}
