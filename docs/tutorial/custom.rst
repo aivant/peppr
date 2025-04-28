@@ -42,11 +42,7 @@ For the scope of this tutorial we will create an all-atom RMSD as metric.
 
         # The core of each metric
         def evaluate(self, reference, pose):
-            # Limit system to common atoms between reference and pose
-            not_nan_mask = ~np.isnan(reference.coord[:, 0]) & ~np.isnan(pose.coord[:, 0])
             # It is not guaranteed that `reference` and `pose` are superimposed
-            reference = reference[not_nan_mask]
-            pose = pose[not_nan_mask]
             pose, _ = struc.superimpose(reference, pose)
             return struc.rmsd(reference, pose).item()
 
@@ -66,8 +62,6 @@ our life easier:
   This means that atom ``reference[i]`` corresponds to the atom ``pose[i]``.
   Finding the optimal atom mapping in case of ambiguous scenarios, as they appear in
   homomers or symmetric molecules, is already handled under the hood beforehand.
-- If either the pose or the reference have atoms that are not present in the other,
-  the respective coordinates of these atoms are *NaN*.
 - The :class:`Metric` should respect the ``hetero`` annotation of the input
   :class:`biotite.structure.AtomArray`.
   An atom where ``hetero`` is ``False`` is defined as polymer and where ``hetero`` is
