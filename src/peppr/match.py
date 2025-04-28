@@ -484,10 +484,18 @@ def _find_optimal_molecule_permutation(
     """
     reference_mol = _to_mol(reference)
     pose_mol = _to_mol(pose)
+
     mappings = pose_mol.GetSubstructMatches(
         reference_mol, useChirality=True, uniquify=False
     )
     if len(mappings) == 0:
+        # The coordinates may be off, so try matching without chirality
+        mappings = pose_mol.GetSubstructMatches(
+            reference_mol, useChirality=False, uniquify=False
+        )
+    if len(mappings) == 0:
+        # If still no match is found, conformation is not the problem,
+        # but the bond graph is different -> correct match is impossible
         raise ValueError(
             "No atom mapping found between pose and reference small molecule"
         )
