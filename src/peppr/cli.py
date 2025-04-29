@@ -1,14 +1,18 @@
+import copy
 import glob
 import json
+import os
 import pickle
 import sys
 from io import FileIO
+from multiprocessing import Pool
 from pathlib import Path
 import biotite.structure as struc
 import biotite.structure.io.mol as mol
 import biotite.structure.io.pdb as pdb
 import biotite.structure.io.pdbx as pdbx
 import click
+import numpy as np
 import pandas as pd
 from peppr.evaluator import Evaluator
 from peppr.metric import *
@@ -53,7 +57,7 @@ def cli() -> None:
     default=0.95,
     help=(
         "The minimum sequence identity between two polymer chains "
-        "to be considered the same entity"
+        "to be considered the same entity."
     ),
 )
 @click.option(
@@ -92,7 +96,7 @@ def create(
     "--id",
     "-i",
     type=str,
-    help="The system ID, by default taken from the reference file name",
+    help="The system ID. By default it is derived from the reference file name.",
 )
 @click.argument("EVALUATOR", type=click.File("rb+", lazy=True))
 @click.argument(
@@ -121,10 +125,18 @@ def evaluate(
 
 
 @cli.command()
+@click.option(
+    "--cores",
+    "-c",
+    type=click.IntRange(min=1),
+    help="The number of cores to use. By default, all available cores are used.",
+)
 @click.argument("EVALUATOR", type=click.File("rb+", lazy=True))
 @click.argument("REFERENCE", type=str)
 @click.argument("POSE", type=str)
-def evaluate_batch(evaluator: click.File, reference: str, pose: str) -> None:
+def evaluate_batch(
+    evaluator: click.File, reference: str, pose: str, cores: int | None
+) -> None:
     """
     Evaluate multiple systems.
 
@@ -136,39 +148,44 @@ def evaluate_batch(evaluator: click.File, reference: str, pose: str) -> None:
     Note that REFERENCE and POSE are assigned to each other in
     lexicographical order.
     """
-    ev = _evaluator_from_file(evaluator)
-    reference_paths = sorted(
-        [Path(path) for path in glob.glob(reference, recursive=True)]
-    )
+    ref_paths = sorted([Path(path) for path in glob.glob(reference, recursive=True)])
     pose_paths = sorted([Path(path) for path in glob.glob(pose, recursive=True)])
-    if len(reference_paths) != len(pose_paths):
+    if len(ref_paths) != len(pose_paths):
         raise click.UsageError(
-            f"Number of reference files ({len(reference_paths)}) "
+            f"Number of reference files ({len(ref_paths)}) "
             f"does not match the number of pose files ({len(pose_paths)})"
         )
 
-    system_ids = _find_unique_part(reference_paths)
+    system_ids = _find_unique_part(ref_paths)
     # Potentially remove the file suffix from the system ID
     for i, system_id in enumerate(system_ids):
         splitted = system_id.split(".")
         if len(splitted) > 1 and splitted[-1] in ["cif", "bcif", "pdb", "mol", "sdf"]:
             system_ids[i] = splitted[0]
 
-    for system_id, ref_path, pose_path in zip(system_ids, reference_paths, pose_paths):
-        if ref_path.is_dir():
-            raise click.UsageError(
-                "REFERENCE glob pattern must point to files, but found a directory"
-            )
-        reference = _load_system(ref_path)
-        if pose_path.is_dir():
-            poses = [
-                _load_system(path)
-                for path in sorted(pose_path.iterdir())
-                if path.is_file()
-            ]
-        else:
-            poses = _load_system(pose_path)
-        ev.feed(system_id, reference, poses)
+    cores: int = min(cores or os.cpu_count(), len(system_ids))  # type: ignore[type-var,assignment]
+
+    ev = _evaluator_from_file(evaluator)
+    if cores > 1:
+        with Pool(cores) as pool:
+            all_chunk_indices = np.array_split(np.arange(len(system_ids)), cores)
+            async_results = []
+            for chunk_indices in all_chunk_indices:
+                async_results.append(
+                    pool.apply_async(
+                        _evaluate_systems,
+                        (
+                            copy.deepcopy(ev),
+                            [system_ids[i] for i in chunk_indices],
+                            [ref_paths[i] for i in chunk_indices],
+                            [pose_paths[i] for i in chunk_indices],
+                        ),
+                    )
+                )
+            split_evaluators = [async_result.get() for async_result in async_results]
+            ev = Evaluator.combine(split_evaluators)
+    else:
+        _evaluate_systems(ev, system_ids, ref_paths, pose_paths)
     _evaluator_to_file(evaluator, ev)
 
 
@@ -292,6 +309,53 @@ def _create_selector(selector_string: str) -> Selector:
         return RandomSelector(int(selector_string[6:]))
     else:
         raise click.BadParameter(f"Selector '{selector_string}' is not supported")
+
+
+def _evaluate_systems(
+    evaluator: Evaluator,
+    system_ids: list[str],
+    ref_paths: list[Path],
+    pose_paths: list[Path],
+) -> Evaluator:
+    """
+    Evaluate the given systems.
+
+    Parameters
+    ----------
+    evaluator : Evaluator
+        The evaluator to use.
+    system_id : str
+        The system IDs.
+    ref_path : Path
+        The paths to the reference structures.
+    pose_path : Path
+        The paths to the pose structures.
+
+    Returns
+    -------
+    Evaluator
+        The same evaluator as the input.
+    """
+    for system_id, ref_path, pose_path in zip(
+        system_ids, ref_paths, pose_paths, strict=True
+    ):
+        if ref_path.is_dir():
+            raise click.UsageError(
+                "REFERENCE glob pattern must point to files, but found a directory"
+            )
+        reference = _load_system(ref_path)
+        if pose_path.is_dir():
+            poses = [
+                _load_system(path)
+                # Do not read files with no suffix, as these usually refer to
+                # hidden system files (e.g. `.DS_Store`)
+                for path in sorted(p for p in pose_path.iterdir() if p.suffix != "")
+                if path.is_file()
+            ]
+        else:
+            poses = _load_system(pose_path)
+        evaluator.feed(system_id, reference, poses)
+    return evaluator
 
 
 def _load_system(path: Path) -> struc.AtomArray:

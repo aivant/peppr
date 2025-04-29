@@ -234,3 +234,57 @@ that :class:`Selector`.
 .. jupyter-execute::
 
     evaluator.tabulate_metrics(selectors=[peppr.TopSelector(3), peppr.MedianSelector()])
+
+A note on multiprocessing
+-------------------------
+Multiprocessing of multiple systems is not baked into the :class:`Evaluator` directly.
+Instead, you can can use multiple :class:`Evaluator` objects in parallel and
+combine them afterwards using :func:`Evaluator.combine()`.
+This gives you flexibility to use the multiprocessing library of your choice.
+
+.. jupyter-execute::
+
+    import copy
+    # Use 'mpire' multiprocessing library in this example,
+    # as it allows using 'apply_async()' with a function defined in a notebook
+    from mpire import WorkerPool
+    import numpy as np
+
+    N_PROCESSES = 2
+
+    def _evaluate_systems(evaluator, system_dirs):
+        for system_dir in system_dirs:
+            if not system_dir.is_dir():
+                continue
+            system_id = system_dir.name
+            pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
+            ref = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+            pdbx_file = pdbx.CIFFile.read(system_dir / "poses" / "pose_0.cif")
+            pose = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+            evaluator.feed(system_id, ref, pose)
+        # Return the input evaluator for convenience
+        return evaluator
+
+    evaluator = peppr.Evaluator(
+        [
+            peppr.MonomerRMSD(threshold=2.0),
+            peppr.MonomerLDDTScore(),
+        ]
+    )
+    system_dir_chunks = np.array_split(sorted(path_to_systems.iterdir()), N_PROCESSES)
+
+    with WorkerPool(N_PROCESSES) as pool:
+        async_results = []
+        for system_dirs in system_dir_chunks:
+            async_results.append(
+                pool.apply_async(
+                    _evaluate_systems,
+                    (
+                        copy.deepcopy(evaluator),
+                        system_dirs
+                    ),
+                )
+            )
+        split_evaluators = [async_result.get() for async_result in async_results]
+    combined_evaluator = peppr.Evaluator.combine(split_evaluators)
+    combined_evaluator.tabulate_metrics()

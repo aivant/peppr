@@ -164,6 +164,47 @@ def test_summarize(metrics, system_dir, tmp_path, selector, selector_name):
     assert f"CA-RMSD <2.0 ({selector.name})" in summary.keys()
 
 
+def test_single_multi_core_equivalence(tmp_path, system_dir, metrics):
+    """
+    Check if the ``tabulate`` command gives the same results in a single- and
+    multiprocessed setting.
+    """
+    evaluator_path = tmp_path / "peppr.pkl"
+    table_path = tmp_path / "table.csv"
+    reference_pattern = f"{system_dir.as_posix()}/references/*.bcif"
+    pose_pattern = f"{system_dir.as_posix()}/poses/*/pose_0.bcif"
+
+    runner = CliRunner()
+
+    tables = []
+    for cores in [1, 2]:
+        result = runner.invoke(
+            create, ["--strict", evaluator_path.as_posix()] + metrics
+        )
+        if result.exception:
+            raise result.exception
+        result = runner.invoke(
+            evaluate_batch,
+            [
+                evaluator_path.as_posix(),
+                reference_pattern,
+                pose_pattern,
+                "--cores",
+                str(cores),
+            ],
+        )
+        if result.exception:
+            raise result.exception
+        result = runner.invoke(
+            tabulate, [evaluator_path.as_posix(), table_path.as_posix()]
+        )
+        if result.exception:
+            raise result.exception
+        tables.append(pd.read_csv(table_path))
+
+    assert tables[0].equals(tables[1])
+
+
 @pytest.mark.parametrize("metric_name", list(_METRICS.keys()))
 def test_run(system_dir, metric_name):
     """

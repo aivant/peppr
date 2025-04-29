@@ -237,3 +237,23 @@ def test_tolerate_exceptions():
         match=f"Failed to evaluate Broken on '{system_id}': Expected failure",
     ):
         evaluator.feed(system_id, reference, poses[0])
+
+
+def test_combine():
+    """
+    Check if an evaluator combined from multiple evaluators fed with one system each
+    contains the same results as the evaluator fed with all systems.
+    """
+    ref_evaluator = peppr.Evaluator([peppr.MonomerRMSD(5.0), peppr.MonomerLDDTScore()])
+    system_ids = list_test_predictions()
+
+    split_evaluators = [copy.deepcopy(ref_evaluator) for _ in range(len(system_ids))]
+    for split_evaluator, system_id in zip(split_evaluators, system_ids):
+        reference, poses = assemble_predictions(system_id)
+        split_evaluator.feed(system_id, reference, poses[0])
+        ref_evaluator.feed(system_id, reference, poses[0])
+    combined_evaluator = peppr.Evaluator.combine(split_evaluators)
+    ref_table = ref_evaluator.tabulate_metrics()
+    test_table = combined_evaluator.tabulate_metrics()
+
+    assert test_table.equals(ref_table)
