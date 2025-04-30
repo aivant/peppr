@@ -5,6 +5,7 @@ __all__ = [
     "OracleSelector",
     "TopSelector",
     "RandomSelector",
+    "VarianceSelector",
 ]
 
 from abc import ABC, abstractmethod
@@ -164,3 +165,15 @@ class RandomSelector(Selector):
             return np.nanmin(top_values)
         else:
             return np.nanmax(top_values)
+
+class VarianceSelector(Selector):
+    """
+    Selector that computes the variance of the values.
+    """
+
+    @property
+    def name(self) -> str:
+        return "variance"
+
+    def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
+        return np.nanvar(values)
