@@ -47,6 +47,7 @@ def test_random_selector():
 
     assert np.isclose(np.mean(selected_values), 9, rtol=0.5)
 
+
 def test_variance_selector():
     """
     Test the VarianceSelector's behavior.
