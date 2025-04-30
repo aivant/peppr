@@ -166,6 +166,7 @@ class RandomSelector(Selector):
         else:
             return np.nanmax(top_values)
 
+
 class VarianceSelector(Selector):
     """
     Selector that computes the variance of the values.
