@@ -199,15 +199,21 @@ class Evaluator(Mapping):
         The optimal atom matching is handled automatically based on the
         :class:`MatchMethod`.
         """
-        reference = standardize(reference)
-        if isinstance(poses, struc.AtomArray):
-            poses = [standardize(poses)]
-        elif isinstance(poses, struc.AtomArrayStack):
-            poses = list(standardize(poses))
-        else:
-            poses = [standardize(pose) for pose in poses]
-        if len(poses) == 0:
-            raise ValueError("No poses provided")
+        try:
+            reference = standardize(reference)
+            if isinstance(poses, struc.AtomArray):
+                poses = [standardize(poses)]
+            elif isinstance(poses, struc.AtomArrayStack):
+                poses = list(standardize(poses))
+            else:
+                poses = [standardize(pose) for pose in poses]
+            if len(poses) == 0:
+                raise ValueError("No poses provided")
+        except Exception as e:
+            self._raise_or_warn(
+                e,
+                UserWarning(f"Failed to standardize system '{system_id}': {e}"),
+            )
 
         if self._match_method in (
             Evaluator.MatchMethod.HEURISTIC,
