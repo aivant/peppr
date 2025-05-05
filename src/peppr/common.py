@@ -31,6 +31,7 @@ def standardize(
 
     - removes hydrogen atoms
     - removes solvent atoms and monoatomic ions
+    - checks if an associated :class:`biotite.structure.BondList` is present
 
     Parameters
     ----------
@@ -42,6 +43,8 @@ def standardize(
     struc.AtomArray or struc.AtomArrayStack
         The standardize system.
     """
+    if system.bonds is None:
+        raise ValueError("The system must have an associated BondList")
     mask = (
         (system.element != "H")
         & ~struc.filter_solvent(system)
