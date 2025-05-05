@@ -28,6 +28,32 @@ def test_selectors(selector, expected_value):
     assert selected_value == expected_value
 
 
+@pytest.mark.filterwarnings("error")
+@pytest.mark.parametrize("smaller_is_better", [False, True])
+@pytest.mark.parametrize(
+    "selector",
+    [
+        peppr.MeanSelector(),
+        peppr.OracleSelector(),
+        peppr.TopSelector(5),
+        peppr.TopSelector(1),
+        peppr.RandomSelector(5, seed=0),
+    ],
+    ids=lambda selector: selector.name,
+)
+def test_nan_values(selector, smaller_is_better):
+    """
+    Check that :meth:`Selector.select()` returns NaN if all values are NaN, without
+    raising a warnings.
+    If any value is not NaN, the selector should return an actual value.
+    """
+    values = np.full(10, np.nan)
+    assert np.isnan(selector.select(values, smaller_is_better))
+    # Expect a non-NaN value if the input contains any non-NaN value
+    values = np.concatenate([np.arange(9), [np.nan]])
+    assert not np.isnan(selector.select(values, smaller_is_better))
+
+
 def test_random_selector():
     """
     Test the RandomSelector's statistical behavior.
