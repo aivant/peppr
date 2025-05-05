@@ -27,6 +27,7 @@ extensions = [
     "sphinx.ext.doctest",
     "sphinx.ext.mathjax",
     "sphinx.ext.linkcode",
+    "sphinx.ext.autosectionlabel",
     "sphinx.ext.todo",
     "sphinx.ext.intersphinx",
     "sphinx_design",

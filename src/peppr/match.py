@@ -1,9 +1,14 @@
-__all__ = ["GraphMatchWarning", "find_matching_atoms"]
+__all__ = [
+    "GraphMatchWarning",
+    "UnmappableEntityError",
+    "find_optimal_match",
+    "find_all_matches",
+]
 
 
 import itertools
 import warnings
-from typing import Any
+from typing import Any, Iterator
 import biotite.interface.rdkit as rdkit_interface
 import biotite.sequence as seq
 import biotite.sequence.align as align
@@ -38,158 +43,148 @@ class GraphMatchWarning(UserWarning):
     pass
 
 
-def find_matching_atoms(
+class UnmappableEntityError(Exception):
+    """
+    This exceptions is raised, if the reference and pose structure contain
+    entities that cannot be mapped to each other.
+    """
+
+    pass
+
+
+def find_optimal_match(
     reference: struc.AtomArray,
     pose: struc.AtomArray,
     min_sequence_identity: float = 0.95,
+    use_heuristic: bool = True,
+    max_matches: int | None = None,
 ) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
     """
-    Find the optimal atom order for each pose that minimizes the RMSD to the reference.
+    Find the atom indices for the given reference and pose structure that brings these
+    structure into a corresponding order that minimizes the RMSD between them.
 
     Parameters
     ----------
-    reference : struc.AtomArray, shape=(n,)
+    reference : AtomArray, shape=(p,)
         The reference structure.
-    pose : struc.AtomArray, shape=(n,)
+    pose : AtomArray, shape=(q,)
         The pose structure.
     min_sequence_identity : float
         The minimum sequence identity between two chains to be considered the same
         entity.
+    use_heuristic : bool or int
+        Whether to employ a fast heuristic [1]_ to find the optimal chain permutation.
+        This heuristic represents each chain by its centroid, i.e. instead of
+        exhaustively superimposing all atoms for each permutation, only the centroids
+        are superimposed and the closest match between the reference and pose is
+        selected.
+    max_matches : int, optional
+        The maximum number of atom mappings to try, if the `use_heuristic` is set to
+        ``False``.
 
     Returns
     -------
-    reference_order, : np.array, shape=(n,), dtype=int
-        The atom order that should be applied to `reference`.
-    pose_order : np.array, shape=(n,), dtype=int
-        The atom order that should be applied to `pose`.
+    reference_indices : np.array, shape=(n,), dtype=int
+        The atom indices that should be applied to `reference`.
+    pose_indices : np.array, shape=(n,), dtype=int
+        The atom indices that should be applied to `pose`.
 
     Notes
     -----
-    For finding the optimal chain permutation, the function uses the
-    algorithm described in [1]_.
+    Note that the heuristic used by default is much faster compared to the
+    exhaustive approach:
+    Especially for larger complexes with many homomers or small molecule copies,
+    the number of possible mappings combinatorially explodes.
+    However, the heuristic might not find the optimal permutation for all cases,
+    especially in poses that only remotely resemble the reference.
 
     References
     ----------
     .. [1] *Protein complex prediction with AlphaFold-Multimer*, Section 7.3, https://doi.org/10.1101/2021.10.04.463034
     """
-    ref_chain_starts = struc.get_chain_starts(reference, add_exclusive_stop=True)
-    mod_chain_starts = struc.get_chain_starts(pose, add_exclusive_stop=True)
-    reference_chains = [
-        reference[start:stop] for start, stop in itertools.pairwise(ref_chain_starts)
-    ]
-    pose_chains = [
-        pose[start:stop] for start, stop in itertools.pairwise(mod_chain_starts)
-    ]
+    reference_chains = list(struc.chain_iter(reference))
+    pose_chains = list(struc.chain_iter(pose))
+    if len(reference_chains) == 1:
+        # Only one chain -> no need to match
+        if len(pose_chains) != 1:
+            raise UnmappableEntityError("Reference and pose have different entities")
+        return _create_indices_from_chain_order(
+            reference_chains,
+            pose_chains,
+            np.array([0]),
+            np.array([0]),
+            superimpose=True,
+        )
 
-    # Find corresponding chains by identifying the chain permutation minimizing the RMSD
-    mod_chain_order, transform, anchor_index = _find_matching_chain_permutation(
-        reference_chains, pose_chains, min_sequence_identity
-    )
-
-    # Based on the matching chains, find corresponding atoms within each pair of chains
-    ref_atom_orders: list[np.ndarray | None] = [None] * len(reference_chains)
-    mod_atom_orders: list[np.ndarray | None] = [None] * len(reference_chains)
-    for ref_i, mod_i in zip(np.arange(len(reference_chains)), mod_chain_order):
-        if is_small_molecule(reference_chains[ref_i]):
-            try:
-                ref_atom_orders[ref_i], mod_atom_orders[mod_i] = (
-                    _find_optimal_molecule_permutation(
-                        reference_chains[ref_i],
-                        transform.apply(pose_chains[mod_i]),
-                        # If no other chain already determined the optimal transform,
-                        # superimpose each permuted molecule to get the best RMSD
-                        superimpose=True if mod_i == anchor_index else False,
-                    )
-                )
-            except Exception as e:
-                warnings.warn(
-                    f"RDKit failed atom matching: {e}",
-                    GraphMatchWarning,
-                )
-                ref_atom_orders[ref_i] = np.arange(
-                    reference_chains[ref_i].array_length()
-                )
-                mod_atom_orders[mod_i] = np.arange(pose_chains[mod_i].array_length())
-        else:
-            ref_atom_orders[ref_i], mod_atom_orders[mod_i] = _find_common_residues(
-                reference_chains[ref_i], pose_chains[mod_i]
-            )
-
-    # Finally bring chain order and order within chains together
-    return (
-        _combine_chain_and_atom_orders(
-            np.arange(len(reference_chains)), ref_atom_orders, ref_chain_starts
-        ),
-        _combine_chain_and_atom_orders(
-            mod_chain_order, mod_atom_orders, mod_chain_starts
-        ),
-    )
+    if use_heuristic:
+        return _find_optimal_match_fast(
+            reference_chains, pose_chains, min_sequence_identity
+        )
+    else:
+        return _find_optimal_match_precise(
+            reference_chains, pose_chains, min_sequence_identity, max_matches
+        )
 
 
-def _combine_chain_and_atom_orders(
-    chain_order: NDArray[np.int_],
-    atom_orders: list[NDArray[np.int_]],
-    chain_starts: NDArray[np.int_],
-) -> NDArray[np.int_]:
+def find_all_matches(
+    reference: struc.AtomArray,
+    pose: struc.AtomArray,
+    min_sequence_identity: float = 0.95,
+) -> Iterator[tuple[NDArray[np.int_], NDArray[np.int_]]]:
     """
-    Bring both atom and chain orders together.
+    Find all possible atom mappings between the reference and the pose.
+
+    Each mappings gives corresponding atoms between the reference and the pose.
 
     Parameters
     ----------
-    chain_order : np.ndarray, shape=(k,), dtype=int
-        The order of the chains in terms of indices pointing to a list of chains.
-    atom_orders : list of (np.ndarray, shape=(n,), dtype=int), length=k
-        The order of the atoms in terms of indices pointing to atoms within each chain.
-    chain_starts : np.ndarray, shape=(k+1,), dtype=int
-        The start indices of the chains.
-        Contains the exclusive stop index of the last chain as last element.
+    reference : AtomArray, shape=(p,)
+        The reference structure.
+    pose : AtomArray, shape=(q,)
+        The pose structure.
+    min_sequence_identity : float
+        The minimum sequence identity between two chains to be considered the same
+        entity.
 
-    Returns
-    -------
-    global_order : np.ndarray, shape=(n,), dtype=int
-        The order of the atoms in the global system.
+    Yields
+    ------
+    list of tuple (np.ndarray, shape=(n,), dtype=int)
+        Atom indices that, when applied to the reference and pose,
+        respectively, yield the corresponding atoms.
+
+    Notes
+    -----
+    This functions tries all chain mappings of chain that are the same entity and
+    within each small molecules tries all proper molecule permutations.
+    For larger homomers this can quickly lead to a combinatorial explosion.
     """
-    order_chunks = []
-    # Take atom indices for each chain in the determined order
-    for chain_i in chain_order:
-        atom_indices = np.arange(chain_starts[chain_i], chain_starts[chain_i + 1])
-        # Apply reordering within the chain
-        atom_indices = atom_indices[atom_orders[chain_i]]
-        order_chunks.append(atom_indices)
-    return np.concatenate(order_chunks)
+    reference_chains = list(struc.chain_iter(reference))
+    pose_chains = list(struc.chain_iter(pose))
+    for m in _all_global_mappings(reference_chains, pose_chains, min_sequence_identity):
+        yield m
 
 
-def _find_matching_chain_permutation(
+def _find_optimal_match_fast(
     reference_chains: list[struc.AtomArray],
     pose_chains: list[struc.AtomArray],
-    min_sequence_identity: float,
-) -> tuple[NDArray[np.int_], struc.AffineTransformation, int]:
+    min_sequence_identity: float = 0.95,
+) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
     """
-    Find the permutation of the given chains that minimizes the RMSD between the pose
-    and the reference.
+    Find the optimal atom order for each pose that minimizes the centroid RMSD to the
+    reference.
 
     Parameters
     ----------
-    reference_chains : list of struc.AtomArray, length=n
-        The reference chains.
-    pose_chains : list of struc.AtomArray, length=n
-        The pose chains.
-        Must have the same order as the `reference_chains`,
-        i.e. elements at the same index must be equivalent chains.
+    reference_chains, pose_chains : list of AtomArray
+        The reference and pose structure, separated into chains.
     min_sequence_identity : float
         The minimum sequence identity between two chains to be considered the same
         entity.
 
     Returns
     -------
-    chain_order : np.array, shape=(n,), dtype=int
-        The permutation of the chains that minimizes the RMSD between the pose and the
-        reference.
-    transform : AffineTransformation
-        The transformation that applied on the pose system gave the minimal RMSD.
-    anchor_index : int
-        The index of the anchor pose chain.
-        This index points to the original order, before `chain_order` is applied.
+    reference_order, pose_order : np.array, shape=(n,), dtype=int
+        The atom order that should be applied to `reference` and pose, respectively.
     """
     # Assign reference and pose entity IDs in a single call
     # in order to assign the same ID to corresponding chains between reference and pose
@@ -203,13 +198,13 @@ def _find_matching_chain_permutation(
         np.bincount(reference_entity_ids, minlength=len(entity_ids))
         != np.bincount(pose_entity_ids, minlength=len(entity_ids))
     ).any():
-        raise ValueError("Reference and pose have different entities")
+        raise UnmappableEntityError("Reference and pose have different entities")
 
     anchor_index = _choose_anchor_chain(pose_chains, pose_entity_ids)
 
+    # Find corresponding chains by identifying the chain permutation minimizing the centroid RMSD
     reference_centroids = np.array([struc.centroid(c) for c in reference_chains])
     pose_centroids = np.array([struc.centroid(c) for c in pose_chains])
-
     best_transform = None
     best_rmsd = np.inf
     best_chain_order = None
@@ -238,7 +233,288 @@ def _find_matching_chain_permutation(
                 best_rmsd = rmsd
                 best_transform = transform
                 best_chain_order = chain_order
-    return best_chain_order, best_transform, anchor_index  # type: ignore[return-value]
+
+    pose_chains = [best_transform.apply(chain) for chain in pose_chains]  # type: ignore[union-attr]
+    return _create_indices_from_chain_order(
+        reference_chains,
+        pose_chains,
+        np.arange(len(reference_chains)),
+        best_chain_order,
+        # Superimposition is defined by centroids
+        superimpose=False,
+    )
+
+
+def _find_optimal_match_precise(
+    reference_chains: list[struc.AtomArray],
+    pose_chains: list[struc.AtomArray],
+    min_sequence_identity: float = 0.95,
+    max_matches: int | None = None,
+) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
+    """
+    Find the optimal atom order for each pose that minimizes the all-atom RMSD to the
+    reference.
+
+    Parameters
+    ----------
+    reference_chains, pose_chains : list of AtomArray
+        The reference and pose structure, separated into chains.
+    min_sequence_identity : float
+        The minimum sequence identity between two chains to be considered the same
+        entity.
+    max_matches : int, optional
+        The maximum number of mappings to try.
+
+    Returns
+    -------
+    reference_order, pose_order : np.array, shape=(n,), dtype=int
+        The atom order that should be applied to `reference` and pose, respectively.
+    """
+    if max_matches is not None and max_matches < 1:
+        raise ValueError("Maximum number of mappings must be at least 1")
+
+    # The reassembled structures are required below
+    # for global superimposition and RMSD computation
+    reference = struc.concatenate(reference_chains)
+    pose = struc.concatenate(pose_chains)
+
+    best_rmsd = np.inf
+    best_indices: tuple[NDArray[np.int_], NDArray[np.int_]] = None  # type: ignore[assignment]
+    for it, (ref_indices, pose_indices) in enumerate(
+        _all_global_mappings(reference_chains, pose_chains, min_sequence_identity)
+    ):
+        if max_matches is not None and it >= max_matches:
+            break
+        matched_reference_coord = reference.coord[ref_indices]
+        matched_pose_coord, _ = struc.superimpose(
+            matched_reference_coord, pose.coord[pose_indices]
+        )
+        rmsd = struc.rmsd(matched_reference_coord, matched_pose_coord)
+        if rmsd < best_rmsd:
+            best_rmsd = rmsd
+            best_indices = ref_indices, pose_indices
+
+    return best_indices
+
+
+def _all_global_mappings(
+    reference_chains: list[struc.AtomArray],
+    pose_chains: list[struc.AtomArray],
+    min_sequence_identity: float = 0.95,
+) -> Iterator[tuple[NDArray[np.int_], NDArray[np.int_]]]:
+    """
+    Find all possible atom mappings between the reference and the pose.
+
+    Each mappings gives corresponding atoms between the reference and the pose.
+
+    Parameters
+    ----------
+    reference_chains, pose_chains : list of AtomArray
+        The reference and pose chains, respectively.
+    min_sequence_identity : float
+        The minimum sequence identity between two chains to be considered the same
+        entity.
+
+    Yields
+    ------
+    ref_atom_indices, pose_atom_indices : list of np.ndarray, shape=(n,), dtype=int
+        The global atom indices that, when applied to the entire reference and pose,
+        respectively, yield the corresponding atoms.
+
+    Notes
+    -----
+    This functions tries all chain mappings of chain that are the same entity and
+    within each small molecules tries all proper molecule permutations.
+    """
+    # Assign reference and pose entity IDs in a single call
+    # in order to assign the same ID to corresponding chains between reference and pose
+    entity_ids = _assign_entity_ids(
+        reference_chains + pose_chains, min_sequence_identity
+    )
+    # Split the entity IDs again
+    reference_entity_ids = entity_ids[: len(reference_chains)]
+    pose_entity_ids = entity_ids[len(reference_chains) :]
+    if (
+        np.bincount(reference_entity_ids, minlength=len(entity_ids))
+        != np.bincount(pose_entity_ids, minlength=len(entity_ids))
+    ).any():
+        raise UnmappableEntityError("Reference and pose have different entities")
+
+    ref_chain_order = np.arange(len(reference_chains), dtype=int)
+    for pose_chain_order in itertools.permutations(range(len(pose_chains))):
+        pose_chain_order = np.array(pose_chain_order)  # type: ignore[assignment]
+        if np.any(
+            reference_entity_ids[ref_chain_order] != pose_entity_ids[pose_chain_order]
+        ):
+            # This permutation would map different entities to each other
+            continue
+        # All possible intra-chain atom mappings for the current chain mapping
+        # In case of symmetric small molecules, multiple mappings are possible
+        all_intra_chain_mappings: list[list[tuple[np.ndarray, np.ndarray]]] = []
+        for ref_chain_i, pose_chain_i in zip(ref_chain_order, pose_chain_order):
+            if is_small_molecule(reference_chains[ref_chain_i]):
+                try:
+                    pose_mappings = _molecule_mappings(
+                        reference_chains[ref_chain_i], pose_chains[pose_chain_i]
+                    )
+                    all_mapping_possibilities = []
+                    for pose_mapping in pose_mappings:
+                        all_mapping_possibilities.append(
+                            (
+                                np.arange(reference_chains[ref_chain_i].array_length()),
+                                pose_mapping,
+                            )
+                        )
+                    all_intra_chain_mappings.append(all_mapping_possibilities)
+                except Exception as e:
+                    warnings.warn(
+                        f"RDKit failed atom matching: {e}",
+                        GraphMatchWarning,
+                    )
+                    # Default to trivial mapping
+                    all_intra_chain_mappings.append(
+                        [
+                            (
+                                np.arange(reference_chains[ref_chain_i].array_length()),
+                                np.arange(pose_chains[pose_chain_i].array_length()),
+                            )
+                        ]
+                    )
+            else:
+                # For polymers there is only one mapping
+                all_intra_chain_mappings.append(
+                    [
+                        _find_common_residues(
+                            reference_chains[ref_chain_i], pose_chains[pose_chain_i]
+                        )
+                    ]
+                )
+
+        # Create Cartesian product of intra-chain mappings over all chains
+        for intra_chain_mappings in itertools.product(*all_intra_chain_mappings):
+            ref_atom_orders = [mapping[0] for mapping in intra_chain_mappings]
+            pose_atom_orders = [mapping[1] for mapping in intra_chain_mappings]
+            # The atom orders are still in the permuted chain order
+            # -> reorder them to the original chain order
+            ref_atom_orders = [ref_atom_orders[i] for i in np.argsort(ref_chain_order)]
+            pose_atom_orders = [
+                pose_atom_orders[i] for i in np.argsort(pose_chain_order)
+            ]
+            yield (
+                _combine_inter_and_intra_chain_orders(
+                    ref_chain_order,
+                    ref_atom_orders,
+                    [chain.array_length() for chain in reference_chains],
+                ),
+                _combine_inter_and_intra_chain_orders(
+                    pose_chain_order,
+                    pose_atom_orders,
+                    [chain.array_length() for chain in pose_chains],
+                ),
+            )
+
+
+def _create_indices_from_chain_order(
+    reference_chains: list[struc.AtomArray],
+    pose_chains: list[struc.AtomArray],
+    reference_chain_order: NDArray[np.int_],
+    pose_chain_order: NDArray[np.int_],
+    superimpose: bool = False,
+) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
+    """
+    Given the order of corresponding chains between the reference and the pose,
+    find the corresponding atom order within each chain and create atom indices
+    that point to the entire structure.
+
+    Parameters
+    ----------
+    reference_chains, pose_chains : list of AtomArray
+        The reference and pose chains, respectively.
+    reference_chain_order, pose_chain_order : np.ndarray, shape=(n,), dtype=int
+        The indices when applied to `reference_chains` and `pose_chains`, respectively,
+        yield the corresponding chains.
+    superimpose : bool, optional
+        Whether to superimpose the corresponding small molecules onto each other
+        before finding the optimal permutation.
+
+    Returns
+    -------
+    ref_atom_indices, pose_atom_indices : list of np.ndarray, shape=(n,), dtype=int
+        The global atom indices that, when applied to the entire reference and pose,
+        respectively, yield the corresponding atoms.
+    """
+    ref_atom_orders: list[np.ndarray | None] = [None] * len(reference_chains)
+    pose_atom_orders: list[np.ndarray | None] = [None] * len(pose_chains)
+    for ref_i, pose_i in zip(reference_chain_order, pose_chain_order):
+        if is_small_molecule(reference_chains[ref_i]):
+            try:
+                ref_atom_orders[ref_i], pose_atom_orders[pose_i] = (
+                    _find_optimal_molecule_permutation(
+                        reference_chains[ref_i],
+                        pose_chains[pose_i],
+                        superimpose=superimpose,
+                    )
+                )
+            except Exception as e:
+                warnings.warn(
+                    f"RDKit failed atom matching: {e}",
+                    GraphMatchWarning,
+                )
+                ref_atom_orders[ref_i] = np.arange(
+                    reference_chains[ref_i].array_length()
+                )
+                pose_atom_orders[pose_i] = np.arange(pose_chains[pose_i].array_length())
+        else:
+            ref_atom_orders[ref_i], pose_atom_orders[pose_i] = _find_common_residues(
+                reference_chains[ref_i], pose_chains[pose_i]
+            )
+
+    # Finally bring chain order and atom order within chains together
+    return (
+        _combine_inter_and_intra_chain_orders(
+            reference_chain_order,
+            ref_atom_orders,
+            [chain.array_length() for chain in reference_chains],
+        ),
+        _combine_inter_and_intra_chain_orders(
+            pose_chain_order,
+            pose_atom_orders,
+            [chain.array_length() for chain in pose_chains],
+        ),
+    )
+
+
+def _combine_inter_and_intra_chain_orders(
+    chain_order: NDArray[np.int_],
+    atom_orders: list[NDArray[np.int_]],
+    chain_lengths: NDArray[np.int_],
+) -> NDArray[np.int_]:
+    """
+    Bring both, chain indices and atom indices within each chain, together.
+
+    Parameters
+    ----------
+    chain_order : np.ndarray, shape=(k,), dtype=int
+        The order of the chains in terms of indices pointing to a list of chains.
+    atom_orders : list of (np.ndarray, shape=(n,), dtype=int), length=k
+        The order of the atoms in terms of indices pointing to atoms within each chain.
+    chain_lengths : np.ndarray, shape=(k,), dtype=int
+        The number of atoms in each chain.
+
+    Returns
+    -------
+    global_order : np.ndarray, shape=(n,), dtype=int
+        The order of the atoms in the global system.
+    """
+    chain_starts = np.concatenate(([0], np.cumsum(chain_lengths)))
+    order_chunks = []
+    # Take atom indices for each chain in the determined order
+    for chain_i in chain_order:
+        atom_indices = np.arange(chain_starts[chain_i], chain_starts[chain_i + 1])
+        # Apply reordering within the chain
+        atom_indices = atom_indices[atom_orders[chain_i]]
+        order_chunks.append(atom_indices)
+    return np.concatenate(order_chunks)
 
 
 def _find_matching_centroids(
@@ -293,19 +569,18 @@ def _find_common_residues(
     reference: struc.AtomArray, pose: struc.AtomArray
 ) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
     """
-    Find common residues (and the common atoms) in them in two protein chains.
+    Find common residues (and the common atoms) in two protein chains.
 
     Parameters
     ----------
     reference, pose : struc.AtomArray, shape=(n,)
-        The reference and pose small molecule, respectively.
-        Must have the same atoms (with different coordinates).
+        The reference and pose polymer chain whose common atoms are to be found.
 
     Returns
     -------
-    reference_order, pose_order : np.array, shape=(n,), dtype=int
-        The atom order that should be applied to the `reference` or `pose`,
-        respectively to minimize the RMSD between them.
+    reference_indices, pose_indices : np.array, shape=(n,), dtype=int
+        The indices that when applied to the `reference` or `pose`, respectively,
+        yield the corresponding atoms.
 
     Notes
     -----
@@ -414,14 +689,14 @@ def _find_atom_intersection(
         ]
     )
     ref_annotations = _annotations_to_structured(reference, structured_dtype)
-    mod_annotations = _annotations_to_structured(pose, structured_dtype)
-    ref_indices = np.where(np.isin(ref_annotations, mod_annotations))[0]
-    mod_indices = np.where(np.isin(mod_annotations, ref_annotations))[0]
+    pose_annotations = _annotations_to_structured(pose, structured_dtype)
+    ref_indices = np.where(np.isin(ref_annotations, pose_annotations))[0]
+    pose_indices = np.where(np.isin(pose_annotations, ref_annotations))[0]
     # Atom ordering might not be same -> sort
-    mod_indices = mod_indices[np.argsort(mod_annotations[mod_indices])]
+    pose_indices = pose_indices[np.argsort(pose_annotations[pose_indices])]
     ref_indices = ref_indices[np.argsort(ref_annotations[ref_indices])]
 
-    return ref_indices, mod_indices
+    return ref_indices, pose_indices
 
 
 def _annotations_to_structured(
@@ -460,31 +735,57 @@ def _find_optimal_molecule_permutation(
     ----------
     reference, pose : struc.AtomArray, shape=(n,)
         The reference and pose small molecule, respectively.
-        It is expected that they are already superimposed onto each other.
     superimpose : bool
         Whether to superimpose the reference and the reordered pose onto each other
         before calculating the RMSD.
-        This is necessary if no other anchor chain determines the optimal
-        superimposition.
+        Only necessary if no other means has already determined the superimposition.
+        If ``False``, it is expected that they are already superimposed onto each other.
 
     Returns
     -------
     reference_order, pose_order : np.array, shape=(n,), dtype=int
-        The atom order that should be applied to the `reference` or `pose`,
-        respectively to minimize the RMSD between them.
+        The indices that when applied to the `reference` or `pose`, respectively,
+        yield the corresponding atoms.
+    """
+    best_rmsd = np.inf
+    best_pose_atom_order = None
+    for pose_atom_order in _molecule_mappings(reference, pose):
+        if len(pose_atom_order) != reference.array_length():
+            raise ValueError("Atom mapping does not cover all atoms")
+        if superimpose:
+            superimposed, _ = struc.superimpose(reference, pose[pose_atom_order])
+        else:
+            superimposed = pose[pose_atom_order]
+        rmsd = struc.rmsd(reference, superimposed)
+        if rmsd < best_rmsd:
+            best_rmsd = rmsd
+            best_pose_atom_order = pose_atom_order
+    return np.arange(reference.array_length()), best_pose_atom_order  # type: ignore[return-value]
 
-    Notes
-    -----
-    Atoms are identified by their element only.
-    Currently this allows atoms/groups to be matched even if they are not equivalent
-    in some scenarios:
 
-    - Configurational diastereomers (enantiomers and cis/trans isomers)
-    - Terminal aldehydes and hydroxyl groups
+def _molecule_mappings(
+    reference: struc.AtomArray, pose: struc.AtomArray
+) -> list[NDArray[np.int_]]:
+    """
+    Find corresponding atoms in small molecules.
+
+    Use graph isomorphism on the bond graph to account for symmetries within
+    the small molecule.
+
+    Parameters
+    ----------
+    reference, pose : struc.AtomArray, shape=(n,)
+        The reference and pose small molecule, respectively.
+        It is expected that they are already superimposed onto each other.
+
+    Returns
+    -------
+    list of np.ndarray, shape=(n,), dtype=int
+        All mappings of `pose` that maps its atoms to the `reference` with
+        respect to elements and the bond graph.
     """
     reference_mol = _to_mol(reference)
     pose_mol = _to_mol(pose)
-
     mappings = pose_mol.GetSubstructMatches(
         reference_mol, useChirality=True, uniquify=False
     )
@@ -499,22 +800,8 @@ def _find_optimal_molecule_permutation(
         raise ValueError(
             "No atom mapping found between pose and reference small molecule"
         )
-
-    best_rmsd = np.inf
-    best_pose_atom_order = None
-    for pose_atom_order in mappings:
-        pose_atom_order = np.array(pose_atom_order)
-        if len(pose_atom_order) != reference.array_length():
-            raise ValueError("Atom mapping does not cover all atoms")
-        if superimpose:
-            superimposed, _ = struc.superimpose(reference, pose[pose_atom_order])
-        else:
-            superimposed = pose[pose_atom_order]
-        rmsd = struc.rmsd(reference, superimposed)
-        if rmsd < best_rmsd:
-            best_rmsd = rmsd
-            best_pose_atom_order = pose_atom_order
-    return np.arange(reference.array_length()), best_pose_atom_order  # type: ignore[return-value]
+    # Convert tuples to proper index arrays
+    return [np.array(mapping) for mapping in mappings]
 
 
 def _assign_entity_ids(

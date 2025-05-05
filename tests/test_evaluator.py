@@ -1,13 +1,15 @@
 import copy
 import itertools
 from collections import OrderedDict
+from pathlib import Path
+import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
 import peppr
 from tests.common import assemble_predictions, list_test_predictions
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def metrics():
     return [peppr.MonomerRMSD(5.0), peppr.MonomerLDDTScore(), peppr.MonomerTMScore()]
 
@@ -17,12 +19,15 @@ def selectors():
     return [peppr.MeanSelector(), peppr.OracleSelector()]
 
 
-@pytest.fixture
-def evaluator(metrics):
-    return peppr.Evaluator(metrics)
+@pytest.fixture(scope="module", params=list(peppr.Evaluator.MatchMethod))
+def evaluator(metrics, request):
+    match_method = request.param
+    # Avoid combinatorial explosion for time consuming metrics
+    max_matches = 10 if match_method == peppr.Evaluator.MatchMethod.INDIVIDUAL else None
+    return peppr.Evaluator(metrics, match_method, max_matches)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def evaluator_fed_with_single_poses(evaluator):
     evaluator = copy.deepcopy(evaluator)
     system_ids = list_test_predictions()
@@ -32,7 +37,7 @@ def evaluator_fed_with_single_poses(evaluator):
     return evaluator
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def evaluator_fed_with_multiple_poses(evaluator):
     evaluator = copy.deepcopy(evaluator)
     system_ids = list_test_predictions()
@@ -71,8 +76,9 @@ def test_tabulate_metrics_for_multi(evaluator_fed_with_multiple_poses, selectors
     ]
 
 
+@pytest.mark.parametrize("match_method", list(peppr.Evaluator.MatchMethod))
 @pytest.mark.parametrize("selectors", [None, [peppr.MeanSelector()]])
-def test_tabulate_metrics_with_unsuitable_metric(selectors):
+def test_tabulate_metrics_with_unsuitable_metric(selectors, match_method):
     """
     Check if metric values appear as *NaN* in the output dataframe, if the metric
     does not work for a given system.
@@ -88,7 +94,7 @@ def test_tabulate_metrics_with_unsuitable_metric(selectors):
             return "Unsuitable"
 
         def evaluate(self, reference, poses):
-            return None
+            return np.nan
 
         def requires_hydrogen(self):
             return False
@@ -96,7 +102,9 @@ def test_tabulate_metrics_with_unsuitable_metric(selectors):
         def smaller_is_better(self):
             return False
 
-    evaluator = peppr.Evaluator([peppr.MonomerRMSD(5.0), UnsuitableMetric()])
+    evaluator = peppr.Evaluator(
+        [peppr.MonomerRMSD(5.0), UnsuitableMetric()], match_method
+    )
     system_ids = list_test_predictions()
     for system_id in system_ids:
         reference, poses = assemble_predictions(system_id)
@@ -154,10 +162,11 @@ def test_summarize_metrics(
     assert np.isfinite(list(summary.values())).all()
 
 
-def test_summarize_metrics_with_nan():
+@pytest.mark.parametrize("match_method", list(peppr.Evaluator.MatchMethod))
+def test_summarize_metrics_with_nan(match_method):
     """
     Check if :meth:`Evaluator.summarize_metrics()` is able to handle metrics that
-    return `None` for some systems.
+    return *NaN* for some systems.
     """
 
     class SometimesUnsuitableMetric(peppr.Metric):
@@ -184,7 +193,7 @@ def test_summarize_metrics_with_nan():
                 return self._rng.random()
             else:
                 self._works = True
-                return None
+                return np.nan
 
         def requires_hydrogen(self):
             return False
@@ -192,7 +201,7 @@ def test_summarize_metrics_with_nan():
         def smaller_is_better(self):
             return False
 
-    evaluator = peppr.Evaluator([SometimesUnsuitableMetric()])
+    evaluator = peppr.Evaluator([SometimesUnsuitableMetric()], match_method)
     system_ids = list_test_predictions()
     for system_id in system_ids:
         reference, poses = assemble_predictions(system_id)
@@ -206,10 +215,14 @@ def test_summarize_metrics_with_nan():
     assert summary["Metric bad"] + summary["Metric good"] == pytest.approx(1.0)
 
 
-def test_tolerate_exceptions():
+@pytest.mark.parametrize("tolerate_exceptions", [False, True])
+@pytest.mark.parametrize("match_method", list(peppr.Evaluator.MatchMethod))
+def test_tolerate_exceptions(match_method, tolerate_exceptions):
     """
-    Check if ``tolerate_exceptions`` leads to warnings instead of exceptions.
+    Check if ``tolerate_exceptions=True`` leads to warnings instead of exceptions.
+    If ``tolerate_exceptions=False``, the exception should be raised.
     """
+    EXCEPTION_MESSAGE = "Expected failure"
 
     class BrokenMetric(peppr.Metric):
         """
@@ -221,7 +234,7 @@ def test_tolerate_exceptions():
             return "Broken"
 
         def evaluate(self, reference, poses):
-            raise ValueError("Expected failure")
+            raise ValueError(EXCEPTION_MESSAGE)
 
         def requires_hydrogen(self):
             return False
@@ -229,14 +242,23 @@ def test_tolerate_exceptions():
         def smaller_is_better(self):
             return False
 
-    evaluator = peppr.Evaluator([BrokenMetric()], tolerate_exceptions=True)
+    evaluator = peppr.Evaluator(
+        [BrokenMetric()], match_method, tolerate_exceptions=tolerate_exceptions
+    )
     system_id = list_test_predictions()[0]
     reference, poses = assemble_predictions(system_id)
-    with pytest.warns(
-        peppr.EvaluationWarning,
-        match=f"Failed to evaluate Broken on '{system_id}': Expected failure",
-    ):
-        evaluator.feed(system_id, reference, poses[0])
+    if tolerate_exceptions:
+        with pytest.warns(
+            peppr.EvaluationWarning,
+            match=f"Failed to evaluate Broken on '{system_id}': {EXCEPTION_MESSAGE}",
+        ):
+            evaluator.feed(system_id, reference, poses[0])
+    else:
+        with pytest.raises(
+            ValueError,
+            match=EXCEPTION_MESSAGE,
+        ):
+            evaluator.feed(system_id, reference, poses[0])
 
 
 def test_combine():
@@ -257,3 +279,49 @@ def test_combine():
     test_table = combined_evaluator.tabulate_metrics()
 
     assert test_table.equals(ref_table)
+
+
+@pytest.mark.parametrize(
+    ["model_num", "optimal_bisy_rmsd"],
+    [
+        (1, 5.82),
+        (2, 11.49),
+        # For this one model the exhaustive method actually finds the optimal result
+        # (3, 7.68),
+        (4, 5.38),
+        (5, 10.59),
+    ],
+)
+def test_individual_match_method(model_num, optimal_bisy_rmsd):
+    """
+    Check if :attr:`Evaluator.MatchMethod.INDIVIDUAL` is able to find the optimal metric
+    value for a poorly predicted pose, where the other match methods fail.
+
+    The optimal results were computed with OpenStructure.
+    """
+    TOLERANCE = 0.1
+
+    system_dir = Path(__file__).parent / "data" / "poor" / "7yn2__1__1.A_1.B__1.C"
+    pdbx_file = pdbx.CIFFile.read(system_dir / "reference.cif")
+    reference = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    pdbx_file = pdbx.CIFFile.read(system_dir / "poses.cif")
+    pose = pdbx.get_structure(pdbx_file, model=model_num, include_bonds=True)
+
+    metric = peppr.BiSyRMSD(2.0)
+    exhaustive_evaluator = peppr.Evaluator(
+        [metric], peppr.Evaluator.MatchMethod.EXHAUSTIVE
+    )
+    exhaustive_evaluator.feed("foo", reference, pose)
+    exhaustive_bisy_rmsd = exhaustive_evaluator.get_results()[0][0]
+
+    individual_evaluator = peppr.Evaluator(
+        [metric], peppr.Evaluator.MatchMethod.INDIVIDUAL
+    )
+    individual_evaluator.feed("foo", reference, pose)
+    individual_bisy_rmsd = individual_evaluator.get_results()[0][0]
+
+    # Ensure the validity of this test,
+    # i.e. that the heuristic/exhaustive method is really insufficient
+    assert exhaustive_bisy_rmsd > optimal_bisy_rmsd + TOLERANCE
+    # The individual method should be able to find the optimal value
+    assert individual_bisy_rmsd <= optimal_bisy_rmsd + TOLERANCE

@@ -68,7 +68,7 @@ def test_metrics(metric, value_range):
 
     reference, poses = assemble_predictions(SYSTEM_ID)
     for pose in poses:
-        reference_order, pose_order = peppr.find_matching_atoms(reference, pose)
+        reference_order, pose_order = peppr.find_optimal_match(reference, pose)
         reference = reference[reference_order]
         pose = pose[pose_order]
         value = metric.evaluate(reference, pose)
@@ -249,7 +249,7 @@ def test_ligand_rmsd_with_no_contacts():
     """
     reference, poses = assemble_predictions("7znt__2__1.F_1.G__1.J")
     pose = poses[0]
-    reference_order, pose_order = peppr.find_matching_atoms(reference, pose)
+    reference_order, pose_order = peppr.find_optimal_match(reference, pose)
     reference = reference[reference_order]
     pose = pose[pose_order]
 

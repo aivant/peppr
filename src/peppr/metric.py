@@ -91,7 +91,7 @@ class Metric(ABC):
 
         Returns
         -------
-        np.ndarray, shape=(m,) or None
+        float
             The metric computed for each pose.
             *NaN*, if the structure is not suitable for this metric.
 

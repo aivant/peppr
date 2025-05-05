@@ -1,5 +1,9 @@
 # Test systems
 
+# `poor`
+
+Poor poses to check edge cases of atom matching.
+
 # `predictions`
 
 Reference and predicted pose structures for PROTAC test systems, i.e. every system
