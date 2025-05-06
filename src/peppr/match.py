@@ -842,6 +842,9 @@ def _assign_entity_ids(
                     entity_ids.append(entity_ids[j])
                     break
             else:
+                if sequences[j] is None:
+                    continue
+                
                 # Match protein chains by sequence identity
                 alignment = align.align_optimal(
                     sequence,
