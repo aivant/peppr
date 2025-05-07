@@ -48,15 +48,15 @@ def test_random_selector():
     assert np.isclose(np.mean(selected_values), 9, rtol=0.5)
 
 
-def test_variance_selector():
+def test_standard_deviation_selector():
     """
-    This test verifies that the VarianceSelector returns the expected value of
-    variance for a given set of values.
+    This test verifies that the StandardDeviationSelector returns the expected
+    value of standard deviation for a given set of values.
     """
-    selector = peppr.VarianceSelector()
+    selector = peppr.StandardDeviationSelector()
     values = np.linspace(0, 10, 10 + 1)
-    expected_variance = np.var(values)
+    expected_std = np.std(values)
 
     selected_value = selector.select(values, smaller_is_better=False)
 
-    assert np.isclose(selected_value, expected_variance)
+    assert np.isclose(selected_value, expected_std)

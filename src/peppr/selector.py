@@ -5,7 +5,7 @@ __all__ = [
     "OracleSelector",
     "TopSelector",
     "RandomSelector",
-    "VarianceSelector",
+    "StandardDeviationSelector",
 ]
 
 from abc import ABC, abstractmethod
@@ -167,15 +167,15 @@ class RandomSelector(Selector):
             return np.nanmax(top_values)
 
 
-class VarianceSelector(Selector):
+class StandardDeviationSelector(Selector):
     """
-    Selector that computes the variance of the values. This can be used to
-    assess the consistency of accuracy of a set of predicted poses.
+    Selector that computes the standard deviation of the values. This can be
+    used to assess the consistency of accuracy of a set of predicted poses.
     """
 
     @property
     def name(self) -> str:
-        return "variance"
+        return "stdev"
 
     def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
-        return np.nanvar(values)
+        return np.nanstd(values)
