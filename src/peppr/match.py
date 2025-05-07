@@ -836,16 +836,18 @@ def _assign_entity_ids(
     entity_ids: list[int] = []
     for i, (chain, sequence) in enumerate(zip(chains, sequences)):
         for j in range(i):
-            if sequence is None:
+            if (sequence is None and sequences[j] is not None) or (
+                sequence is not None and sequences[j] is None
+            ):
+                # Cannot match small molecules to polymer chains
+                continue
+            elif sequence is None:
                 # Match small molecules by residue name
                 if chain.res_name[0] == chains[j].res_name[0]:
                     entity_ids.append(entity_ids[j])
                     break
             else:
-                if sequences[j] is None:
-                    continue
-                
-                # Match protein chains by sequence identity
+                # Match polymer chains by sequence identity
                 alignment = align.align_optimal(
                     sequence,
                     sequences[j],
