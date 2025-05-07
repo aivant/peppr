@@ -169,7 +169,8 @@ class RandomSelector(Selector):
 
 class VarianceSelector(Selector):
     """
-    Selector that computes the variance of the values.
+    Selector that computes the variance of the values. This can be used to
+    assess the consistency of accuracy of a set of predicted poses.
     """
 
     @property
