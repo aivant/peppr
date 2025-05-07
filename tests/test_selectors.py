@@ -50,8 +50,6 @@ def test_random_selector():
 
 def test_variance_selector():
     """
-    Test the VarianceSelector's behavior.
-
     This test verifies that the VarianceSelector returns the expected value of
     variance for a given set of values.
     """
