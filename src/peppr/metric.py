@@ -19,6 +19,7 @@ __all__ = [
 ]
 
 import itertools
+import warnings
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Tuple
@@ -726,11 +727,16 @@ class BondLengthViolations(Metric):
             atom2_type = pose.element[j]
 
             if (atom1_type, atom2_type) in self._reference_bonds:
-                total_checked += 1
                 bond_length = struc.distance(pose[i], pose[j])
-                ideal_lengths = self._reference_bonds[(atom1_type, atom2_type)]
+                ideal_lengths = self._reference_bonds.get((atom1_type, atom2_type))
+                if ideal_lengths is None:
+                    warnings.warn(
+                        f"No reference bond length for {atom1_type}-{atom2_type} found. Ignoring {atom1_type}-{atom2_type} bond."
+                    )
+                    continue
                 if np.any(np.abs(bond_length - ideal_lengths) <= self._tolerance):
                     valid_bonds += 1
+                total_checked += 1
 
         if total_checked == 0:
             return np.nan
