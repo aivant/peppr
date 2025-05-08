@@ -641,8 +641,9 @@ class BiSyRMSD(Metric):
 
 class BondLengthViolations(Metric):
     """
-    Check for unusual bond lengths in the structure by comparing against reference values.
-    Returns the percentage of bonds that are within acceptable ranges.
+    Check for unusual bond lengths in the structure by comparing against reference
+    values.
+    Returns the percentage of bonds that are outside acceptable ranges.
 
     Parameters
     ----------
@@ -744,7 +745,7 @@ class BondAngleViolations(Metric):
     """
     Check for unusual bond angles in the structure by comparing against
     idealized bond geometry.
-    Returns the percentage of bonds that are within acceptable ranges.
+    Returns the percentage of bonds that are outside acceptable ranges.
 
     Parameters
     ----------
