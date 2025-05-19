@@ -105,6 +105,7 @@ class Evaluator(Mapping):
         min_sequence_identity: float = 0.95,
     ):
         self._metrics = tuple(metrics)
+        self._check_unique_metric_names()
         self._match_method = match_method
         self._max_matches = max_matches
         self._results: list[list[np.ndarray]] = [[] for _ in range(len(metrics))]
@@ -120,6 +121,11 @@ class Evaluator(Mapping):
     @property
     def system_ids(self) -> tuple[str, ...]:
         return tuple(self._ids)
+
+    def _check_unique_metric_names(self) -> None:
+        metric_names = [m.name for m in self._metrics]
+        if len(metric_names) != len(set(metric_names)):
+            raise ValueError(f"Metrics must have unique names, got {metric_names}")
 
     @staticmethod
     def combine(evaluators: Iterable["Evaluator"]) -> "Evaluator":
