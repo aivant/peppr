@@ -1,8 +1,8 @@
+import inspect
 import itertools
 import biotite.structure as struc
 import numpy as np
 import pytest
-import inspect
 import peppr
 from tests.common import (
     assemble_predictions,
