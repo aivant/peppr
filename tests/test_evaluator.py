@@ -90,7 +90,7 @@ def test_tabulate_metrics_with_unsuitable_metric(selectors, match_method):
         """
 
         @property
-        def name(self):
+        def _default_name(self):
             return "Unsuitable"
 
         def evaluate(self, reference, poses):
@@ -180,7 +180,7 @@ def test_summarize_metrics_with_nan(match_method):
             super().__init__()
 
         @property
-        def name(self):
+        def _default_name(self):
             return "Metric"
 
         @property
@@ -230,7 +230,7 @@ def test_tolerate_exceptions(match_method, tolerate_exceptions):
         """
 
         @property
-        def name(self):
+        def _default_name(self):
             return "Broken"
 
         def evaluate(self, reference, poses):
