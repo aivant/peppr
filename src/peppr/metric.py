@@ -51,8 +51,7 @@ class Metric(ABC):
     Parameters
     ----------
     custom_name : str, optional
-        A custom name for the metric. If not provided, each metric class will use
-        its _default_name.
+        A custom name for the metric. If not provided, the default name will be used.
 
     Attributes
     ----------
@@ -81,7 +80,15 @@ class Metric(ABC):
 
     @property
     def name(self) -> str:
-        """Return the custom name if provided, otherwise return the default name."""
+        """
+        The name of the metric.
+
+        Returns
+        -------
+        str
+            Returns the custom name if provided during instantiation, and the
+            default name otherwise.
+        """
         return (
             self._custom_name if self._custom_name is not None else self._default_name
         )
@@ -148,6 +155,8 @@ class MonomerRMSD(Metric):
     ca_only : bool, optional
         If ``True``, only consider :math:`C_{\alpha}` atoms.
         Otherwise, consider all heavy atoms.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
     """
 
     def __init__(
@@ -366,6 +375,8 @@ class GlobalLDDTScore(Metric):
         If ``True``, only consider :math:`C_{\alpha}` from peptides and :math:`C_3^'`
         from nucleic acids.
         Otherwise, consider all heavy atoms.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
 
     References
     ----------
@@ -406,6 +417,8 @@ class DockQScore(Metric):
     ----------
     include_pli : bool, optional
         If set to ``False``, small molecules are excluded from the calculation.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
 
     References
     ----------
@@ -618,6 +631,8 @@ class BiSyRMSD(Metric):
         The minimum number of anchors to use for the superimposition.
         If less than this number of anchors are present, the superimposition is
         performed on all interface backbone atoms.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
 
     References
     ----------
@@ -678,6 +693,8 @@ class BondLengthViolations(Metric):
     reference_bonds : dict, optional
         Dictionary mapping atom type pairs to ideal bond lengths.
         If not provided, uses a default set of common bond lengths.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
     """
 
     # Default reference bond lengths in Angstroms
@@ -782,6 +799,8 @@ class BondAngleViolations(Metric):
     ----------
     tolerance : float, optional
         The tolerance in radians for acceptable deviation from ideal bond angles.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
     """
 
     def __init__(
