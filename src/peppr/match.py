@@ -58,6 +58,7 @@ def find_optimal_match(
     min_sequence_identity: float = 0.95,
     use_heuristic: bool = True,
     max_matches: int | None = None,
+    sequence_identity_mode: str = "all",
 ) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
     """
     Find the atom indices for the given reference and pose structure that brings these
@@ -81,6 +82,9 @@ def find_optimal_match(
     max_matches : int, optional
         The maximum number of atom mappings to try, if the `use_heuristic` is set to
         ``False``.
+    sequence_identity_mode : str
+        The mode to use when computing sequence identity from alignments,
+        refer to biotite.sequence.align.get_sequence_identity
 
     Returns
     -------
@@ -118,11 +122,11 @@ def find_optimal_match(
 
     if use_heuristic:
         return _find_optimal_match_fast(
-            reference_chains, pose_chains, min_sequence_identity
+            reference_chains, pose_chains, min_sequence_identity, sequence_identity_mode
         )
     else:
         return _find_optimal_match_precise(
-            reference_chains, pose_chains, min_sequence_identity, max_matches
+            reference_chains, pose_chains, min_sequence_identity, max_matches, sequence_identity_mode
         )
 
 
@@ -130,6 +134,7 @@ def find_all_matches(
     reference: struc.AtomArray,
     pose: struc.AtomArray,
     min_sequence_identity: float = 0.95,
+    sequence_identity_mode: str = "all",
 ) -> Iterator[tuple[NDArray[np.int_], NDArray[np.int_]]]:
     """
     Find all possible atom mappings between the reference and the pose.
@@ -145,6 +150,9 @@ def find_all_matches(
     min_sequence_identity : float
         The minimum sequence identity between two chains to be considered the same
         entity.
+    sequence_identity_mode : str
+        The mode to use when computing sequence identity from alignments,
+        refer to biotite.sequence.align.get_sequence_identity
 
     Yields
     ------
@@ -160,7 +168,7 @@ def find_all_matches(
     """
     reference_chains = list(struc.chain_iter(reference))
     pose_chains = list(struc.chain_iter(pose))
-    for m in _all_global_mappings(reference_chains, pose_chains, min_sequence_identity):
+    for m in _all_global_mappings(reference_chains, pose_chains, min_sequence_identity, sequence_identity_mode):
         yield m
 
 
@@ -168,6 +176,7 @@ def _find_optimal_match_fast(
     reference_chains: list[struc.AtomArray],
     pose_chains: list[struc.AtomArray],
     min_sequence_identity: float = 0.95,
+    sequence_identity_mode: str = "all",
 ) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
     """
     Find the optimal atom order for each pose that minimizes the centroid RMSD to the
@@ -180,6 +189,9 @@ def _find_optimal_match_fast(
     min_sequence_identity : float
         The minimum sequence identity between two chains to be considered the same
         entity.
+    sequence_identity_mode : str
+        The mode to use when computing sequence identity from alignments,
+        refer to biotite.sequence.align.get_sequence_identity
 
     Returns
     -------
@@ -189,7 +201,7 @@ def _find_optimal_match_fast(
     # Assign reference and pose entity IDs in a single call
     # in order to assign the same ID to corresponding chains between reference and pose
     entity_ids = _assign_entity_ids(
-        reference_chains + pose_chains, min_sequence_identity
+        reference_chains + pose_chains, min_sequence_identity, sequence_identity_mode
     )
     # Split the entity IDs again
     reference_entity_ids = entity_ids[: len(reference_chains)]
@@ -250,6 +262,7 @@ def _find_optimal_match_precise(
     pose_chains: list[struc.AtomArray],
     min_sequence_identity: float = 0.95,
     max_matches: int | None = None,
+    sequence_identity_mode: str = "all",
 ) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
     """
     Find the optimal atom order for each pose that minimizes the all-atom RMSD to the
@@ -264,6 +277,9 @@ def _find_optimal_match_precise(
         entity.
     max_matches : int, optional
         The maximum number of mappings to try.
+    sequence_identity_mode : str
+        The mode to use when computing sequence identity from alignments,
+        refer to biotite.sequence.align.get_sequence_identity
 
     Returns
     -------
@@ -281,7 +297,7 @@ def _find_optimal_match_precise(
     best_rmsd = np.inf
     best_indices: tuple[NDArray[np.int_], NDArray[np.int_]] = None  # type: ignore[assignment]
     for it, (ref_indices, pose_indices) in enumerate(
-        _all_global_mappings(reference_chains, pose_chains, min_sequence_identity)
+        _all_global_mappings(reference_chains, pose_chains, min_sequence_identity, sequence_identity_mode)
     ):
         if max_matches is not None and it >= max_matches:
             break
@@ -301,6 +317,7 @@ def _all_global_mappings(
     reference_chains: list[struc.AtomArray],
     pose_chains: list[struc.AtomArray],
     min_sequence_identity: float = 0.95,
+    sequence_identity_mode: str = "all",
 ) -> Iterator[tuple[NDArray[np.int_], NDArray[np.int_]]]:
     """
     Find all possible atom mappings between the reference and the pose.
@@ -314,6 +331,9 @@ def _all_global_mappings(
     min_sequence_identity : float
         The minimum sequence identity between two chains to be considered the same
         entity.
+    sequence_identity_mode : str
+        The mode to use when computing sequence identity from alignments,
+        refer to biotite.sequence.align.get_sequence_identity
 
     Yields
     ------
@@ -329,7 +349,7 @@ def _all_global_mappings(
     # Assign reference and pose entity IDs in a single call
     # in order to assign the same ID to corresponding chains between reference and pose
     entity_ids = _assign_entity_ids(
-        reference_chains + pose_chains, min_sequence_identity
+        reference_chains + pose_chains, min_sequence_identity, sequence_identity_mode
     )
     # Split the entity IDs again
     reference_entity_ids = entity_ids[: len(reference_chains)]
@@ -807,6 +827,7 @@ def _molecule_mappings(
 def _assign_entity_ids(
     chains: list[struc.AtomArray],
     min_sequence_identity: float,
+    sequence_identity_mode: str,
 ) -> NDArray[np.int_]:
     """
     Assign a unique entity ID to each distinct chain.
@@ -821,6 +842,9 @@ def _assign_entity_ids(
     min_sequence_identity : float
         The minimum sequence identity between two chains to be considered the same
         entity.
+    sequence_identity_mode : str
+        The mode to use when computing sequence identity from alignments,
+        refer to biotite.sequence.align.get_sequence_identity
 
     Returns
     -------
@@ -858,7 +882,7 @@ def _assign_entity_ids(
                     max_number=1,
                 )[0]
                 if (
-                    align.get_sequence_identity(alignment, mode="all")
+                    align.get_sequence_identity(alignment, mode=sequence_identity_mode)
                     >= min_sequence_identity
                 ):
                     entity_ids.append(entity_ids[j])

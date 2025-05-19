@@ -57,6 +57,9 @@ class Evaluator(Mapping):
         Instead a warning is raised and the result is set to ``None``.
     min_sequence_identity : float
         The minimum sequence identity for two chains to be considered the same entity.
+    sequence_identity_mode : str
+        The mode to use when computing sequence identity from alignments,
+        refer to biotite.sequence.align.get_sequence_identity
 
     Attributes
     ----------
@@ -103,6 +106,7 @@ class Evaluator(Mapping):
         max_matches: int | None = None,
         tolerate_exceptions: bool = False,
         min_sequence_identity: float = 0.95,
+        sequence_identity_mode: str = "all",
     ):
         self._metrics = tuple(metrics)
         self._match_method = match_method
@@ -111,6 +115,7 @@ class Evaluator(Mapping):
         self._ids: list[str] = []
         self._tolerate_exceptions = tolerate_exceptions
         self._min_sequence_identity = min_sequence_identity
+        self._sequence_identity_mode = sequence_identity_mode
 
     @property
     def metrics(self) -> tuple[Metric, ...]:
@@ -387,6 +392,7 @@ class Evaluator(Mapping):
                 min_sequence_identity=self._min_sequence_identity,
                 use_heuristic=use_heuristic,
                 max_matches=self._max_matches,
+                sequence_identity_mode= self._sequence_identity_mode,
             )
             matched_reference = reference[reference_order]
             matched_pose = pose[pose_order]
@@ -452,6 +458,7 @@ class Evaluator(Mapping):
                         reference,
                         pose,
                         min_sequence_identity=self._min_sequence_identity,
+                        sequence_identity_mode= self._sequence_identity_mode,
                     )
                 ):
                     if self._max_matches is not None and it >= self._max_matches:
