@@ -106,9 +106,11 @@ def test_unsuitable_system(metric):
 
 def test_unique_names():
     """
-    Check if the names of the implemented metrics are unique.
+    Check if the default names of the implemented metrics are unique. Note that users can still
+    provide non-unique names via custom_name, so the Evaluator will check this separately in its
+    __init__ method.
     """
-    names = set(metric.name for metric in ALL_METRICS)
+    names = set(metric._default_name for metric in ALL_METRICS)
     assert len(names) == len(ALL_METRICS)
 
 
