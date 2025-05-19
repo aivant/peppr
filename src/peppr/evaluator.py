@@ -380,7 +380,6 @@ class Evaluator(Mapping):
         RMSD between the reference and pose.
         """
         results = np.full(len(self._metrics), np.nan)
-
         try:
             reference_order, pose_order = find_optimal_match(
                 reference,
@@ -391,18 +390,15 @@ class Evaluator(Mapping):
             )
             matched_reference = reference[reference_order]
             matched_pose = pose[pose_order]
+            # Sanity check if something went wrong in the matching
+            if not np.array_equal(matched_reference.element, matched_pose.element):
+                raise ValueError("Reference and pose arrays are not array_equal")
         except Exception as e:
             self._raise_or_warn(
                 e,
                 MatchWarning(
                     f"Failed to match reference and pose in system '{system_id}': {e}"
                 ),
-            )
-        # Sanity check if something went wrong in the matching
-        if not np.array_equal(matched_reference.element, matched_pose.element):
-            self._raise_or_warn(
-                ValueError(f"'{system_id}' poses could not be matched to reference"),
-                MatchWarning,
             )
 
         for i, metric in enumerate(self._metrics):
