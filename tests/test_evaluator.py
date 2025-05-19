@@ -90,7 +90,7 @@ def test_tabulate_metrics_with_unsuitable_metric(selectors, match_method):
         """
 
         @property
-        def name(self):
+        def _default_name(self):
             return "Unsuitable"
 
         def evaluate(self, reference, poses):
@@ -180,7 +180,7 @@ def test_summarize_metrics_with_nan(match_method):
             super().__init__()
 
         @property
-        def name(self):
+        def _default_name(self):
             return "Metric"
 
         @property
@@ -230,7 +230,7 @@ def test_tolerate_exceptions(match_method, tolerate_exceptions):
         """
 
         @property
-        def name(self):
+        def _default_name(self):
             return "Broken"
 
         def evaluate(self, reference, poses):
@@ -325,3 +325,22 @@ def test_individual_match_method(model_num, optimal_bisy_rmsd):
     assert exhaustive_bisy_rmsd > optimal_bisy_rmsd + TOLERANCE
     # The individual method should be able to find the optimal value
     assert individual_bisy_rmsd <= optimal_bisy_rmsd + TOLERANCE
+
+
+def test_unique_metric_names_in_evaluator():
+    """
+    Check that the Evaluator raises a ValueError when initialized with metrics
+    that have duplicate names.
+    """
+    # Create two metrics with the same name
+    metric1 = peppr.MonomerRMSD(5.0, custom_name="Same name")
+    metric2 = peppr.MonomerLDDTScore(custom_name="Same name")
+
+    # Test that initializing with duplicate names raises ValueError
+    with pytest.raises(ValueError, match="Metrics must have unique names"):
+        peppr.Evaluator([metric1, metric2])
+
+    # Test that initializing with unique names works
+    metric2 = peppr.MonomerLDDTScore(custom_name="Different name")
+    evaluator = peppr.Evaluator([metric1, metric2])
+    assert len(evaluator.metrics) == 2, "Evaluator should contain two metrics"

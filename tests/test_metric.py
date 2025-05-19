@@ -1,3 +1,4 @@
+import inspect
 import itertools
 import biotite.structure as struc
 import numpy as np
@@ -105,10 +106,44 @@ def test_unsuitable_system(metric):
 
 def test_unique_names():
     """
-    Check if the names of the implemented metrics are unique.
+    Check if the default names of the implemented metrics are unique. Note that users can still
+    provide non-unique names via custom_name, so the Evaluator will check this separately in its
+    __init__ method.
     """
-    names = set(metric.name for metric in ALL_METRICS)
+    names = set(metric._default_name for metric in ALL_METRICS)
     assert len(names) == len(ALL_METRICS)
+
+
+METRICS_WITH_THRESHOLDS = (peppr.MonomerRMSD, peppr.BiSyRMSD)
+
+
+@pytest.mark.parametrize("metric", ALL_METRICS, ids=lambda metric: metric.name)
+def test_custom_name(metric):
+    """
+    Test that metrics can be instantiated with custom names and that the name property
+    returns the custom name when provided and the default name otherwise.
+    """
+    default_name = metric.name
+
+    # Create a new instance with a custom name, and using the same parameters otherwise
+    metric_class = metric.__class__
+    init_signature = inspect.signature(metric_class.__init__)
+    bound_args = init_signature.bind_partial()
+    bound_args.apply_defaults()
+    args = bound_args.arguments
+    custom_name = f"Custom {default_name}"
+    args["custom_name"] = custom_name
+
+    # Handle metrics that require positional arguments
+    if isinstance(metric, METRICS_WITH_THRESHOLDS):
+        new_metric = metric_class(metric._threshold, **args)
+    else:
+        new_metric = metric_class(**args)
+
+    # Test that the custom name is being used
+    assert new_metric.name == custom_name, (
+        f"{metric_class}.name did not return custom name"
+    )
 
 
 @pytest.mark.parametrize(

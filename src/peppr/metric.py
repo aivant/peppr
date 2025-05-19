@@ -48,26 +48,50 @@ class Metric(ABC):
     The central :meth:`evaluate()` method takes a for a system reference and pose
     structures as input and returns a sclar score.
 
+    Parameters
+    ----------
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
+
     Attributes
     ----------
     name : str
-        The name of the metric.
+        The name of the metric, either the custom name provided during instantiation
+        or the default name defined by the metric class.
         Used for displaying the results via the :class:`Evaluator`.
-        **ABSTRACT:** Must be overridden by subclasses.
+    _default_name : str
+        **ABSTRACT**: Must be overridden by subclasses.
     thresholds : dict (str -> float)
         The named thresholds for the metric.
         Each threshold contains the lower bound
     """
 
-    def __init__(self) -> None:
+    def __init__(self, custom_name: str | None = None) -> None:
+        self._custom_name = custom_name
         thresholds = list(self.thresholds.values())
         if sorted(thresholds) != thresholds:
             raise ValueError("Thresholds must be sorted in ascending order")
 
     @property
     @abstractmethod
-    def name(self) -> str:
+    def _default_name(self) -> str:
+        """Return the default name for this metric."""
         raise NotImplementedError
+
+    @property
+    def name(self) -> str:
+        """
+        The name of the metric.
+
+        Returns
+        -------
+        str
+            Returns the custom name if provided during instantiation, and the
+            default name otherwise.
+        """
+        return (
+            self._custom_name if self._custom_name is not None else self._default_name
+        )
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
@@ -131,15 +155,19 @@ class MonomerRMSD(Metric):
     ca_only : bool, optional
         If ``True``, only consider :math:`C_{\alpha}` atoms.
         Otherwise, consider all heavy atoms.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
     """
 
-    def __init__(self, threshold: float, ca_only: bool = True) -> None:
+    def __init__(
+        self, threshold: float, ca_only: bool = True, custom_name: str | None = None
+    ) -> None:
         self._threshold = threshold
         self._ca_only = ca_only
-        super().__init__()
+        super().__init__(custom_name=custom_name)
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         if self._ca_only:
             return "CA-RMSD"
         else:
@@ -172,7 +200,7 @@ class MonomerTMScore(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "TM-score"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
@@ -209,7 +237,7 @@ class MonomerLDDTScore(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "intra protein lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
@@ -232,7 +260,7 @@ class IntraLigandLDDTScore(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "intra ligand lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
@@ -272,7 +300,7 @@ class LDDTPLIScore(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "protein-ligand lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
@@ -319,7 +347,7 @@ class LDDTPPIScore(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "protein-protein lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
@@ -347,18 +375,22 @@ class GlobalLDDTScore(Metric):
         If ``True``, only consider :math:`C_{\alpha}` from peptides and :math:`C_3^'`
         from nucleic acids.
         Otherwise, consider all heavy atoms.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
 
     References
     ----------
     .. [1] https://doi.org/10.1093/bioinformatics/btt473
     """
 
-    def __init__(self, backbone_only: bool = True) -> None:
+    def __init__(
+        self, backbone_only: bool = True, custom_name: str | None = None
+    ) -> None:
         self._backbone_only = backbone_only
-        super().__init__()
+        super().__init__(custom_name=custom_name)
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         if self._backbone_only:
             return "global backbone lDDT"
         else:
@@ -385,18 +417,22 @@ class DockQScore(Metric):
     ----------
     include_pli : bool, optional
         If set to ``False``, small molecules are excluded from the calculation.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
 
     References
     ----------
     .. [1] https://doi.org/10.1093/bioinformatics/btae586
     """
 
-    def __init__(self, include_pli: bool = True) -> None:
+    def __init__(
+        self, include_pli: bool = True, custom_name: str | None = None
+    ) -> None:
         self._include_pli = include_pli
-        super().__init__()
+        super().__init__(custom_name=custom_name)
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         if self._include_pli:
             return "DockQ"
         else:
@@ -450,7 +486,7 @@ class LigandRMSD(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "LRMSD"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
@@ -495,7 +531,7 @@ class InterfaceRMSD(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "iRMSD"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
@@ -520,7 +556,7 @@ class ContactFraction(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "fnat"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
@@ -546,7 +582,7 @@ class PocketAlignedLigandRMSD(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "PLI-LRMSD"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
@@ -595,6 +631,8 @@ class BiSyRMSD(Metric):
         The minimum number of anchors to use for the superimposition.
         If less than this number of anchors are present, the superimposition is
         performed on all interface backbone atoms.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
 
     References
     ----------
@@ -608,16 +646,17 @@ class BiSyRMSD(Metric):
         outlier_distance: float = 3.0,
         max_iterations: int = 5,
         min_anchors: int = 3,
+        custom_name: str | None = None,
     ) -> None:
         self._threshold = threshold
         self._inclusion_radius = inclusion_radius
         self._outlier_distance = outlier_distance
         self._max_iterations = max_iterations
         self._min_anchors = min_anchors
-        super().__init__()
+        super().__init__(custom_name=custom_name)
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "BiSyRMSD"
 
     @property
@@ -654,6 +693,8 @@ class BondLengthViolations(Metric):
     reference_bonds : dict, optional
         Dictionary mapping atom type pairs to ideal bond lengths.
         If not provided, uses a default set of common bond lengths.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
     """
 
     # Default reference bond lengths in Angstroms
@@ -672,6 +713,7 @@ class BondLengthViolations(Metric):
         self,
         tolerance: float = 0.1,
         reference_bonds: Dict[Tuple[str, str], np.ndarray] | None = None,
+        custom_name: str | None = None,
     ) -> None:
         self._tolerance = tolerance
         self._reference_bonds = (
@@ -682,10 +724,10 @@ class BondLengthViolations(Metric):
         # Add reverse pairs for convenience
         reverse_bonds = {(b, a): v for (a, b), v in self._reference_bonds.items()}
         self._reference_bonds.update(reverse_bonds)
-        super().__init__()
+        super().__init__(custom_name=custom_name)
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "Bond-length-violation"
 
     @property
@@ -757,14 +799,18 @@ class BondAngleViolations(Metric):
     ----------
     tolerance : float, optional
         The tolerance in radians for acceptable deviation from ideal bond angles.
+    custom_name : str, optional
+        A custom name for the metric. If not provided, the default name will be used.
     """
 
-    def __init__(self, tolerance: float = np.deg2rad(15.0)) -> None:
+    def __init__(
+        self, tolerance: float = np.deg2rad(15.0), custom_name: str | None = None
+    ) -> None:
         self._tolerance = tolerance
-        super().__init__()
+        super().__init__(custom_name=custom_name)
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "Bond-angle-violation"
 
     @property
@@ -824,7 +870,7 @@ class ClashCount(Metric):
     """
 
     @property
-    def name(self) -> str:
+    def _default_name(self) -> str:
         return "Number of clashes"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:

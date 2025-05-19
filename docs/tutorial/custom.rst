@@ -32,7 +32,7 @@ For the scope of this tutorial we will create an all-atom RMSD as metric.
 
         # This is mandatory
         @property
-        def name(self):
+        def _default_name(self):
             return "My awesome RMSD"
 
         # This optionally enables binning for `Evaluator.summarize_metrics()`
