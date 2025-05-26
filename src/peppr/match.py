@@ -603,6 +603,7 @@ def _find_common_residues(
         # We get mismatches due to cropping, not due to evolution
         # -> linear gap penalty makes most sense
         gap_penalty=-1,
+        terminal_penalty=False,
         max_number=1,
     )[0]
     # Remove gaps -> crop structures to common residues
@@ -855,10 +856,11 @@ def _assign_entity_ids(
                     # We get mismatches due to experimental artifacts, not evolution
                     # -> linear gap penalty makes most sense
                     gap_penalty=-1,
+                    terminal_penalty=False,
                     max_number=1,
                 )[0]
                 if (
-                    align.get_sequence_identity(alignment, mode="all")
+                    align.get_sequence_identity(alignment, mode="shortest")
                     >= min_sequence_identity
                 ):
                     entity_ids.append(entity_ids[j])
