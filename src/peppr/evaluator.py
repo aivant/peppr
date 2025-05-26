@@ -86,6 +86,11 @@ class Evaluator(Mapping):
           As this requires exhaustive iteration over all mappings and computing the
           each metric for all of them, this method is slower than ``EXHAUSTIVE``.
           However, it guarantees to find the optimal match for each metric.
+        - ``NO_MATCHING``: Skip atom matching entirely and evaluate metrics on the
+          structures as provided. This is useful when the reference and pose are
+          already properly aligned, or when using metrics that don't require
+          matching (e.g., bond-length violations, clash counts). This is the fastest
+          option but requires that atom ordering is already correct.
 
         References
         ----------
@@ -95,6 +100,7 @@ class Evaluator(Mapping):
         HEURISTIC = "heuristic"
         EXHAUSTIVE = "exhaustive"
         INDIVIDUAL = "individual"
+        NO_MATCHING = "no_matching"
 
     def __init__(
         self,
@@ -235,6 +241,14 @@ class Evaluator(Mapping):
                 ],
                 axis=-1,
             )
+        elif self._match_method == Evaluator.MatchMethod.NO_MATCHING:
+            result_for_system = np.stack(
+                [
+                    self._evaluate_without_matching(system_id, reference, pose)
+                    for pose in poses
+                ],
+                axis=-1,
+            )
         else:
             raise ValueError(f"Unknown match strategy: {self._match_method}")
 
@@ -366,6 +380,8 @@ class Evaluator(Mapping):
             return False
         if self._min_sequence_identity != other._min_sequence_identity:
             return False
+        if self._match_method != other._match_method:
+            return False
         return True
 
     def _evaluate_using_rmsd(
@@ -404,6 +420,29 @@ class Evaluator(Mapping):
         for i, metric in enumerate(self._metrics):
             try:
                 results[i] = metric.evaluate(matched_reference, matched_pose)
+            except Exception as e:
+                self._raise_or_warn(
+                    e,
+                    EvaluationWarning(
+                        f"Failed to evaluate {metric.name} on '{system_id}': {e}"
+                    ),
+                )
+        return results
+
+    def _evaluate_without_matching(
+        self, system_id: str, reference: struc.AtomArray, pose: struc.AtomArray
+    ) -> np.ndarray:
+        """
+        Run the metrics on the given system without performing any atom matching.
+
+        This assumes that the reference and pose structures are already properly
+        aligned with matching atom ordering.
+        """
+        results = np.full(len(self._metrics), np.nan)
+
+        for i, metric in enumerate(self._metrics):
+            try:
+                results[i] = metric.evaluate(reference, pose)
             except Exception as e:
                 self._raise_or_warn(
                     e,
