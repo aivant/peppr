@@ -433,7 +433,7 @@ class Evaluator(Mapping):
         Run the metrics on the given system without performing any atom matching.
 
         This assumes that the reference and pose structures are already properly
-        aligned with matching atom ordering.
+        aligned with matching atom ordering, or that the metrics don't require matching.
         """
         results = np.full(len(self._metrics), np.nan)
 
