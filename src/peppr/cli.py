@@ -342,6 +342,10 @@ def run(
                 raise click.ClickException("Reference and pose have different entities")
             print(f"{best_result:.3f}", file=sys.stdout)
 
+        case Evaluator.MatchMethod.NO_MATCHING:
+            result = metric.evaluate(reference, pose)
+            print(f"{result:.3f}", file=sys.stdout)
+
 
 def _evaluator_from_file(file: FileIO) -> Evaluator:
     """
