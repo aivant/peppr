@@ -89,8 +89,7 @@ class Evaluator(Mapping):
         - ``NO_MATCHING``: Skip atom matching entirely and evaluate metrics on the
           structures as provided. This is useful when the reference and pose are
           already properly aligned, or when using metrics that don't require
-          matching (e.g., bond-length violations, clash counts). This is the fastest
-          option but requires that atom ordering is already correct.
+          matching (e.g., bond-length violations, clash counts).
 
         References
         ----------
@@ -379,8 +378,6 @@ class Evaluator(Mapping):
         if self._tolerate_exceptions != other._tolerate_exceptions:
             return False
         if self._min_sequence_identity != other._min_sequence_identity:
-            return False
-        if self._match_method != other._match_method:
             return False
         return True
 
