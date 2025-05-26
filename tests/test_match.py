@@ -415,7 +415,7 @@ def test_exhaustive_mappings():
 
 
 def test_no_matching_avoids_sequence_mismatch_exception():
-    """Test that NO_MATCHING doesn't raise exception when sequences differ, but HEURISTIC does."""
+    """Test that NONE doesn't raise exception when sequences differ, but HEURISTIC does."""
     # Create reference structure - single chain
     reference = info.residue("ALA")
     reference = reference[reference.element != "H"]
@@ -441,10 +441,10 @@ def test_no_matching_avoids_sequence_mismatch_exception():
     with pytest.raises(peppr.UnmappableEntityError):
         evaluator_heuristic.feed("test_system", reference, pose)
 
-    # Test with NO_MATCHING - should not raise exception
+    # Test with NONE - should not raise exception
     evaluator_no_matching = peppr.Evaluator(
         [peppr.BondLengthViolations()],
-        match_method=peppr.Evaluator.MatchMethod.NO_MATCHING,
+        match_method=peppr.Evaluator.MatchMethod.NONE,
     )
 
     # This should not raise an exception
@@ -458,7 +458,7 @@ def test_no_matching_avoids_sequence_mismatch_exception():
 
 
 def test_no_matching_vs_heuristic_identical_sequences():
-    """Test that NO_MATCHING gives same results as HEURISTIC for identical sequences with coordinate noise."""
+    """Test that NONE gives same results as HEURISTIC for identical sequences with coordinate noise."""
     # Create reference structure
     reference = info.residue("ALA")
     reference = reference[reference.element != "H"]
@@ -476,7 +476,7 @@ def test_no_matching_vs_heuristic_identical_sequences():
         metrics, match_method=peppr.Evaluator.MatchMethod.HEURISTIC
     )
     evaluator_no_matching = peppr.Evaluator(
-        metrics, match_method=peppr.Evaluator.MatchMethod.NO_MATCHING
+        metrics, match_method=peppr.Evaluator.MatchMethod.NONE
     )
 
     evaluator_heuristic.feed("test", reference, pose)

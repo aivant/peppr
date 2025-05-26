@@ -86,7 +86,7 @@ class Evaluator(Mapping):
           As this requires exhaustive iteration over all mappings and computing the
           each metric for all of them, this method is slower than ``EXHAUSTIVE``.
           However, it guarantees to find the optimal match for each metric.
-        - ``NO_MATCHING``: Skip atom matching entirely and evaluate metrics on the
+        - ``NONE``: Skip atom matching entirely and evaluate metrics on the
           structures as provided. This is useful when the reference and pose are
           already properly aligned, or when using metrics that don't require
           matching (e.g., bond-length violations, clash counts).
@@ -99,7 +99,7 @@ class Evaluator(Mapping):
         HEURISTIC = "heuristic"
         EXHAUSTIVE = "exhaustive"
         INDIVIDUAL = "individual"
-        NO_MATCHING = "no_matching"
+        NONE = "none"
 
     def __init__(
         self,
@@ -240,7 +240,7 @@ class Evaluator(Mapping):
                 ],
                 axis=-1,
             )
-        elif self._match_method == Evaluator.MatchMethod.NO_MATCHING:
+        elif self._match_method == Evaluator.MatchMethod.NONE:
             result_for_system = np.stack(
                 [
                     self._evaluate_without_matching(system_id, reference, pose)

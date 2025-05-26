@@ -87,7 +87,10 @@ def cli() -> None:
         "all-atom RMSD.\n"
         "'individual': Exhaustively iterate through all valid atom mappings between "
         "the reference and pose for each metric individually and select the one that "
-        "gives the best metric value."
+        "gives the best metric value.\n"
+        "'none': Skip atom matching entirely and evaluate metrics on the structures "
+        "as provided. Useful when structures are already aligned or for metrics that "
+        "don't require matching."
     ),
 )
 @click.argument("EVALUATOR", type=click.File("wb", lazy=True))
@@ -283,7 +286,10 @@ def summarize(
         "the reference and pose and select the one that gives the lowest "
         "all-atom RMSD.\n"
         "'individual': Exhaustively iterate through all valid atom mappings between "
-        "the reference and pose and select the one that gives the best metric value."
+        "the reference and pose and select the one that gives the best metric value.\n"
+        "'none': Skip atom matching entirely and evaluate metrics on the structures "
+        "as provided. Useful when structures are already aligned or for metrics that "
+        "don't require matching."
     ),
 )
 @click.argument("METRIC", type=click.Choice(_METRICS.keys()))
@@ -342,7 +348,7 @@ def run(
                 raise click.ClickException("Reference and pose have different entities")
             print(f"{best_result:.3f}", file=sys.stdout)
 
-        case Evaluator.MatchMethod.NO_MATCHING:
+        case Evaluator.MatchMethod.NONE:
             result = metric.evaluate(reference, pose)
             print(f"{result:.3f}", file=sys.stdout)
 
