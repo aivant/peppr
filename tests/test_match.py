@@ -4,6 +4,7 @@ from math import factorial
 from pathlib import Path
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
+import biotite.structure.info as info
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
@@ -411,3 +412,88 @@ def test_exhaustive_mappings():
         ]
     )
     assert len(test_mappings_set) == len(test_mappings)
+
+
+def test_no_matching_avoids_sequence_mismatch_exception():
+    """Test that NONE doesn't raise exception when sequences differ, but HEURISTIC does."""
+    # Create reference structure - single chain
+    reference = info.residue("ALA")
+    reference = reference[reference.element != "H"]
+    reference.chain_id[:] = "A"  # Assign chain ID
+
+    # Create pose with two chains - different number of entities
+    pose1 = info.residue("ALA")
+    pose1 = pose1[pose1.element != "H"]
+    pose1.chain_id[:] = "A"
+
+    pose2 = info.residue("VAL")
+    pose2 = pose2[pose2.element != "H"]
+    pose2.chain_id[:] = "B"
+
+    pose = struc.concatenate([pose1, pose2])  # Two chains vs one chain
+
+    # Test with HEURISTIC - should raise UnmappableEntityError due to different number of chains
+    evaluator_heuristic = peppr.Evaluator(
+        [peppr.BondLengthViolations()],
+        match_method=peppr.Evaluator.MatchMethod.HEURISTIC,
+    )
+
+    with pytest.raises(peppr.UnmappableEntityError):
+        evaluator_heuristic.feed("test_system", reference, pose)
+
+    # Test with NONE - should not raise exception
+    evaluator_no_matching = peppr.Evaluator(
+        [peppr.BondLengthViolations()],
+        match_method=peppr.Evaluator.MatchMethod.NONE,
+    )
+
+    # This should not raise an exception
+    evaluator_no_matching.feed("test_system", reference, pose)
+    results = evaluator_no_matching.get_results()
+
+    # Should get some result
+    assert len(results) == 1
+    assert len(results[0]) == 1
+    assert len(results[0][0]) == 1
+
+
+def test_no_matching_vs_heuristic_identical_sequences():
+    """Test that NONE gives same results as HEURISTIC for identical sequences with coordinate noise."""
+    # Create reference structure
+    reference = info.residue("ALA")
+    reference = reference[reference.element != "H"]
+
+    # Create pose with identical sequence but slightly different coordinates
+    pose = reference.copy()
+    # Add small random noise to coordinates
+    rng = np.random.default_rng(seed=42)
+    pose.coord += rng.normal(scale=0.5, size=pose.coord.shape)
+
+    # Metrics that should give similar results regardless of matching method
+    metrics = [peppr.BondLengthViolations(), peppr.ClashCount()]
+
+    evaluator_heuristic = peppr.Evaluator(
+        metrics, match_method=peppr.Evaluator.MatchMethod.HEURISTIC
+    )
+    evaluator_no_matching = peppr.Evaluator(
+        metrics, match_method=peppr.Evaluator.MatchMethod.NONE
+    )
+
+    evaluator_heuristic.feed("test", reference, pose)
+    evaluator_no_matching.feed("test", reference, pose)
+
+    results_heuristic = evaluator_heuristic.get_results()
+    results_no_matching = evaluator_no_matching.get_results()
+
+    # Results should be very similar (allowing for small numerical differences)
+    for i in range(len(metrics)):
+        assert results_heuristic[i][0] > 0.0, (
+            "Bond length violations should be non-zero"
+        )
+        assert np.allclose(
+            results_heuristic[i][0],
+            results_no_matching[i][0],
+            rtol=1e-10,
+            atol=1e-10,
+            equal_nan=True,
+        )
