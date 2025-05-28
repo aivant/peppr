@@ -36,6 +36,7 @@ The metrics for pose evaluation.
     PocketAlignedLigandRMSD
     BiSyRMSD
     BondLengthViolations
+    BondAngleViolations
     ClashCount
 
 Selectors
