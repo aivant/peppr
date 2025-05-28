@@ -77,7 +77,7 @@ Atom Matching
 -------------
 .. autosummary::
     :toctree: apidoc
-    :caption: Miscellaneous
+    :caption: Atom Matching
 
     find_optimal_match
     find_all_matches
