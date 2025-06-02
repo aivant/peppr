@@ -310,6 +310,43 @@ def test_matching_small_molecules(comp_name, swap_atom_names, shuffle):
     assert struc.rmsd(reference, pose) == pytest.approx(0.0, abs=1e-6)
 
 
+@pytest.mark.filterwarnings("error::peppr.GraphMatchWarning")
+def test_match_kekulized_to_aromatic():
+    """
+    Check if an aromatic molecule can be matched to the same molecule where its
+    bonds are kekulized.
+    """
+    # A molecule without symmetry
+    COMP_NAME = "HIS"
+
+    reference = struc.info.residue(COMP_NAME)
+    reference = reference[reference.element != "H"]
+    reference.hetero[:] = True
+
+    pose = reference.copy()
+    # Kekulize the bonds
+    bond_array = pose.bonds.as_array()
+    for aromatic_bond_type, kelulized_bond_type in [
+        (struc.BondType.AROMATIC_SINGLE, struc.BondType.SINGLE),
+        (struc.BondType.AROMATIC_DOUBLE, struc.BondType.DOUBLE),
+        (struc.BondType.AROMATIC_TRIPLE, struc.BondType.TRIPLE),
+    ]:
+        mask = bond_array[:, 2] == aromatic_bond_type
+        bond_array[mask, 2] = kelulized_bond_type
+    pose.bonds = struc.BondList(pose.array_length(), bond_array)
+
+    # Shuffle atom order to increase difficulty
+    rng = np.random.default_rng(seed=0)
+    pose = pose[rng.permutation(pose.array_length())]
+
+    reference_order, pose_order = peppr.find_optimal_match(reference, pose)
+
+    assert (
+        pose.atom_name[pose_order].tolist()
+        == reference.atom_name[reference_order].tolist()
+    )
+
+
 @pytest.mark.parametrize("mirror", [False, True])
 def test_no_matching_of_enantiomers(bromochlorofluoromethane, mirror):
     """
