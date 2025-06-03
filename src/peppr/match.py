@@ -1005,8 +1005,11 @@ def _to_mol(molecule: struc.AtomArray) -> Mol:
     mol = rdkit_interface.to_mol(molecule)
     # Make RDKit distinguish stereoisomers when matching atoms
     AssignStereochemistryFrom3D(mol)
-    # Make conjugated terminal groups symmetric (e.g. carboxyl oxygen atoms)
-    SanitizeMol(mol, SanitizeFlags.SANITIZE_SETCONJUGATION)
+    SanitizeMol(
+        mol,
+        SanitizeFlags.SANITIZE_SETCONJUGATION | SanitizeFlags.SANITIZE_SETAROMATICITY,
+    )
+    # Make conjugated terminal groups truly symmetric (e.g. carboxyl oxygen atoms)
     for bond in mol.GetBonds():
         if bond.GetIsConjugated() and bond.GetBondType() in [
             BondType.SINGLE,
