@@ -72,6 +72,7 @@ that are not directly implemented :mod:`biotite.structure`.
     irmsd
     fnat
     DockQ
+    ContactMeasurement
 
 Atom Matching
 -------------
@@ -95,6 +96,7 @@ Miscellaneous
     standardize
     is_small_molecule
     get_contact_residues
+    find_atoms_by_pattern
     MatchWarning
     EvaluationWarning
     NoContactError
