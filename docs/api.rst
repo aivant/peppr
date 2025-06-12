@@ -97,6 +97,7 @@ Miscellaneous
     is_small_molecule
     get_contact_residues
     find_atoms_by_pattern
+    estimate_formal_charges
     MatchWarning
     EvaluationWarning
     NoContactError

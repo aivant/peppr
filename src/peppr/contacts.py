@@ -7,7 +7,8 @@ import biotite.structure.info as info
 import numpy as np
 import rdkit.Chem.AllChem as Chem
 from numpy.typing import NDArray
-import peppr
+from peppr.charge import estimate_formal_charges
+from peppr.sanitize import sanitize
 
 # Create a proper Python Enum for the RDKit HybridizationType
 HybridizationType = IntEnum(  # type: ignore[misc]
@@ -88,12 +89,19 @@ class ContactMeasurement:
         self._binding_site = binding_site
         self._ligand = ligand.copy()
 
+        # Detect charged atoms to find salt bridges
+        # and detect molecular patterns involving charged atoms
+        self._binding_site.set_annotation(
+            "charge", estimate_formal_charges(self._binding_site, ph)
+        )
+        self._ligand.set_annotation("charge", estimate_formal_charges(self._ligand, ph))
+
         # Convert to 'Mol' object to allow for matching SMARTS patterns
         self._binding_site_mol = rdkit_interface.to_mol(self._binding_site)
         self._ligand_mol = rdkit_interface.to_mol(self._ligand)
         # For matching some SMARTS strings a properly sanitized molecule is required
-        peppr.sanitize(self._binding_site_mol)
-        peppr.sanitize(self._ligand_mol)
+        sanitize(self._binding_site_mol)
+        sanitize(self._ligand_mol)
 
     def find_contacts_by_pattern(
         self,

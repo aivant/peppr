@@ -1,4 +1,5 @@
 from .bisyrmsd import *
+from .charge import *
 from .clashes import *
 from .common import *
 from .contacts import *
