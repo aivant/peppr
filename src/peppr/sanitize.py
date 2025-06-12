@@ -110,8 +110,13 @@ def _is_same_problem(problem1: Exception, problem2: Exception) -> bool:
     same : bool
         True if the two problems are the same.
     """
-    if problem1.GetType() != problem2.GetType():
+    problem_type = problem1.GetType()
+    if problem_type != problem2.GetType():
         return False
-    if problem1.GetAtomIndices() != problem2.GetAtomIndices():
-        return False
+    elif problem_type == "AtomValenceException":
+        if problem1.GetAtomIdx() != problem2.GetAtomIdx():
+            return False
+    elif problem_type == "KekulizeException":
+        if problem1.GetAtomIndices() != problem2.GetAtomIndices():
+            return False
     return True
