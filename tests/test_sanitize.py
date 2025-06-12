@@ -3,6 +3,7 @@ from rdkit import Chem
 from peppr.sanitize import sanitize
 
 
+@pytest.mark.parametrize("multiple_problems", [False, True])
 @pytest.mark.parametrize(
     "smiles",
     [
@@ -12,7 +13,16 @@ from peppr.sanitize import sanitize
         "C1CCCC=O1",
     ],
 )
-def test_soft_rdkit_sanitize_mol(smiles):
+def test_sanitize(smiles, multiple_problems):
+    """
+    Check if :func:`sanitize()` is able to fix the chemistry problems in the
+    given molecules.
+
+    Also check if molecules with the same problem appearing multiple times can
+    be solved, by creating a :class:`Mol` containing two copies of the molecule.
+    """
+    if multiple_problems:
+        smiles = smiles + "." + smiles
     mol = Chem.MolFromSmiles(smiles, sanitize=False)
     assert len(Chem.DetectChemistryProblems(mol)) > 0
     sanitize(mol)
