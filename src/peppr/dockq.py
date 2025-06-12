@@ -605,7 +605,7 @@ def _as_set(array: NDArray[np.int_]) -> set[tuple[int, int]]:
     """
     Convert an array of tuples into a set of tuples.
     """
-    return set([tuple(c) for c in array])
+    return set([tuple(c) for c in array])  # type: ignore[misc]
 
 
 def _to_sparse_indices(all_contacts: NDArray[np.int_]) -> NDArray[np.int_]:
