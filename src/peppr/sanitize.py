@@ -30,9 +30,14 @@ def sanitize(mol: Chem.Mol, max_fix_iterations: int = 1000) -> None:
     mol.UpdatePropertyCache(strict=False)
     prev_problems: list[Exception] = []
 
-    # RDKit detects probels iteratively,
+    # RDKit detects problems iteratively,
     # i.e. new problems may show up as soon as previous problems are fixed
+    encountered_same_problem = False
     for _ in range(max_fix_iterations):
+        if encountered_same_problem:
+            # Fixing this problem previously failed,
+            # so there is no need to try again
+            break
         with rdkit.rdBase.BlockLogs():
             # Temporarily disable RDKit verbosity while in scope
             problems = Chem.DetectChemistryProblems(mol)
@@ -42,9 +47,7 @@ def sanitize(mol: Chem.Mol, max_fix_iterations: int = 1000) -> None:
         for problem in problems:
             for prev_problem in prev_problems:
                 if _is_same_problem(problem, prev_problem):
-                    # Fixing this problem previously failed,
-                    # so there is no need to try again
-                    break
+                    encountered_same_problem = True
         for problem in problems:
             _fix_problem(mol, problem)
         prev_problems = list(problems)
