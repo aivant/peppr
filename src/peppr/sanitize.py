@@ -77,9 +77,7 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
             return
         elif elem in [7, 8]:
             # only process positively charged N, O atoms
-            opt_charge = at.GetValence(
-                Chem.ValenceType.EXPLICIT
-            ) - pt.GetDefaultValence(elem)
+            opt_charge = at.GetTotalValence() - pt.GetDefaultValence(elem)
             formal_charge = at.GetFormalCharge()
             if opt_charge > formal_charge:
                 if abs(opt_charge) > 1:
