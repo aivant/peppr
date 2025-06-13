@@ -96,7 +96,11 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
         for atidx in problem.GetAtomIndices():
             at = mol.GetAtomWithIdx(atidx)
             # set one of the nitrogens with two bonds in a ring system as "[nH]"
-            if at.GetAtomicNum() == 7 and at.GetDegree() == 2:
+            if (
+                at.GetAtomicNum() == 7
+                and at.GetDegree() == 2
+                and at.GetTotalNumHs() == 0
+            ):
                 at.SetNumExplicitHs(1)
                 break
 
