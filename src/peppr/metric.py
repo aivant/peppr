@@ -794,11 +794,13 @@ class BondAngleViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
-        if pose.bonds is None:
+        if pose.array_length() == 0:
             return np.nan
-
         # Idealize the pose local geometry to make the reference
-        reference = idealize_bonds(pose)
+        try:
+            reference = idealize_bonds(pose)
+        except struc.BadStructureError:
+            return np.nan
 
         # Check the angle of all bonded triples
         graph = reference.bonds.as_graph()
@@ -926,7 +928,7 @@ def _run_for_each_chain_pair(
                 pose_chains[chain_j],
             )
         )
-    if len(results) == 0:
+    if len(results) == 0 or np.isnan(results).all():
         return np.nan
     return np.nanmean(results).item()
 

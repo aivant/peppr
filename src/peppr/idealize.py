@@ -26,7 +26,10 @@ def idealize_bonds(pose: struc.AtomArray) -> struc.AtomArray:
     """
     # Generate an rdkit mol
     mol = rdkit_interface.to_mol(pose, explicit_hydrogen=False)
-    sanitize(mol)
+    try:
+        sanitize(mol)
+    except Exception:
+        raise struc.BadStructureError("Cannot idealize invalid molecule")
 
     # Set `nonBondedThresh` very high and `ignoreInterfragInteractions=True`
     # to effectively ignore clashes
