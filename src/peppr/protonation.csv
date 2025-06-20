@@ -1,0 +1,30 @@
+# Adapted from https://github.com/openbabel/openbabel/blob/master/data/phmodel.txt
+# this uses SMARTS extensions described here: https://www.rdkit.org/docs/RDKit_Book.html#smarts-support-and-extensions
+group;ph;charge;description
+# ionizable nitrogens
+"[N^3v3+0,N^3v4!H0+1;$(N-[#6^3+0]);!$(N~[!#6;!#1]);!$(N-a);!$(N-[#6,#16]=[#7,#8]):1]";<10.0;+1;charged amine
+"[N^2v3+0,N^2v4!H0+1;$(N-[#6^2+0]);!$(N~[!#6;!#1]);!$(N-[#6,#16]=[#7,#8]):1]";<4.6;+1;charged aniline
+"[N^2v3+0,N^2v4!H0+1;$(N=[#6^2+0]);!$(N~[!#6;!#1]);!$(N=C~[#7,#8]):1]";<4.0;+1;imine
+"[N^2v3+0,N^2v4!H0+1;$(N=[#6^2+0]~[N^2+0]);!$(N~[!#6;!#1]):1]";<12.5;+1;guanidine or amidine
+# ionizable ring nitrogens
+"[nD2H0+0,nD2H1+1:1]1c[nH]cc1";<7.0;+1;imidazole
+"[nD2H1-0,nD2H0-1:1]1[nD2H0-0][nD2H0-0][nD2H0-0]c1";>4.89;-1;tetrazole
+"[nD2H0-0]1[nD2H1-0,nD2H0-1:1][nD2H0-0][nD2H0-0]c1";>4.89;-1;tetrazole
+# ionizable oxygens
+"[OD1+0,OD1H1+0,OD1H0-1;$(O-C=O):1]";>4.0;-1;carboxy group
+"[OD1+0,OD1H1+0,OD1H0-1;$([OD1]-NC=O):1]";>8.0;-1;hydroxamic acid
+"[OD1+0,OD1H1+0,OD1H0-1;$([OD1]-C=CC=O):1]";>4.0;-1;vinylogous carboxylic acids (e.g. ascorbic acid)
+"[OD1+0,OD1H1+0,OD1H0-1;$([OD1]-[#6^2]);!$(O~[!#6;!#1]);!$(O-[#6,#16]=[#7,#8]);!$(OC=CC=O):1]";>10.0;-1;phenol or tyrosine
+"[OD1+0,OD1H1+0,OD1H0-1;$([OD1]-[#6]);!$(O~[!#6;!#1]);!$(O-a);!$(O-[#6,#16]=[#7,#8]);!$(OC=CC=O):1]";>16.0;-1;alkohol or serine
+# ionizable sulfo oxygens
+"[OD1+0,OD1H1+0,OD1H0-1;$([OD1]-[SD3](=O)):1]";>2.0;-1;sulfinic acid
+"[OD1+0,OD1H1+0,OD1H0-1;$([OD1]-[SD4]([OD1,!D1])(=O)(=O)):1]";>-2.6;-1;sulfonic acid, or sulfates
+# ionizable phospho oxygens
+"[OD1+0,OD1H1+0,OD1H0-1;$([OD1]-[PD4](=O)([OD1,OD2H0])([OD1,OD2H0,#6])):1]";>2.2;-1;phosphoric or phosphonic acid (or ester), or phosphate
+# NOTE: phosphate second ionization happens around pH 7
+# this nuance will be missed in this model as above pattern ionizes both at once!
+# the attempt to make this dynamic would be beyond the scope of this simplistic model
+# "[OD1+0,OD1H1+0,OD1H0-1;$([OD1]-[PD4](=O)([OD1H0-1])([OD2H0,#6])):1]";>7.2;-1;
+# ionizable sulfurs
+"[SD1v2+0,SD1v2H1+0,SD1v2H0-1;!$(S~[!#6;!#1]);!$(S-a);!$(S-[#6,#16]=[#7,#8]):1]";>8.3;-1;thiol or cysteine
+"[SD1v2+0,SD1v2H1+0,SD1v2H0-1;$([SD1]-c);!$(S~[!#6;!#1]);!$(S-[#6,#16]=[#7,#8]):1]";>6.6;-1;thiophenol
