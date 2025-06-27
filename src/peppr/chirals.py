@@ -11,8 +11,7 @@ def get_chirality(mol: Chem.Mol) -> Dict[int, str]:
     Extract chirality information from an RDKit molecule.
 
     This function identifies all tetrahedral chiral centers in the molecule
-    and returns their chirality in CW/CCW notation, which is RDKit's native
-    representation.
+    and returns their chirality in CW/CCW notation.
 
     Parameters
     ----------
