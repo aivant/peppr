@@ -16,6 +16,7 @@ __all__ = [
     "BondLengthViolations",
     "BondAngleViolations",
     "ClashCount",
+    "ChiralityViolations",
 ]
 
 import itertools
@@ -23,6 +24,7 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Tuple
+import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 import numpy as np
 from numpy.typing import NDArray
@@ -39,6 +41,7 @@ from peppr.dockq import (
 )
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
+from peppr.chirals import get_chirality
 
 
 class Metric(ABC):
@@ -834,6 +837,40 @@ class ClashCount(Metric):
             return np.nan
         return len(find_clashes(pose))
 
+    def smaller_is_better(self) -> bool:
+        return True
+    
+
+class ChiralityViolations(Metric):
+    @property
+    def name(self) -> str:
+        return "Chirality-violation"
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """Returns the fraction of tetrahedral chiral centers have a different chirality
+        in the reference as compared to the pose.
+        """
+        if pose.array_length() == 0:
+            return np.nan
+
+        # Convert the reference and pose to RDKit molecules
+        ref_mol = rdkit_interface.to_mol(reference, explicit_hydrogen=False)
+        pose_mol = rdkit_interface.to_mol(pose, explicit_hydrogen=False)
+
+        # Get the chirality of the reference and pose
+        ref_chirality = get_chirality(ref_mol)
+        pose_chirality = get_chirality(pose_mol)
+
+        # Count the number of violations
+        violation_count = 0
+        for atom_idx, ref_chirality_type in ref_chirality.items():
+            if atom_idx in pose_chirality:
+                if pose_chirality[atom_idx] != ref_chirality_type:
+                    violation_count += 1
+            else:
+                violation_count += 1
+        return violation_count / (len(ref_chirality) + 1e-6)
+    
     def smaller_is_better(self) -> bool:
         return True
 

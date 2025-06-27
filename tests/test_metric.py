@@ -29,6 +29,7 @@ ALL_METRICS = [
     peppr.BondLengthViolations(),
     peppr.ClashCount(),
     peppr.BondAngleViolations(),
+    peppr.ChiralityViolations(),
 ]
 
 
