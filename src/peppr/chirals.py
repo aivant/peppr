@@ -38,15 +38,6 @@ def get_chirality(mol: Chem.Mol) -> Dict[int, str]:
     >>> print(chirality)
     {1: 'CCW'}
     """
-    if mol is None:
-        raise ValueError("Invalid molecule provided")
-
-    # Ensure the molecule has 3D coordinates for proper chirality perception
-    if mol.GetNumConformers() == 0:
-        # Generate 3D coordinates if none exist
-        AllChem.EmbedMolecule(mol)
-        AllChem.MMFFOptimizeMolecule(mol)
-
     chirality_dict = {}
 
     for atom in mol.GetAtoms():
