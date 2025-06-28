@@ -861,6 +861,9 @@ class ChiralityViolations(Metric):
         ref_chirality = get_chirality(ref_mol)
         pose_chirality = get_chirality(pose_mol)
 
+        if len(ref_chirality) == 0:
+            return np.nan
+
         # Count the number of violations
         violation_count = 0
         for atom_idx, ref_chirality_type in ref_chirality.items():
@@ -869,7 +872,7 @@ class ChiralityViolations(Metric):
                     violation_count += 1
             else:
                 violation_count += 1
-        return violation_count / (len(ref_chirality) + 1e-6)
+        return violation_count / len(ref_chirality)
     
     def smaller_is_better(self) -> bool:
         return True
