@@ -842,14 +842,33 @@ class ClashCount(Metric):
 
 
 class ChiralityViolations(Metric):
+    """
+    Check for differences in the chirality of the reference and pose.
+    """
+
     @property
     def name(self) -> str:
         return "Chirality-violation"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        """Returns the fraction of tetrahedral chiral centers have a different chirality
-        in the reference as compared to the pose.
         """
+        Returns the fraction of chiral centers that have a different chirality
+        in the reference as compared to the pose.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            The reference structure of the system.
+        pose : AtomArray
+            The predicted pose.
+            Must have the same length and atom order as the `reference`.
+
+        Returns
+        -------
+        float
+            The fraction of chiral centers that have a different chirality in the reference as compared to the pose.
+        """
+
         if pose.array_length() == 0:
             return np.nan
 
