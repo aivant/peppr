@@ -29,6 +29,7 @@ import biotite.structure as struc
 import numpy as np
 from numpy.typing import NDArray
 from peppr.bisyrmsd import bisy_rmsd
+from peppr.chirals import get_chirality
 from peppr.clashes import find_clashes
 from peppr.common import is_small_molecule
 from peppr.dockq import (
@@ -41,7 +42,6 @@ from peppr.dockq import (
 )
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
-from peppr.chirals import get_chirality
 
 
 class Metric(ABC):
@@ -839,7 +839,7 @@ class ClashCount(Metric):
 
     def smaller_is_better(self) -> bool:
         return True
-    
+
 
 class ChiralityViolations(Metric):
     @property
@@ -873,7 +873,7 @@ class ChiralityViolations(Metric):
             else:
                 violation_count += 1
         return violation_count / len(ref_chirality)
-    
+
     def smaller_is_better(self) -> bool:
         return True
 

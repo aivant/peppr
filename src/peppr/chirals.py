@@ -3,7 +3,6 @@ __all__ = ["get_chirality"]
 
 from typing import Dict
 from rdkit import Chem
-from rdkit.Chem import AllChem
 
 
 def get_chirality(mol: Chem.Mol) -> Dict[int, str]:
@@ -47,11 +46,8 @@ def get_chirality(mol: Chem.Mol) -> Dict[int, str]:
             chiral_tag = atom.GetChiralTag()
 
             if chiral_tag == Chem.ChiralType.CHI_TETRAHEDRAL_CW:
-                chirality_dict[atom.GetIdx()] = 'CW'
+                chirality_dict[atom.GetIdx()] = "CW"
             elif chiral_tag == Chem.ChiralType.CHI_TETRAHEDRAL_CCW:
-                chirality_dict[atom.GetIdx()] = 'CCW'
+                chirality_dict[atom.GetIdx()] = "CCW"
 
     return chirality_dict
-
-
-
