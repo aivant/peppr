@@ -56,6 +56,7 @@ ALL_METRICS = [
         (peppr.BondLengthViolations(), (0.0, 1.0)),
         (peppr.ClashCount(), (0, 10000)),
         (peppr.BondAngleViolations(), (0.0, 1.0)),
+        (peppr.ChiralityViolations(), (0.0, 1.0)),
     ],
     ids=lambda x: x.name if isinstance(x, peppr.Metric) else "",
 )

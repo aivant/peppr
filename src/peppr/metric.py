@@ -28,8 +28,8 @@ import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 import numpy as np
 from numpy.typing import NDArray
+from rdkit import Chem
 from peppr.bisyrmsd import bisy_rmsd
-from peppr.chirals import get_chirality
 from peppr.clashes import find_clashes
 from peppr.common import is_small_molecule
 from peppr.dockq import (
@@ -857,22 +857,21 @@ class ChiralityViolations(Metric):
         ref_mol = rdkit_interface.to_mol(reference, explicit_hydrogen=False)
         pose_mol = rdkit_interface.to_mol(pose, explicit_hydrogen=False)
 
+        # Assign chiral centers
+        Chem.AssignStereochemistryFrom3D(ref_mol)
+        Chem.AssignStereochemistryFrom3D(pose_mol)
+
         # Get the chirality of the reference and pose
-        ref_chirality = get_chirality(ref_mol)
-        pose_chirality = get_chirality(pose_mol)
+        ref_chirality = np.array([atom.GetChiralTag() for atom in ref_mol.GetAtoms()])
+        pose_chirality = np.array([atom.GetChiralTag() for atom in pose_mol.GetAtoms()])
 
-        if len(ref_chirality) == 0:
+        chiral_count = np.count_nonzero(ref_chirality != int(Chem.ChiralType.CHI_UNSPECIFIED))
+        violation_count = np.count_nonzero(ref_chirality != pose_chirality)
+
+        if chiral_count == 0:
             return np.nan
-
-        # Count the number of violations
-        violation_count = 0
-        for atom_idx, ref_chirality_type in ref_chirality.items():
-            if atom_idx in pose_chirality:
-                if pose_chirality[atom_idx] != ref_chirality_type:
-                    violation_count += 1
-            else:
-                violation_count += 1
-        return violation_count / len(ref_chirality)
+        
+        return violation_count / chiral_count
 
     def smaller_is_better(self) -> bool:
         return True
