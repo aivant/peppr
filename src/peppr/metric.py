@@ -865,12 +865,14 @@ class ChiralityViolations(Metric):
         ref_chirality = np.array([atom.GetChiralTag() for atom in ref_mol.GetAtoms()])
         pose_chirality = np.array([atom.GetChiralTag() for atom in pose_mol.GetAtoms()])
 
-        chiral_count = np.count_nonzero(ref_chirality != int(Chem.ChiralType.CHI_UNSPECIFIED))
+        chiral_count = np.count_nonzero(
+            ref_chirality != int(Chem.ChiralType.CHI_UNSPECIFIED)
+        )
         violation_count = np.count_nonzero(ref_chirality != pose_chirality)
 
         if chiral_count == 0:
             return np.nan
-        
+
         return violation_count / chiral_count
 
     def smaller_is_better(self) -> bool:
