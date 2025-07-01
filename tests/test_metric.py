@@ -294,3 +294,22 @@ def test_ligand_only_system(metric):
     # For most metrics, we expect a valid numeric value or NaN
     # (NaN is acceptable for metrics that can't handle the input)
     assert np.isnan(value) or isinstance(value, (int, float))
+
+
+def test_chirality_violations():
+    """
+    Comparing a molecule with itself should return 0% chirality violations.
+    Comparing a molecule with its mirror image should return 100% chirality violations.
+    """
+    SYSTEM_ID = "7znt__2__1.F_1.G__1.J"
+    reference, _ = assemble_predictions(SYSTEM_ID)
+
+    metric = peppr.ChiralityViolations()
+
+    # Compare the molecule with itself
+    assert metric.evaluate(reference, reference) == 0.0
+
+    # Compare the molecule with its mirror image
+    mirror_image = reference.copy()
+    mirror_image.coord[:, 0] *= -1
+    assert metric.evaluate(reference, mirror_image) == 1.0
