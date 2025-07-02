@@ -101,7 +101,7 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
             ):
                 at.SetNumExplicitHs(1)
                 break
-    # Fix radical, cases like '[CH2]' or [OH] where rdkit won't necessarily throw error, 
+    # Fix radical, cases like '[CH2]' or [OH] where rdkit won't necessarily throw error,
     # but to total valence will be different from the default valence
     for at in mol.GetAtoms():
         radical_electrons = at.GetNumRadicalElectrons()
@@ -109,9 +109,10 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
             # Convert radicals to charged equivalent
             at.SetNumRadicalElectrons(0)
             opt_charge = at.GetTotalValence() - pt.GetDefaultValence(at.GetAtomicNum())
-            at.SetFormalCharge(-1 * opt_charge )
+            at.SetFormalCharge(-1 * opt_charge)
         else:
             continue
+
 
 def _is_same_problem(problem1: Exception, problem2: Exception) -> bool:
     """
