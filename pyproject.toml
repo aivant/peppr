@@ -21,7 +21,7 @@ classifiers = [
 
 dependencies = [
   "biotite >= 1.2",
-  "numpy >= 1.25",
+  "numpy >= 2.0",
   "pandas >= 2.0.0",
   "rdkit >= 2024.09.1",
   "click >= 8.0.0",
