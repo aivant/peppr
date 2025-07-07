@@ -892,7 +892,7 @@ class ChiralityViolations(Metric):
         if chiral_count == 0:
             return np.nan
 
-        return violation_count / chiral_count
+        return float(violation_count / chiral_count)
 
     def smaller_is_better(self) -> bool:
         return True
