@@ -23,7 +23,7 @@ __all__ = [
 import itertools
 import warnings
 from abc import ABC, abstractmethod
-from collections import OrderedDict, Counter
+from collections import Counter, OrderedDict
 from typing import Any, Callable, Dict, Tuple
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
@@ -33,6 +33,15 @@ from rdkit import Chem
 from peppr.bisyrmsd import bisy_rmsd
 from peppr.clashes import find_clashes
 from peppr.common import is_small_molecule
+from peppr.contacts import (
+    ACCEPTOR_PATTERN,
+    DONOR_PATTERN,
+    HALOGEN_DISTANCE_SCALING,
+    HALOGEN_PATTERN,
+    HBOND_DISTANCE_SCALING,
+    ContactMeasurement,
+    InteractionType,
+)
 from peppr.dockq import (
     dockq,
     fnat,
@@ -43,15 +52,6 @@ from peppr.dockq import (
 )
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
-from peppr.contacts import (
-    InteractionType,
-    ContactMeasurement,
-    DONOR_PATTERN,
-    ACCEPTOR_PATTERN,
-    HALOGEN_PATTERN,
-    HBOND_DISTANCE_SCALING,
-    HALOGEN_DISTANCE_SCALING,
-)
 
 
 class Metric(ABC):

@@ -1,6 +1,7 @@
-from pathlib import Path
 import itertools
+from pathlib import Path
 import biotite.structure as struc
+import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
 import peppr
@@ -9,8 +10,6 @@ from tests.common import (
     get_reference_metric,
     list_test_predictions,
 )
-import biotite.structure.io.pdbx as pdbx
-
 
 ALL_METRICS = [
     peppr.MonomerRMSD(5.0, ca_only=True),

@@ -9,7 +9,7 @@ __all__ = [
     "HALOGEN_DISTANCE_SCALING",
 ]
 
-from enum import IntEnum
+from enum import IntEnum, auto
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 import biotite.structure.info as info
@@ -18,7 +18,6 @@ import rdkit.Chem.AllChem as Chem
 from numpy.typing import NDArray
 from peppr.charge import estimate_formal_charges
 from peppr.sanitize import sanitize
-from enum import IntEnum, auto
 
 # Create a proper Python Enum for the RDKit HybridizationType
 HybridizationType = IntEnum(  # type: ignore[misc]
