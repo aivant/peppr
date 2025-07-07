@@ -1,3 +1,4 @@
+from pathlib import Path
 import itertools
 import biotite.structure as struc
 import numpy as np
@@ -8,6 +9,8 @@ from tests.common import (
     get_reference_metric,
     list_test_predictions,
 )
+import biotite.structure.io.pdbx as pdbx
+
 
 ALL_METRICS = [
     peppr.MonomerRMSD(5.0, ca_only=True),
@@ -29,6 +32,7 @@ ALL_METRICS = [
     peppr.BondLengthViolations(),
     peppr.ClashCount(),
     peppr.BondAngleViolations(),
+    peppr.PLIFRecovery(),
 ]
 
 
@@ -292,3 +296,74 @@ def test_ligand_only_system(metric):
     # For most metrics, we expect a valid numeric value or NaN
     # (NaN is acceptable for metrics that can't handle the input)
     assert np.isnan(value) or isinstance(value, (int, float))
+
+
+@pytest.mark.parametrize(
+    "pdb_id",  # structures containing ligands
+    [
+        "2rtg",
+        "1a3n",
+        "3eca",
+        "1acj",
+    ],
+    ids=lambda x: x,
+)
+def test_plif_recovery_sanity_check(pdb_id):
+    """
+    Test PLIFRecovery.evaluate() with real PDB structures.
+    When reference and model are identical, should return 1.0.
+    For different structures, should return a value between 0.0 and 1.0.
+
+    Parameters
+    ----------
+    pdb_id : str
+        The PDB ID to test with. Must have a corresponding .cif file in
+        tests/geotite/eval/data/pdb/
+    """
+    data_dir = Path(__file__).parent / "data" / "pdb"
+    pdbx_file = pdbx.CIFFile.read(data_dir / f"{pdb_id}.cif")
+    atoms = pdbx.get_structure(
+        pdbx_file,
+        model=1,
+        include_bonds=True,
+    )
+
+    # Apply same preprocessing as test_contacts.py
+    # Remove salt and water
+    atoms = atoms[~struc.filter_solvent(atoms) & ~struc.filter_monoatomic_ions(atoms)]
+    # Focus on a single monomer if multiple chains exist
+    if len(np.unique(atoms.chain_id)) > 1:
+        atoms = atoms[atoms.chain_id == atoms.chain_id[0]]
+    # Remove hydrogen atoms (ContactMeasurement requires heavy atoms only)
+    atoms = atoms[atoms.element != "H"]
+
+    reference = atoms
+    model = reference
+    # Include all interactions for testing
+    interactions = list(peppr.contacts.InteractionType)
+    metric = peppr.PLIFRecovery(include_interactions=interactions)
+
+    # Test with same structure - should return 1.0 (perfect recovery)
+    recovery_score = metric.evaluate(reference, model)
+    assert recovery_score == pytest.approx(1.0), (
+        f"Identical structures should have perfect PLIF recovery for {pdb_id}"
+    )
+
+    # Move the ligand to a different position
+    model = reference.copy()
+    ligand_mask = model.hetero
+    translation_vector = np.array([100.0, 100.0, 100.0])
+    model.coord[ligand_mask] += translation_vector
+    recovery_score = metric.evaluate(reference, model)
+
+    assert recovery_score == pytest.approx(0.0), (
+        f"A model with a displaced ligand for {pdb_id} should have a recovery "
+        f"score of 0.0, but got {recovery_score} instead."
+    )
+
+    model = atoms.copy()
+    model.coord += np.random.normal(0, 0.5, model.coord.shape)  # Add small random noise
+    recovery_score_model = metric.evaluate(reference, model)
+    assert 0.0 <= recovery_score_model <= 1.0, (
+        f"PLIF recovery should be between 0.0 and 1.0 for {pdb_id}, got {recovery_score_model}"
+    )

@@ -1,4 +1,13 @@
-__all__ = ["ContactMeasurement", "find_atoms_by_pattern"]
+__all__ = [
+    "ContactMeasurement",
+    "find_atoms_by_pattern",
+    "InteractionType",
+    "DONOR_PATTERN",
+    "ACCEPTOR_PATTERN",
+    "HALOGEN_PATTERN",
+    "HBOND_DISTANCE_SCALING",
+    "HALOGEN_DISTANCE_SCALING",
+]
 
 from enum import IntEnum
 import biotite.interface.rdkit as rdkit_interface
@@ -9,6 +18,7 @@ import rdkit.Chem.AllChem as Chem
 from numpy.typing import NDArray
 from peppr.charge import estimate_formal_charges
 from peppr.sanitize import sanitize
+from enum import IntEnum, auto
 
 # Create a proper Python Enum for the RDKit HybridizationType
 HybridizationType = IntEnum(  # type: ignore[misc]
@@ -28,6 +38,56 @@ _ANGLES_FOR_HYBRIDIZATION[HybridizationType.SP2D] = np.deg2rad(90.0)  # type: ig
 _ANGLES_FOR_HYBRIDIZATION[HybridizationType.SP3D2] = np.deg2rad(90.0)  # type: ignore[attr-defined]
 _ANGLES_FOR_HYBRIDIZATION[HybridizationType.SP3D] = np.deg2rad(90.0)  # type: ignore[attr-defined]
 _ANGLES_FOR_HYBRIDIZATION[HybridizationType.OTHER] = np.nan  # type: ignore[attr-defined]
+
+# Adapted from https://github.com/oddt/oddt/blob/master/oddt/toolkits/ob.py
+DONOR_PATTERN = (
+    "["
+    "$([Nv3!H0,Nv4!H0+1,nH1]),"
+    # Guanidine can be tautomeric - e.g. Arginine
+    "$([NX3,NX2]([!O,!S])!@C(!@[NX3,NX2]([!O,!S]))!@[NX3,NX2]([!O,!S])),"
+    "$([O,S;!H0])"
+    "]"
+)
+# Adapted from https://github.com/oddt/oddt/blob/master/oddt/toolkits/ob.py
+ACCEPTOR_PATTERN = (
+    "["
+    # Oxygens and Sulfurs
+    # singly protonotated can be acceptors
+    "$([O,S;v2H1]),"
+    # O,S that is unprotonotated, neutral or negative (but not part of nitro-like group!)
+    "$([O,S;v2H0;!$([O,S]=N-*)]),"
+    "$([O,S;-;!$(*-N=[O,S])]),"
+    # also include neutral aromatic oxygen and sulfur
+    "$([s,o;+0]),"
+    # Nitrogens
+    # aromatic unprotonated nitrogens (not trivalent connectivity?)
+    "$([nH0+0;!X3])"
+    # nitrile
+    "$([ND1H0;$(N#[Cv4])]),"
+    # unprotonated nitrogen next to aromatic ring
+    "$([Nv3H0;$(N-c)]),"
+    # Fluorine on aromatic ring, only
+    "$([F;$(F-[#6]);!$(FC[F,Cl,Br,I])])"
+    "]"
+)
+# Carbon bonded halogen, 'X' is later replaced with the actual halogen element
+HALOGEN_PATTERN = "[F,Cl,Br,I;+0]"
+HBOND_DISTANCE_SCALING = (0.8, 1.15)
+HALOGEN_DISTANCE_SCALING = (0.8, 1.05)
+
+
+class InteractionType(IntEnum):
+    """
+    Defines the different contact types that can be evaluated for PLIF recovery.
+    """
+
+    HBOND_DONOR_RECEPTOR = auto()
+    HBOND_DONOR_LIGAND = auto()
+    HALOGEN_BOND = auto()
+    PI_STACKING = auto()
+    CATION_PI = auto()
+    PI_CATION = auto()
+    IONIC_BOND = auto()
 
 
 class ContactMeasurement:
@@ -387,6 +447,73 @@ class ContactMeasurement:
             ligand_idx - len(self._binding_site),  # Map to ligand
             kind,
         )
+
+    def find_pi_cation_interactions(
+        self,
+        distance_cutoff: float = 5.0,
+        angle_tol: float = np.deg2rad(30.0),
+    ) -> list[tuple[NDArray[np.int_], NDArray[np.int_], InteractionType]]:
+        """
+        Find π-cation interactions between aromatic rings and cations across the binding interface.
+
+        Wrapper around biotite.structure.find_pi_cation_interactions that filters for
+        interactions between binding site and ligand only.
+
+        Parameters
+        ----------
+        distance_cutoff : float, optional
+            The cutoff distance between ring centroid and cation.
+        angle_tol : float, optional
+            The tolerance for the angle between the ring plane normal
+            and the centroid-cation vector. Perfect pi-cation interaction
+            has 0° angle (perpendicular to ring plane).
+            Given in radians.
+
+        Returns
+        -------
+        interactions : list of tuple
+            Each tuple contains (receptor_indices, ligand_indices, interaction_type).
+            For PI_CATION: receptor_indices are the ring, ligand_indices is the cation.
+            For CATION_PI: receptor_indices is the cation, ligand_indices are the ring.
+        """
+        combined_atoms = self._binding_site + self._ligand
+        binding_site_size = len(self._binding_site)
+        all_interactions = struc.find_pi_cation_interactions(
+            combined_atoms, distance_cutoff, angle_tol
+        )
+
+        return [
+            self._map_pi_cation_indices(ring_indices, cation_index)
+            for ring_indices, cation_index in all_interactions
+            #  filter out intra protein and intra ligand interactions
+            if (ring_indices[0] >= binding_site_size)
+            != (cation_index >= binding_site_size)
+        ]
+
+    def _map_pi_cation_indices(
+        self, ring_indices: NDArray[np.int_], cation_index: int
+    ) -> tuple[NDArray[np.int_], NDArray[np.int_], InteractionType]:
+        """
+        Map combined structure indices for a pi-cation interaction back to the
+        original receptor and ligand.
+        """
+        binding_site_size = len(self._binding_site)
+        is_ring_in_ligand = ring_indices[0] >= binding_site_size
+
+        if not is_ring_in_ligand:
+            # Case 1: Ring in receptor, Cation in ligand
+            receptor_indices = self._binding_site_indices[ring_indices]
+            ligand_indices = np.array([cation_index - binding_site_size], dtype=int)
+            interaction_type = InteractionType.PI_CATION
+        else:
+            # Case 2: Cation in receptor, Ring in ligand
+            receptor_indices = np.array(
+                [self._binding_site_indices[cation_index]], dtype=int
+            )
+            ligand_indices = ring_indices - binding_site_size
+            interaction_type = InteractionType.CATION_PI
+
+        return (receptor_indices, ligand_indices, interaction_type)
 
 
 def find_atoms_by_pattern(
