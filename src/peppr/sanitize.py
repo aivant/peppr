@@ -30,9 +30,14 @@ def sanitize(mol: Chem.Mol, max_fix_iterations: int = 1000) -> None:
     mol.UpdatePropertyCache(strict=False)
     prev_problems: list[Exception] = []
 
-    # RDKit detects probels iteratively,
+    # RDKit detects problems iteratively,
     # i.e. new problems may show up as soon as previous problems are fixed
+    encountered_same_problem = False
     for _ in range(max_fix_iterations):
+        if encountered_same_problem:
+            # Fixing this problem previously failed,
+            # so there is no need to try again
+            break
         with rdkit.rdBase.BlockLogs():
             # Temporarily disable RDKit verbosity while in scope
             problems = Chem.DetectChemistryProblems(mol)
@@ -42,9 +47,7 @@ def sanitize(mol: Chem.Mol, max_fix_iterations: int = 1000) -> None:
         for problem in problems:
             for prev_problem in prev_problems:
                 if _is_same_problem(problem, prev_problem):
-                    # Fixing this problem previously failed,
-                    # so there is no need to try again
-                    break
+                    encountered_same_problem = True
         for problem in problems:
             _fix_problem(mol, problem)
         prev_problems = list(problems)
@@ -74,7 +77,7 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
             return
         elif elem in [7, 8]:
             # only process positively charged N, O atoms
-            opt_charge = at.GetExplicitValence() - pt.GetDefaultValence(elem)
+            opt_charge = at.GetTotalValence() - pt.GetDefaultValence(elem)
             formal_charge = at.GetFormalCharge()
             if opt_charge > formal_charge:
                 if abs(opt_charge) > 1:
@@ -91,7 +94,11 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
         for atidx in problem.GetAtomIndices():
             at = mol.GetAtomWithIdx(atidx)
             # set one of the nitrogens with two bonds in a ring system as "[nH]"
-            if at.GetAtomicNum() == 7 and at.GetDegree() == 2:
+            if (
+                at.GetAtomicNum() == 7
+                and at.GetDegree() == 2
+                and at.GetTotalNumHs() == 0
+            ):
                 at.SetNumExplicitHs(1)
                 break
 
@@ -110,8 +117,13 @@ def _is_same_problem(problem1: Exception, problem2: Exception) -> bool:
     same : bool
         True if the two problems are the same.
     """
-    if problem1.GetType() != problem2.GetType():
+    problem_type = problem1.GetType()
+    if problem_type != problem2.GetType():
         return False
-    if problem1.GetAtomIndices() != problem2.GetAtomIndices():
-        return False
+    elif problem_type == "AtomValenceException":
+        if problem1.GetAtomIdx() != problem2.GetAtomIdx():
+            return False
+    elif problem_type == "KekulizeException":
+        if problem1.GetAtomIndices() != problem2.GetAtomIndices():
+            return False
     return True

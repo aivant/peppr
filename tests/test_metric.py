@@ -33,6 +33,7 @@ ALL_METRICS = [
     peppr.ClashCount(),
     peppr.BondAngleViolations(),
     peppr.PLIFRecovery(),
+    peppr.ChiralityViolations(),
 ]
 
 
@@ -59,6 +60,7 @@ ALL_METRICS = [
         (peppr.BondLengthViolations(), (0.0, 1.0)),
         (peppr.ClashCount(), (0, 10000)),
         (peppr.BondAngleViolations(), (0.0, 1.0)),
+        (peppr.ChiralityViolations(), (0.0, 1.0)),
     ],
     ids=lambda x: x.name if isinstance(x, peppr.Metric) else "",
 )
@@ -367,3 +369,22 @@ def test_plif_recovery_sanity_check(pdb_id):
     assert 0.0 <= recovery_score_model <= 1.0, (
         f"PLIF recovery should be between 0.0 and 1.0 for {pdb_id}, got {recovery_score_model}"
     )
+
+
+def test_chirality_violations():
+    """
+    Comparing a molecule with itself should return 0% chirality violations.
+    Comparing a molecule with its mirror image should return 100% chirality violations.
+    """
+    SYSTEM_ID = "7znt__2__1.F_1.G__1.J"
+    reference, _ = assemble_predictions(SYSTEM_ID)
+
+    metric = peppr.ChiralityViolations()
+
+    # Compare the molecule with itself
+    assert metric.evaluate(reference, reference) == 0.0
+
+    # Compare the molecule with its mirror image
+    mirror_image = reference.copy()
+    mirror_image.coord[:, 0] *= -1
+    assert metric.evaluate(reference, mirror_image) == 1.0

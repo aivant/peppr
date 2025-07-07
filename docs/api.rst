@@ -38,7 +38,7 @@ The metrics for pose evaluation.
     BondLengthViolations
     BondAngleViolations
     ClashCount
-
+    ChiralityViolations
 Selectors
 ---------
 Selection of the desired metric result from multiple poses.

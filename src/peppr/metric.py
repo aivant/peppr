@@ -17,6 +17,7 @@ __all__ = [
     "BondAngleViolations",
     "ClashCount",
     "PLIFRecovery",
+    "ChiralityViolations",
 ]
 
 import itertools
@@ -24,9 +25,11 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import OrderedDict, Counter
 from typing import Any, Callable, Dict, Tuple
+import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 import numpy as np
 from numpy.typing import NDArray
+from rdkit import Chem
 from peppr.bisyrmsd import bisy_rmsd
 from peppr.clashes import find_clashes
 from peppr.common import is_small_molecule
@@ -804,11 +807,13 @@ class BondAngleViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
-        if pose.bonds is None:
+        if pose.array_length() == 0:
             return np.nan
-
         # Idealize the pose local geometry to make the reference
-        reference = idealize_bonds(pose)
+        try:
+            reference = idealize_bonds(pose)
+        except struc.BadStructureError:
+            return np.nan
 
         # Check the angle of all bonded triples
         graph = reference.bonds.as_graph()
@@ -1092,6 +1097,63 @@ class PLIFRecovery(Metric):
         return OrderedDict([("Low", 0.0), ("Medium", 0.5), ("High", 0.9)])
 
 
+class ChiralityViolations(Metric):
+    """
+    Check for differences in the chirality of the reference and pose.
+    """
+
+    @property
+    def name(self) -> str:
+        return "Chirality-violation"
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """
+        Returns the fraction of chiral centers that have a different chirality
+        in the reference as compared to the pose.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            The reference structure of the system.
+        pose : AtomArray
+            The predicted pose.
+            Must have the same length and atom order as the `reference`.
+
+        Returns
+        -------
+        float
+            The fraction of chiral centers that have a different chirality in the reference as compared to the pose.
+        """
+
+        if pose.array_length() == 0:
+            return np.nan
+
+        # Convert the reference and pose to RDKit molecules
+        ref_mol = rdkit_interface.to_mol(reference, explicit_hydrogen=False)
+        pose_mol = rdkit_interface.to_mol(pose, explicit_hydrogen=False)
+
+        # Assign chiral centers
+        Chem.AssignStereochemistryFrom3D(ref_mol)
+        Chem.AssignStereochemistryFrom3D(pose_mol)
+
+        # Get the chirality of the reference and pose
+        ref_chirality = np.array([atom.GetChiralTag() for atom in ref_mol.GetAtoms()])
+        pose_chirality = np.array([atom.GetChiralTag() for atom in pose_mol.GetAtoms()])
+
+        chiral_count = np.count_nonzero(
+            ref_chirality != int(Chem.ChiralType.CHI_UNSPECIFIED)
+        )
+        violation_count = np.count_nonzero(ref_chirality != pose_chirality)
+
+        if chiral_count == 0:
+            return np.nan
+
+        return float(violation_count / chiral_count)
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+
 def _run_for_each_monomer(
     reference: struc.AtomArray,
     pose: struc.AtomArray,
@@ -1182,7 +1244,7 @@ def _run_for_each_chain_pair(
                 pose_chains[chain_j],
             )
         )
-    if len(results) == 0:
+    if len(results) == 0 or np.isnan(results).all():
         return np.nan
     return np.nanmean(results).item()
 
