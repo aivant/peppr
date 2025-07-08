@@ -885,6 +885,14 @@ class PLIFRecovery(Metric):
     class InteractionType(Enum):
         """
         Defines the different contact types that can be evaluated.
+
+        - ``HBOND_DONOR_RECEPTOR``: Hydrogen bond, where the donor atom is in the receptor.
+        - ``HBOND_DONOR_LIGAND``: Hydrogen bond, where the donor atom is in the ligand.
+        - ``HALOGEN_BOND``: Halogen bond.
+        - ``PI_STACKING``: Pi stacking interaction.
+        - ``CATION_PI``: Cation-Pi interaction, where the cation is in the receptor.
+        - ``PI_CATION``: Cation-Pi interaction, where the cation is in the ligand.
+        - ``IONIC_BOND``: Salt bridge.
         """
 
         HBOND_DONOR_RECEPTOR = auto()
