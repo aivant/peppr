@@ -852,21 +852,20 @@ class ClashCount(Metric):
 
 
 class PLIFRecovery(Metric):
-    """
+    r"""
     Calculates the Protein-Ligand Interaction Fingerprint (PLIF) recovery rate.
 
     This metric quantifies how well a predicted protein-ligand pose structure
     recapitulates the specific interactions observed in a reference (e.g., crystal)
-    structure. The calculation is based on the formula described by
-    Errington et al. (2025) Journal of Cheminformatics:
+    structure [1]_:
 
-    PLIF Recovery = (sum_ir min(C_ir, P_ir)) / (sum_ir C_ir)
+    .. math::
 
-    Where:
-    - C_ir is the count of interaction type 'i' with receptor residue 'r'
-      in the reference structure.
-    - P_ir is the count of interaction type 'i' with receptor residue 'r'
-      in the predicted pose structure.
+        \textrm{PLIF Recovery} = \frac{\sum_{ir} \min(C_{ir}, P_{ir})}{\sum_{ir} C_{ir}},
+
+    where :math:`C_ir` is the count of interaction type :math:`i` with receptor residue
+    :math:`r` in the reference and :math:`P_ir` is the count of interaction type
+    :math:`i` with receptor residue :math:`r` in the pose.
 
     Parameters
     ----------
@@ -877,6 +876,10 @@ class PLIFRecovery(Metric):
     include_interactions : iterable of PLIFRecovery.InteractionType, optional
         The types of interactions to include in the PLIF calculations.
         By default, all of them are included.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1186/s13321-025-01011-6
     """
 
     class InteractionType(Enum):
