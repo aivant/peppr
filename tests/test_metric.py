@@ -311,15 +311,9 @@ def test_ligand_only_system(metric):
 )
 def test_plif_recovery_sanity_check(pdb_id):
     """
-    Test PLIFRecovery.evaluate() with real PDB structures.
+    Test :meth:`PLIFRecovery.evaluate()` with real PDB structures.
     When reference and model are identical, should return 1.0.
     For different structures, should return a value between 0.0 and 1.0.
-
-    Parameters
-    ----------
-    pdb_id : str
-        The PDB ID to test with. Must have a corresponding .cif file in
-        tests/geotite/eval/data/pdb/
     """
     data_dir = Path(__file__).parent / "data" / "pdb"
     pdbx_file = pdbx.CIFFile.read(data_dir / f"{pdb_id}.cif")
@@ -341,7 +335,7 @@ def test_plif_recovery_sanity_check(pdb_id):
     reference = atoms
     model = reference
     # Include all interactions for testing
-    interactions = list(peppr.contacts.InteractionType)
+    interactions = list(peppr.PLIFRecovery.InteractionType)
     metric = peppr.PLIFRecovery(include_interactions=interactions)
 
     # Test with same structure - should return 1.0 (perfect recovery)

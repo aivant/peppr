@@ -1,15 +1,9 @@
 __all__ = [
     "ContactMeasurement",
     "find_atoms_by_pattern",
-    "InteractionType",
-    "DONOR_PATTERN",
-    "ACCEPTOR_PATTERN",
-    "HALOGEN_PATTERN",
-    "HBOND_DISTANCE_SCALING",
-    "HALOGEN_DISTANCE_SCALING",
 ]
 
-from enum import IntEnum, auto
+from enum import IntEnum
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 import biotite.structure.info as info
@@ -37,56 +31,6 @@ _ANGLES_FOR_HYBRIDIZATION[HybridizationType.SP2D] = np.deg2rad(90.0)  # type: ig
 _ANGLES_FOR_HYBRIDIZATION[HybridizationType.SP3D2] = np.deg2rad(90.0)  # type: ignore[attr-defined]
 _ANGLES_FOR_HYBRIDIZATION[HybridizationType.SP3D] = np.deg2rad(90.0)  # type: ignore[attr-defined]
 _ANGLES_FOR_HYBRIDIZATION[HybridizationType.OTHER] = np.nan  # type: ignore[attr-defined]
-
-# Adapted from https://github.com/oddt/oddt/blob/master/oddt/toolkits/ob.py
-DONOR_PATTERN = (
-    "["
-    "$([Nv3!H0,Nv4!H0+1,nH1]),"
-    # Guanidine can be tautomeric - e.g. Arginine
-    "$([NX3,NX2]([!O,!S])!@C(!@[NX3,NX2]([!O,!S]))!@[NX3,NX2]([!O,!S])),"
-    "$([O,S;!H0])"
-    "]"
-)
-# Adapted from https://github.com/oddt/oddt/blob/master/oddt/toolkits/ob.py
-ACCEPTOR_PATTERN = (
-    "["
-    # Oxygens and Sulfurs
-    # singly protonotated can be acceptors
-    "$([O,S;v2H1]),"
-    # O,S that is unprotonotated, neutral or negative (but not part of nitro-like group!)
-    "$([O,S;v2H0;!$([O,S]=N-*)]),"
-    "$([O,S;-;!$(*-N=[O,S])]),"
-    # also include neutral aromatic oxygen and sulfur
-    "$([s,o;+0]),"
-    # Nitrogens
-    # aromatic unprotonated nitrogens (not trivalent connectivity?)
-    "$([nH0+0;!X3])"
-    # nitrile
-    "$([ND1H0;$(N#[Cv4])]),"
-    # unprotonated nitrogen next to aromatic ring
-    "$([Nv3H0;$(N-c)]),"
-    # Fluorine on aromatic ring, only
-    "$([F;$(F-[#6]);!$(FC[F,Cl,Br,I])])"
-    "]"
-)
-# Carbon bonded halogen, 'X' is later replaced with the actual halogen element
-HALOGEN_PATTERN = "[F,Cl,Br,I;+0]"
-HBOND_DISTANCE_SCALING = (0.8, 1.15)
-HALOGEN_DISTANCE_SCALING = (0.8, 1.05)
-
-
-class InteractionType(IntEnum):
-    """
-    Defines the different contact types that can be evaluated for PLIF recovery.
-    """
-
-    HBOND_DONOR_RECEPTOR = auto()
-    HBOND_DONOR_LIGAND = auto()
-    HALOGEN_BOND = auto()
-    PI_STACKING = auto()
-    CATION_PI = auto()
-    PI_CATION = auto()
-    IONIC_BOND = auto()
 
 
 class ContactMeasurement:
@@ -413,7 +357,8 @@ class ContactMeasurement:
         Returns
         -------
         list of tuple
-            Each tuple contains (binding_site_ring_indices, ligand_ring_indices, stacking_type)
+            Each tuple contains
+            ``(binding_site_ring_indices, ligand_ring_indices, stacking_type)``.
         """
         combined_atoms = self._binding_site + self._ligand
         all_interactions = struc.find_stacking_interactions(
@@ -451,12 +396,13 @@ class ContactMeasurement:
         self,
         distance_cutoff: float = 5.0,
         angle_tol: float = np.deg2rad(30.0),
-    ) -> list[tuple[NDArray[np.int_], NDArray[np.int_], InteractionType]]:
+    ) -> list[tuple[NDArray[np.int_], NDArray[np.int_], bool]]:
         """
-        Find π-cation interactions between aromatic rings and cations across the binding interface.
+        Find π-cation interactions between aromatic rings and cations across the binding
+        interface.
 
-        Wrapper around biotite.structure.find_pi_cation_interactions that filters for
-        interactions between binding site and ligand only.
+        Wrapper around :func:`biotite.structure.find_pi_cation_interactions()` that
+        filters for interactions between binding site and ligand only.
 
         Parameters
         ----------
@@ -470,10 +416,11 @@ class ContactMeasurement:
 
         Returns
         -------
-        interactions : list of tuple
-            Each tuple contains (receptor_indices, ligand_indices, interaction_type).
-            For PI_CATION: receptor_indices are the ring, ligand_indices is the cation.
-            For CATION_PI: receptor_indices is the cation, ligand_indices are the ring.
+        list of tuple
+            Each tuple contains
+            ``(receptor_indices, ligand_indices, cation_in_receptor)``.
+            ``cation_in_receptor`` is ``True``, if the interacting cation is in the
+            receptor molecules and ``False`` otherwise.
         """
         combined_atoms = self._binding_site + self._ligand
         binding_site_size = len(self._binding_site)
@@ -491,28 +438,26 @@ class ContactMeasurement:
 
     def _map_pi_cation_indices(
         self, ring_indices: NDArray[np.int_], cation_index: int
-    ) -> tuple[NDArray[np.int_], NDArray[np.int_], InteractionType]:
+    ) -> tuple[NDArray[np.int_], NDArray[np.int_], bool]:
         """
         Map combined structure indices for a pi-cation interaction back to the
         original receptor and ligand.
         """
-        binding_site_size = len(self._binding_site)
-        is_ring_in_ligand = ring_indices[0] >= binding_site_size
+        binding_site_size = self._binding_site.array_length()
+        cation_in_receptor = cation_index < binding_site_size
 
-        if not is_ring_in_ligand:
-            # Case 1: Ring in receptor, Cation in ligand
-            receptor_indices = self._binding_site_indices[ring_indices]
-            ligand_indices = np.array([cation_index - binding_site_size], dtype=int)
-            interaction_type = InteractionType.PI_CATION
-        else:
+        if cation_in_receptor:
             # Case 2: Cation in receptor, Ring in ligand
             receptor_indices = np.array(
                 [self._binding_site_indices[cation_index]], dtype=int
             )
             ligand_indices = ring_indices - binding_site_size
-            interaction_type = InteractionType.CATION_PI
+        else:
+            # Case 1: Ring in receptor, Cation in ligand
+            receptor_indices = self._binding_site_indices[ring_indices]
+            ligand_indices = np.array([cation_index - binding_site_size], dtype=int)
 
-        return (receptor_indices, ligand_indices, interaction_type)
+        return (receptor_indices, ligand_indices, cation_in_receptor)
 
 
 def find_atoms_by_pattern(
