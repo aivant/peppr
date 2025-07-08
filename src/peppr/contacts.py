@@ -479,7 +479,7 @@ def find_atoms_by_pattern(
     matches : np.ndarray, shape=(n,), dtype=int
         The atom indices that fulfill the given SMARTS pattern.
     """
-    pattern = Chem.MolFromSmarts(pattern)  # type: ignore[attr-defined]
+    pattern = Chem.MolFromSmarts(pattern)
     matches = mol.GetSubstructMatches(pattern)
     for match in matches:
         if len(match) > 1:
