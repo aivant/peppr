@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import rdkit.Chem.AllChem as Chem
 from numpy.typing import NDArray
-import peppr
+from peppr.sanitize import sanitize
 
 METAL_CHARGES = {
     # For metals with multiple oxidation states, the smallest charge is assumed
@@ -68,7 +68,7 @@ def estimate_formal_charges(
             patterns.append((_get_pattern(row.group), 0.0))
 
     mol = rdkit_interface.to_mol(atoms)
-    peppr.sanitize(mol)
+    sanitize(mol)
     # Initialize with the original charges
     charges = rdkit_interface.from_mol(mol, add_hydrogen=False).charge
     # Remove hydrogen atoms to correctly match SMARTS atoms with the '[D<n>]' property
