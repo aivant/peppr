@@ -37,8 +37,10 @@ The metrics for pose evaluation.
     BiSyRMSD
     BondLengthViolations
     BondAngleViolations
-    ClashCount
     ChiralityViolations
+    ClashCount
+    PLIFRecovery
+
 Selectors
 ---------
 Selection of the desired metric result from multiple poses.
