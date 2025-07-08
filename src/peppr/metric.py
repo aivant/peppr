@@ -16,13 +16,15 @@ __all__ = [
     "BondLengthViolations",
     "BondAngleViolations",
     "ClashCount",
+    "PLIFRecovery",
     "ChiralityViolations",
 ]
 
 import itertools
 import warnings
 from abc import ABC, abstractmethod
-from collections import OrderedDict
+from collections import Counter, OrderedDict
+from enum import Enum, auto
 from typing import Any, Callable, Dict, Tuple
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
@@ -31,7 +33,15 @@ from numpy.typing import NDArray
 from rdkit import Chem
 from peppr.bisyrmsd import bisy_rmsd
 from peppr.clashes import find_clashes
-from peppr.common import is_small_molecule
+from peppr.common import (
+    ACCEPTOR_PATTERN,
+    DONOR_PATTERN,
+    HALOGEN_DISTANCE_SCALING,
+    HALOGEN_PATTERN,
+    HBOND_DISTANCE_SCALING,
+    is_small_molecule,
+)
+from peppr.contacts import ContactMeasurement
 from peppr.dockq import (
     dockq,
     fnat,
@@ -839,6 +849,280 @@ class ClashCount(Metric):
 
     def smaller_is_better(self) -> bool:
         return True
+
+
+class PLIFRecovery(Metric):
+    r"""
+    Calculates the Protein-Ligand Interaction Fingerprint (PLIF) recovery rate.
+
+    This metric quantifies how well a predicted protein-ligand pose structure
+    recapitulates the specific interactions observed in a reference (e.g., crystal)
+    structure [1]_:
+
+    .. math::
+
+        \textrm{PLIF Recovery} = \frac{\sum_{ir} \min(C_{ir}, P_{ir})}{\sum_{ir} C_{ir}},
+
+    where :math:`C_ir` is the count of interaction type :math:`i` with receptor residue
+    :math:`r` in the reference and :math:`P_ir` is the count of interaction type
+    :math:`i` with receptor residue :math:`r` in the pose.
+
+    Parameters
+    ----------
+    ph : float, optional
+        The pH value used for charge estimation if relevant to contact definition.
+    binding_site_cutoff : float, optional
+        A cutoff used if contact definition involves focusing on a binding site.
+    include_interactions : iterable of PLIFRecovery.InteractionType, optional
+        The types of interactions to include in the PLIF calculations.
+        By default, all of them are included.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1186/s13321-025-01011-6
+    """
+
+    class InteractionType(Enum):
+        """
+        Defines the different contact types that can be evaluated.
+
+        - ``HBOND_DONOR_RECEPTOR``: Hydrogen bond, where the donor atom is in the receptor.
+        - ``HBOND_DONOR_LIGAND``: Hydrogen bond, where the donor atom is in the ligand.
+        - ``HALOGEN_BOND``: Halogen bond.
+        - ``PI_STACKING``: Pi stacking interaction.
+        - ``CATION_PI``: Cation-Pi interaction, where the cation is in the receptor.
+        - ``PI_CATION``: Cation-Pi interaction, where the cation is in the ligand.
+        - ``IONIC_BOND``: Salt bridge.
+        """
+
+        HBOND_DONOR_RECEPTOR = auto()
+        HBOND_DONOR_LIGAND = auto()
+        HALOGEN_BOND = auto()
+        PI_STACKING = auto()
+        CATION_PI = auto()
+        PI_CATION = auto()
+        IONIC_BOND = auto()
+
+    def __init__(
+        self,
+        ph: float = 7.4,
+        binding_site_cutoff: float = 4.0,
+        include_interactions: list["PLIFRecovery.InteractionType"] | None = None,
+    ) -> None:
+        self._ph = ph
+        self._binding_site_cutoff = binding_site_cutoff
+        if include_interactions is None:
+            self._include_interactions = list(PLIFRecovery.InteractionType)
+        else:
+            self._include_interactions = include_interactions
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "PLIF Recovery"
+
+    def _add_interactions_to_plifs(
+        self,
+        plifs: Dict[int, Dict["PLIFRecovery.InteractionType", int]],
+        interaction_type: "PLIFRecovery.InteractionType",
+        interactions: list | NDArray[np.int_],
+        receptor: struc.AtomArray,
+        mode: str,
+    ) -> None:
+        """
+        Adds interactions to the PLIFs dictionary based on the specified mode.
+
+        Parameters
+        ----------
+        plifs : dict
+            The PLIF dictionary to modify.
+        interaction_type : PLIFRecovery.InteractionType
+            The type of interaction to increment.
+        interactions : list or ndarray
+            The interaction data. Format depends on the mode.
+        receptor : AtomArray
+            The receptor structure for residue lookup.
+        mode : str
+            The processing mode, either "atomic" or "ring".
+        """
+        if len(interactions) == 0:
+            return
+
+        if mode == "atomic":
+            # Assumes 'interactions' is an NDArray of shape (n, 2)
+            # Increments for each atom's residue in the contact list.
+            interactions = np.array(interactions)
+            receptor_indices = interactions[:, 0]
+            res_ids = receptor.res_id[receptor_indices]
+            for res_id in res_ids:
+                plifs[res_id][interaction_type] += 1
+
+        elif mode == "ring":
+            assert isinstance(interactions, list)
+
+            # Assumes 'interactions' is a list of interaction tuples.
+            # Increments only once per residue for each ring system.
+            for interaction in interactions:
+                receptor_ring_indices = interaction[0]
+                res_id = receptor.res_id[receptor_ring_indices[0]]
+                plifs[res_id][interaction_type] += 1
+
+    def _get_plifs_per_residue(
+        self,
+        protein_ligand_complex: struc.AtomArray,
+    ) -> Dict[int, Counter["PLIFRecovery.InteractionType"]]:
+        """
+        Generates a Protein-Ligand Interaction Fingerprint dictionary where counts
+        are aggregated per residue for each interaction type.
+        """
+        receptor = protein_ligand_complex[~protein_ligand_complex.hetero]
+        ligand = protein_ligand_complex[protein_ligand_complex.hetero]
+
+        if ligand.array_length() == 0 or receptor.array_length() == 0:
+            return {}
+
+        contact_measurement = ContactMeasurement(
+            receptor=receptor,
+            ligand=ligand,
+            cutoff=self._binding_site_cutoff,
+            ph=self._ph,
+        )
+
+        # Initialize dict with ALL residues and ALL interaction types set to 0
+        unique_res_ids = set(receptor.res_id)
+        plifs: Dict[int, Counter["PLIFRecovery.InteractionType"]] = {
+            res_id: Counter() for res_id in unique_res_ids
+        }
+
+        # --- Find All Interaction Types ---
+        hbonds_rec_donor = contact_measurement.find_contacts_by_pattern(
+            receptor_pattern=DONOR_PATTERN,
+            ligand_pattern=ACCEPTOR_PATTERN,
+            distance_scaling=HBOND_DISTANCE_SCALING,
+        )
+        hbonds_lig_donor = contact_measurement.find_contacts_by_pattern(
+            receptor_pattern=ACCEPTOR_PATTERN,
+            ligand_pattern=DONOR_PATTERN,
+            distance_scaling=HBOND_DISTANCE_SCALING,
+        )
+        halogen_bonds = contact_measurement.find_contacts_by_pattern(
+            receptor_pattern=ACCEPTOR_PATTERN,
+            ligand_pattern=HALOGEN_PATTERN,
+            distance_scaling=HALOGEN_DISTANCE_SCALING,
+        )
+        ionic_bonds = contact_measurement.find_salt_bridges()
+        pi_stacking_interactions = contact_measurement.find_stacking_interactions()
+        pi_cation_interactions = contact_measurement.find_pi_cation_interactions()
+
+        # --- Populate PLIFs ---
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.HBOND_DONOR_RECEPTOR,
+            hbonds_rec_donor,
+            receptor,
+            mode="atomic",
+        )
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.HBOND_DONOR_LIGAND,
+            hbonds_lig_donor,
+            receptor,
+            mode="atomic",
+        )
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.HALOGEN_BOND,
+            halogen_bonds,
+            receptor,
+            mode="atomic",
+        )
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.IONIC_BOND,
+            ionic_bonds,
+            receptor,
+            mode="atomic",
+        )
+
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.PI_STACKING,
+            pi_stacking_interactions,
+            receptor,
+            mode="ring",
+        )
+
+        # Handle the two types of pi-cation interactions separately
+        for interaction in pi_cation_interactions:
+            receptor_part, _, cation_in_receptor = interaction
+            if cation_in_receptor:
+                # Receptor has the cation (single atom), so use "atomic" mode
+                atomic_contact = np.array([[receptor_part[0], -1]], dtype=int)
+                self._add_interactions_to_plifs(
+                    plifs,
+                    PLIFRecovery.InteractionType.CATION_PI,
+                    atomic_contact,
+                    receptor,
+                    mode="atomic",
+                )
+            else:
+                # Receptor has the ring, so use "ring" mode
+                self._add_interactions_to_plifs(
+                    plifs,
+                    PLIFRecovery.InteractionType.PI_CATION,
+                    [interaction],
+                    receptor,
+                    mode="ring",
+                )
+
+        return plifs
+
+    def _calculate_recovery_score(
+        self,
+        reference_plifs: Dict[int, Counter["PLIFRecovery.InteractionType"]],
+        pose_plifs: Dict[int, Counter["PLIFRecovery.InteractionType"]],
+    ) -> float:
+        """
+        Calculate PLIF recovery score using Errington et al. formula.
+        PLIF Recovery = (sum_ir min(C_ir, P_ir)) / (sum_ir C_ir)
+        """
+        numerator = 0
+        denominator = 0
+
+        # Only iterate over residues and interactions present in the reference
+        all_residues = reference_plifs.keys()
+        all_interaction_types = self._include_interactions
+
+        for res_id in all_residues:
+            for interaction_type in all_interaction_types:
+                c_ir = reference_plifs[res_id][interaction_type]
+                p_ir = pose_plifs.get(res_id, Counter())[interaction_type]
+                numerator += min(c_ir, p_ir)
+                denominator += c_ir
+
+        if denominator == 0:
+            # If the reference has no contacts, the pose perfectly recovers them (100%).
+            return 1.0
+
+        return numerator / denominator
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        if reference.array_length() == 0 or pose.array_length() == 0:
+            return np.nan
+
+        try:
+            reference_plifs = self._get_plifs_per_residue(reference)
+            pose_plifs = self._get_plifs_per_residue(pose)
+        except struc.BadStructureError:
+            return np.nan
+        return self._calculate_recovery_score(reference_plifs, pose_plifs)
+
+    def smaller_is_better(self) -> bool:
+        return False
+
+    @property
+    def thresholds(self) -> "OrderedDict[str, float]":
+        return OrderedDict([("Low", 0.0), ("Medium", 0.5), ("High", 0.9)])
 
 
 class ChiralityViolations(Metric):

@@ -37,8 +37,10 @@ The metrics for pose evaluation.
     BiSyRMSD
     BondLengthViolations
     BondAngleViolations
-    ClashCount
     ChiralityViolations
+    ClashCount
+    PLIFRecovery
+
 Selectors
 ---------
 Selection of the desired metric result from multiple poses.
@@ -72,6 +74,7 @@ that are not directly implemented :mod:`biotite.structure`.
     irmsd
     fnat
     DockQ
+    ContactMeasurement
 
 Atom Matching
 -------------
@@ -95,6 +98,8 @@ Miscellaneous
     standardize
     is_small_molecule
     get_contact_residues
+    find_atoms_by_pattern
+    estimate_formal_charges
     MatchWarning
     EvaluationWarning
     NoContactError
