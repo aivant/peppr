@@ -51,7 +51,7 @@ def estimate_formal_charges(
 
     Returns
     -------
-    charges : np.ndarray, shape=(n,)
+    np.ndarray, shape=(n,)
         The formal charge of each atom.
 
     References

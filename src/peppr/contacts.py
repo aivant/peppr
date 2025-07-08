@@ -142,17 +142,11 @@ class ContactMeasurement:
 
         Returns
         -------
-        contacts : np.ndarray, shape=(n,2), dtype=int
+        np.ndarray, shape=(n,2), dtype=int
             The indices of the receptor and ligand atoms that fulfill the given
             SMARTS pattern and are within the given distance range.
             The first column points to the receptor atom and the second column to the
             ligand atom.
-
-        Notes
-        -----
-        The pattern must target a single atom, not a group of atoms.
-        For example the pattern ``CC`` would lead to an exception, as it would match
-        a group of two carbon atoms.
 
         Warnings
         --------
@@ -162,6 +156,12 @@ class ContactMeasurement:
         This is accurate for most cases, but may miss contacts if d-orbitals are
         involved in a putative contact atom.
         This is true for e.g. metal atoms.
+
+        Notes
+        -----
+        The pattern must target a single atom, not a group of atoms.
+        For example the pattern ``CC`` would lead to an exception, as it would match
+        a group of two carbon atoms.
         """
         matched_receptor_indices = find_atoms_by_pattern(
             self._binding_site_mol, receptor_pattern
@@ -262,7 +262,7 @@ class ContactMeasurement:
 
         Returns
         -------
-        contacts : np.ndarray, shape=(n,2), dtype=int
+        np.ndarray, shape=(n,2), dtype=int
             The indices of the receptor and ligand atoms that form a salt bridge.
             The first column points to the receptor atom and the second column to the
             ligand atom.
@@ -476,7 +476,7 @@ def find_atoms_by_pattern(
 
     Returns
     -------
-    matches : np.ndarray, shape=(n,), dtype=int
+    np.ndarray, shape=(n,), dtype=int
         The atom indices that fulfill the given SMARTS pattern.
     """
     pattern = Chem.MolFromSmarts(pattern)

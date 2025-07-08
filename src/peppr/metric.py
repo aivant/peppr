@@ -874,7 +874,7 @@ class PLIFRecovery(Metric):
         The pH value used for charge estimation if relevant to contact definition.
     binding_site_cutoff : float, optional
         A cutoff used if contact definition involves focusing on a binding site.
-    include_interactions: iterable of PLIFRecovery.InteractionType, optional
+    include_interactions : iterable of PLIFRecovery.InteractionType, optional
         The types of interactions to include in the PLIF calculations.
         By default, all of them are included.
     """
