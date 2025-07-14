@@ -81,17 +81,23 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
             formal_charge = at.GetFormalCharge()
             if opt_charge > formal_charge:
                 if abs(opt_charge) > 1:
-                    raise AssertionError(f"expected N/O atom net charge > 1: {opt_charge}")
+                    raise AssertionError(
+                        f"expected N/O atom net charge > 1: {opt_charge}"
+                    )
                 else:
                     # fix explicit valence issue - setd to +1
                     at.SetFormalCharge(opt_charge)
         elif elem in [5]:
             # or negatively charged B atoms
-            opt_charge = pt.GetDefaultValence(elem) - at.GetTotalValence()  # note: reversed!
+            opt_charge = (
+                pt.GetDefaultValence(elem) - at.GetTotalValence()
+            )  # note: reversed!
             formal_charge = at.GetFormalCharge()
             if opt_charge < formal_charge:
                 if abs(opt_charge) > 1:
-                    raise AssertionError(f"expected B atom net charge > 1: {opt_charge}")
+                    raise AssertionError(
+                        f"expected B atom net charge > 1: {opt_charge}"
+                    )
                 else:
                     # fix explicit valence issue - setd to -1
                     at.SetFormalCharge(opt_charge)
