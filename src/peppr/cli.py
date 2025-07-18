@@ -37,7 +37,9 @@ _METRICS = {
     "bisy-rmsd": BiSyRMSD(2.0),
     "bond-length-violations": BondLengthViolations(),
     "bond-angle-violations": BondAngleViolations(),
+    "chirality-violations": ChiralityViolations(),
     "clash-count": ClashCount(),
+    "plif-recovery": PLIFRecovery(),
 }
 
 

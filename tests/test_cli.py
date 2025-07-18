@@ -57,6 +57,20 @@ def metrics():
     return list(_METRICS.keys())[:N_METRICS]
 
 
+def test_all_metrics_available():
+    """
+    Check if all metrics implemented in `peppr` are available in the CLI.
+    """
+    cli_metrics = set([type(metric) for metric in _METRICS.values()])
+
+    for attr_name, attr in peppr.__dict__.items():
+        if attr is peppr.Metric:
+            # The base class itself should not be part of the CLI
+            continue
+        if isinstance(attr, type) and issubclass(attr, peppr.Metric):
+            assert attr in cli_metrics, f"{attr_name} is not available in the CLI"
+
+
 @pytest.mark.parametrize("use_multi_pose", [False, True])
 @pytest.mark.parametrize("use_batch", [False, True])
 def test_tabulate(
