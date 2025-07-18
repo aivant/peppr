@@ -221,6 +221,30 @@ def test_salt_bridge_identification(
         assert contact in possible_ref_contacts
 
 
+def test_find_stacking_interactions():
+    """Test π-stacking interaction detection between protein and ligand.
+    It uses pdb 1acj known to have stacking interactions between the protein and ligand."""
+
+    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "1acj.cif")
+    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    receptor = atoms[~atoms.hetero]
+    ligand = atoms[atoms.hetero]
+
+    contact_measurement = peppr.ContactMeasurement(receptor, ligand, 10.0)
+    interactions = contact_measurement.find_stacking_interactions()
+    assert len(interactions) > 0
+
+    # assert interactions are between rings of Tryptophan and Phenylalanine residues with ligand THA
+    valid_residues = {"TRP", "PHE"}
+    for protein_indices, ligand_indices, _ in interactions:
+        assert all(
+            atom.res_name in valid_residues for atom in receptor[protein_indices]
+        ), "Found interaction with unexpected residue"
+        assert all(atom.res_name == "THA" for atom in ligand[ligand_indices]), (
+            "Found interaction with unexpected ligand"
+        )
+
+
 @pytest.mark.parametrize(
     "contact_method",
     [
@@ -250,25 +274,30 @@ def test_no_contacts(contact_method):
     assert contacts.shape == (0, 2)
 
 
-def test_find_stacking_interactions():
-    """Test π-stacking interaction detection between protein and ligand.
-    It uses pdb 1acj known to have stacking interactions between the protein and ligand."""
-
-    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "1acj.cif")
-    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-    receptor = atoms[~atoms.hetero]
-    ligand = atoms[atoms.hetero]
+@pytest.mark.parametrize(
+    "contact_method",
+    [
+        functools.partial(
+            peppr.ContactMeasurement.find_contacts_by_pattern,
+            receptor_pattern="*",
+            ligand_pattern="*",
+            distance_scaling=(0.0, 1.0),
+        ),
+        peppr.ContactMeasurement.find_salt_bridges,
+    ],
+    ids=["find_contacts_by_pattern", "find_salt_bridges"],
+)
+def test_no_bonds(contact_method):
+    """
+    Check if :class:`ContactMeasurement` still works if the receptor and ligand
+    do not have any bonds.
+    """
+    ligand = info.residue("ALA")
+    ligand = ligand[ligand.element != "H"]
+    # Remove all bonds
+    ligand.bonds = struc.BondList(ligand.array_length())
+    receptor = ligand.copy()
+    receptor.coord[:, 0] += 5
 
     contact_measurement = peppr.ContactMeasurement(receptor, ligand, 10.0)
-    interactions = contact_measurement.find_stacking_interactions()
-    assert len(interactions) > 0
-
-    # assert interactions are between rings of Tryptophan and Phenylalanine residues with ligand THA
-    valid_residues = {"TRP", "PHE"}
-    for protein_indices, ligand_indices, _ in interactions:
-        assert all(
-            atom.res_name in valid_residues for atom in receptor[protein_indices]
-        ), "Found interaction with unexpected residue"
-        assert all(atom.res_name == "THA" for atom in ligand[ligand_indices]), (
-            "Found interaction with unexpected ligand"
-        )
+    contact_method(contact_measurement)
