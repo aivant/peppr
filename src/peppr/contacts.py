@@ -92,12 +92,19 @@ class ContactMeasurement:
         self._binding_site = binding_site
         self._ligand = ligand.copy()
 
-        # Detect charged atoms to find salt bridges
-        # and detect molecular patterns involving charged atoms
-        self._binding_site.set_annotation(
-            "charge", estimate_formal_charges(self._binding_site, ph)
-        )
-        self._ligand.set_annotation("charge", estimate_formal_charges(self._ligand, ph))
+        try:
+            # Detect charged atoms to find salt bridges
+            # and detect molecular patterns involving charged atoms
+            self._binding_site.set_annotation(
+                "charge", estimate_formal_charges(self._binding_site, ph)
+            )
+            self._ligand.set_annotation(
+                "charge", estimate_formal_charges(self._ligand, ph)
+            )
+        except Exception:
+            raise struc.BadStructureError(
+                "A valid molecule is required for charge estimation"
+            )
 
         # Convert to 'Mol' object to allow for matching SMARTS patterns
         self._binding_site_mol = rdkit_interface.to_mol(self._binding_site)
@@ -510,11 +517,13 @@ def _get_neighbor_pos(
     vectors : ndarray, shape=(n,3), dtype=float
         The coordinates of the respective neighbors of the given atoms.
     """
-    if len(indices) == 0:
-        return np.zeros((0, 3), dtype=np.float32)
-
     all_bonds, _ = atoms.bonds.get_all_bonds()
+    if all_bonds.shape[1] == 0:
+        # No atom has any neighbor (i.e. an empty BondList)
+        # -> getting the first neighbor below would lead to an IndexError
+        return np.full((len(indices), 3), np.nan)
     neighbor_indices = all_bonds[indices]
+    # Arbitrarily choose the first neighbor
     neighbor_coord = atoms.coord[neighbor_indices[:, 0]]
     # Handle the case where an atom has no neighbor
     neighbor_coord[neighbor_indices[:, 0] == -1] = np.nan
@@ -602,16 +611,23 @@ def _find_charged_atoms_in_resonance_structures(
     neg_mask = np.zeros(mol.GetNumAtoms(), dtype=bool)
     resonance_supplier = Chem.ResonanceMolSupplier(mol)
     for resonance_mol in resonance_supplier:
+        if resonance_mol is None:
+            raise struc.BadStructureError("Cannot compute resonance structure")
         for i in range(mol.GetNumAtoms()):
             charge = resonance_mol.GetAtomWithIdx(i).GetFormalCharge()
             if charge > 0:
                 pos_mask[i] = True
             elif charge < 0:
                 neg_mask[i] = True
-    conjugated_groups = np.array(
-        [resonance_supplier.GetAtomConjGrpIdx(i) for i in range(mol.GetNumAtoms())],
-        dtype=int,
-    )
+    try:
+        conjugated_groups = np.array(
+            [resonance_supplier.GetAtomConjGrpIdx(i) for i in range(mol.GetNumAtoms())],
+            dtype=int,
+        )
+    except RuntimeError:
+        # This is a bug in RDKit, that happens if the molecule has no bonds at all
+        # (https://github.com/rdkit/rdkit/issues/8638)
+        conjugated_groups = np.full(mol.GetNumAtoms(), -1, dtype=int)
     # Fix the 'integer underflow issue' for -1 values
     # (https://github.com/rdkit/rdkit/issues/7112)
     conjugated_groups[conjugated_groups == 2**32 - 1] = -1
