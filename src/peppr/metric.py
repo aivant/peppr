@@ -1110,6 +1110,13 @@ class PLIFRecovery(Metric):
         if reference.array_length() == 0 or pose.array_length() == 0:
             return np.nan
 
+        # Only evaluate on PLI systems - check for both ligands and proteins
+        ligand_mask = reference.hetero
+        protein_mask = ~ligand_mask
+
+        if not ligand_mask.any() or not protein_mask.any():
+            return np.nan
+
         try:
             reference_plifs = self._get_plifs_per_residue(reference)
             pose_plifs = self._get_plifs_per_residue(pose)
