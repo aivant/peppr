@@ -1101,8 +1101,8 @@ class PLIFRecovery(Metric):
                 denominator += c_ir
 
         if denominator == 0:
-            # If the reference has no contacts, the pose perfectly recovers them (100%).
-            return 1.0
+            # If the reference has no contacts, the metric is undefined.
+            return np.nan
 
         return numerator / denominator
 
