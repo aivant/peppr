@@ -5,8 +5,8 @@ __all__ = [
 ]
 
 from collections import defaultdict
-from typing import Any
 import networkx as nx
+import numpy as np
 from networkx.algorithms import isomorphism
 
 
@@ -111,7 +111,7 @@ def find_edge_induced_subgraphs(
     return matches
 
 
-def graph_to_connected_triples(graph: nx.Graph) -> list[list[Any, Any, Any]]:
+def graph_to_connected_triples(graph: nx.Graph) -> np.ndarray:
     """
     Given a graph, return a list of the node triples that are in
     all linear subgraphs with two edges (three nodes).
@@ -135,4 +135,8 @@ def graph_to_connected_triples(graph: nx.Graph) -> list[list[Any, Any, Any]]:
     # Extract the nodes
     triples = [[m[1][0], m[1][1], m[1][2]] for m in matches]
 
-    return triples
+    if len(triples) == 0:
+        # Make sure the correct shape is returned, even if no triples are found
+        return np.zeros((0, 3), dtype=int)
+    else:
+        return np.array(triples, dtype=int)

@@ -816,8 +816,7 @@ class BondAngleViolations(Metric):
             return np.nan
 
         # Check the angle of all bonded triples
-        graph = reference.bonds.as_graph()
-        bonded_triples = np.array(graph_to_connected_triples(graph))
+        bonded_triples = graph_to_connected_triples(reference.bonds.as_graph())
         ref_angles = struc.index_angle(reference, bonded_triples)
         pose_angles = struc.index_angle(pose, bonded_triples)
         angle_diffs = np.abs(ref_angles - pose_angles)
@@ -1222,16 +1221,15 @@ def _run_for_each_monomer(
         values.append(function(reference_chain, pose_chain))
     values = np.array(values)
 
+    # Ignore chains where the values are NaN
+    not_nan_mask = np.isfinite(values)
+    values = values[not_nan_mask]
     if len(values) == 0:
         # No chains in the structure
         return np.nan
     else:
         n_atoms_per_chain = np.diff(chain_starts)
-        # Ignore chains where the values are NaN
-        not_nan_mask = np.isfinite(values)
-        return np.average(
-            values[not_nan_mask], weights=n_atoms_per_chain[not_nan_mask]
-        ).item()
+        return np.average(values, weights=n_atoms_per_chain[not_nan_mask]).item()
 
 
 def _run_for_each_chain_pair(
