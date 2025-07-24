@@ -104,7 +104,12 @@ def find_optimal_match(
     """
     reference_chains = list(struc.chain_iter(reference))
     pose_chains = list(struc.chain_iter(pose))
-    if len(reference_chains) == 1:
+    if len(reference_chains) == 0:
+        # No chains -> no need to match
+        if len(pose_chains) != 0:
+            raise UnmappableEntityError("Reference and pose have different entities")
+        return np.array([], dtype=int), np.array([], dtype=int)
+    elif len(reference_chains) == 1:
         # Only one chain -> no need to match
         if len(pose_chains) != 1:
             raise UnmappableEntityError("Reference and pose have different entities")
@@ -870,7 +875,7 @@ def _assign_entity_ids(
             entity_ids.append(current_entity_id)
             current_entity_id += 1
 
-    return np.array(entity_ids)
+    return np.array(entity_ids, dtype=int)
 
 
 def _choose_anchor_chain(
