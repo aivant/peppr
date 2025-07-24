@@ -1101,13 +1101,20 @@ class PLIFRecovery(Metric):
                 denominator += c_ir
 
         if denominator == 0:
-            # If the reference has no contacts, the pose perfectly recovers them (100%).
-            return 1.0
+            # If the reference has no contacts, the metric is undefined.
+            return np.nan
 
         return numerator / denominator
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         if reference.array_length() == 0 or pose.array_length() == 0:
+            return np.nan
+
+        # Only evaluate on PLI systems - check for both ligands and proteins
+        ligand_mask = reference.hetero
+        protein_mask = ~ligand_mask
+
+        if not ligand_mask.any() or not protein_mask.any():
             return np.nan
 
         try:
