@@ -393,31 +393,42 @@ class Evaluator(Mapping):
         RMSD between the reference and pose.
         """
         results = np.full(len(self._metrics), np.nan)
-        try:
-            reference_order, pose_order = find_optimal_match(
-                reference,
-                pose,
-                min_sequence_identity=self._min_sequence_identity,
-                use_heuristic=use_heuristic,
-                max_matches=self._max_matches,
-            )
-            matched_reference = reference[reference_order]
-            matched_pose = pose[pose_order]
-            # Sanity check if something went wrong in the matching
-            if not np.array_equal(matched_reference.element, matched_pose.element):
-                raise ValueError("Reference and pose arrays are not array_equal")
-        except Exception as e:
-            self._raise_or_warn(
-                e,
-                MatchWarning(
-                    f"Failed to match reference and pose in system '{system_id}': {e}"
-                ),
-            )
-            return results
+        matching_is_disabled = np.all(
+            [metric.disable_atom_matching() for metric in self._metrics]
+        )
+        if matching_is_disabled:
+            matched_reference = None
+            matched_pose = None
+        else:
+            try:
+                reference_order, pose_order = find_optimal_match(
+                    reference,
+                    pose,
+                    min_sequence_identity=self._min_sequence_identity,
+                    use_heuristic=use_heuristic,
+                    max_matches=self._max_matches,
+                )
+                matched_reference = reference[reference_order]
+                matched_pose = pose[pose_order]
+                # Sanity check if something went wrong in the matching
+                if not np.array_equal(matched_reference.element, matched_pose.element):
+                    raise ValueError("Reference and pose arrays are not array_equal")
+            except Exception as e:
+                self._raise_or_warn(
+                    e,
+                    MatchWarning(
+                        f"Failed to match reference and pose "
+                        f"in system '{system_id}': {e}"
+                    ),
+                )
+                return results
 
         for i, metric in enumerate(self._metrics):
             try:
-                results[i] = metric.evaluate(matched_reference, matched_pose)
+                if metric.disable_atom_matching():
+                    results[i] = metric.evaluate(reference, pose)
+                else:
+                    results[i] = metric.evaluate(matched_reference, matched_pose)
             except Exception as e:
                 self._raise_or_warn(
                     e,
@@ -482,62 +493,74 @@ class Evaluator(Mapping):
         results = np.full(len(self._metrics), np.nan)
 
         for i, metric in enumerate(self._metrics):
-            try:
-                best_result = np.inf if metric.smaller_is_better() else -np.inf
-                for it, (reference_order, pose_order) in enumerate(
-                    _find_all_matches(
-                        reference,
-                        pose,
-                        min_sequence_identity=self._min_sequence_identity,
+            if metric.disable_atom_matching():
+                try:
+                    results[i] = metric.evaluate(reference, pose)
+                except Exception as e:
+                    self._raise_or_warn(
+                        e,
+                        EvaluationWarning(
+                            f"Failed to evaluate {metric.name} on '{system_id}': {e}"
+                        ),
                     )
-                ):
-                    if self._max_matches is not None and it >= self._max_matches:
-                        break
-                    matched_reference = reference[reference_order]
-                    matched_pose = pose[pose_order]
-                    # Sanity check if something went wrong in the matching
-                    if not np.array_equal(
-                        matched_reference.element, matched_pose.element
+            else:
+                try:
+                    best_result = np.inf if metric.smaller_is_better() else -np.inf
+                    for it, (reference_order, pose_order) in enumerate(
+                        _find_all_matches(
+                            reference,
+                            pose,
+                            min_sequence_identity=self._min_sequence_identity,
+                        )
                     ):
-                        self._raise_or_warn(
-                            ValueError(
-                                f"'{system_id}' poses could not be matched to reference"
-                            ),
-                            MatchWarning,
-                        )
-                        best_result = np.nan
-                        break
-                    try:
-                        result = metric.evaluate(matched_reference, matched_pose)
-                    except Exception as e:
-                        self._raise_or_warn(
-                            e,
-                            EvaluationWarning(
-                                f"Failed to evaluate {metric.name} on '{system_id}': "
-                                f"{e}"
-                            ),
-                        )
-                        best_result = np.nan
-                        break
-                    if metric.smaller_is_better():
-                        if result < best_result:
-                            best_result = result
-                    else:
-                        if result > best_result:
-                            best_result = result
+                        if self._max_matches is not None and it >= self._max_matches:
+                            break
+                        matched_reference = reference[reference_order]
+                        matched_pose = pose[pose_order]
+                        # Sanity check if something went wrong in the matching
+                        if not np.array_equal(
+                            matched_reference.element, matched_pose.element
+                        ):
+                            self._raise_or_warn(
+                                ValueError(
+                                    f"'{system_id}' poses could not be matched "
+                                    f"to reference"
+                                ),
+                                MatchWarning,
+                            )
+                            best_result = np.nan
+                            break
+                        try:
+                            result = metric.evaluate(matched_reference, matched_pose)
+                        except Exception as e:
+                            self._raise_or_warn(
+                                e,
+                                EvaluationWarning(
+                                    f"Failed to evaluate {metric.name} "
+                                    f"on '{system_id}': {e}"
+                                ),
+                            )
+                            best_result = np.nan
+                            break
+                        if metric.smaller_is_better():
+                            if result < best_result:
+                                best_result = result
+                        else:
+                            if result > best_result:
+                                best_result = result
 
-            except _FindAllMatchesError as e:
-                self._raise_or_warn(
-                    e.wrapped_exception,
-                    MatchWarning(
-                        f"Failed to match reference and pose in system '{system_id}': "
-                        f"{e}"
-                    ),
-                )
-                best_result = np.nan
+                except _FindAllMatchesError as e:
+                    self._raise_or_warn(
+                        e.wrapped_exception,
+                        MatchWarning(
+                            f"Failed to match reference and pose "
+                            f"in system '{system_id}': {e}"
+                        ),
+                    )
+                    best_result = np.nan
 
-            if np.isfinite(best_result):
-                results[i] = best_result
+                if np.isfinite(best_result):
+                    results[i] = best_result
 
         return results
 

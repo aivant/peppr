@@ -71,6 +71,59 @@ our life easier:
 - Atoms with the same ``chain_id`` should be considered as part of the same molecule,
   atoms with different ``chain_id`` should be considered as different molecules.
 
+Custom atom matching behavior
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Above we stated
+
+    The input system always contains matching atoms.
+
+This is not desirable for some kinds of metrics, as atom matching involves removing
+atoms that are not common between the reference and pose.
+For example when some model designs completely new small molecules instead of trying to
+reproduce a ground truth molecule, the reference and pose intentionally may have
+completely different atoms.
+Hence, a metric might want to capture exactly this difference.
+Luckily, this is possible by overriding :meth:`disable_atom_matching()`.
+
+For demonstration purposes, let's envision a metric that simply compares the difference
+of carbon atoms in the system's small molecules, where the aim of the pose would be to
+match exactly the number of carbon atoms in the reference.
+Atom matching is not necessary here, as we do not perform pairwise comparisons between
+reference and pose atoms, but instead aggregate some global number for each structure.
+
+.. jupyter-execute::
+
+    import peppr
+    import numpy as np
+    import biotite.structure as struc
+
+    class CarbonContentDifference(peppr.Metric):
+
+        @property
+        def name(self):
+            return "Carbon content difference"
+
+        def evaluate(self, reference, pose):
+            ref_small_mol = reference[reference.hetero]
+            pose_small_mol = pose[pose.hetero]
+            ref_carbon_content = np.count_nonzero(ref_small_mol.atom_name == "C")
+            pose_carbon_content = np.count_nonzero(pose_small_mol.atom_name == "C")
+            return np.abs(ref_carbon_content - pose_carbon_content)
+
+        def smaller_is_better(self):
+            return True
+
+        # This part is important:
+        # We want to disable the upstream atom matching by the Evaluator for this metric
+        def disable_atom_matching(self):
+            return True
+
+Disabling atom matching would also be the correct approach if some metric requires only
+the pose (e.g. when checking atom clashes) or if only certain parts of the structures
+should be matched.
+In the latter case, :meth:`evaluate()` would implement a custom atom matching behavior.
+
 Creating a custom selector
 --------------------------
 Custom selectors can also be created by inheriting from the :class:`Selector` base
@@ -99,14 +152,14 @@ ordering.
 
 Bringing it all together
 ------------------------
-Now that we have created our custom metric and selector, we can use them in the
+Now that we have created our custom metrics and the selector, we can use them in the
 :class:`Evaluator` to evaluate our predictions.
 
 .. jupyter-execute::
 
     import biotite.structure.io.pdbx as pdbx
 
-    evaluator = peppr.Evaluator([RMSD()])
+    evaluator = peppr.Evaluator([RMSD(), CarbonContentDifference()])
 
     for system_dir in sorted(path_to_systems.iterdir()):
         if not system_dir.is_dir():
@@ -122,7 +175,7 @@ Now that we have created our custom metric and selector, we can use them in the
 
     evaluator.tabulate_metrics(selectors=[WorstCaseSelector()])
 
-And finally, we will also the bin thresholds for the RMSD metric in action.
+And finally, we will also see the bin thresholds for the RMSD metric in action.
 
 .. jupyter-execute::
 
