@@ -1013,6 +1013,14 @@ class PLIFRecovery(Metric):
         if ligand.array_length() == 0 or receptor.array_length() == 0:
             return {}
 
+        # The original residue numbering between the reference and pose may be different
+        # However the residue ID is important for this metric, as it is used to
+        # identify the interactions
+        # -> Create consistent residue numbering by just counting up
+        receptor.res_id = struc.create_continuous_res_ids(
+            receptor, restart_each_chain=False
+        )
+
         contact_measurement = ContactMeasurement(
             receptor=receptor,
             ligand=ligand,
