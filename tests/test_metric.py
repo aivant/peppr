@@ -1,6 +1,7 @@
 import itertools
 from pathlib import Path
 import biotite.structure as struc
+import biotite.structure.info as info
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
@@ -34,6 +35,20 @@ ALL_METRICS = [
     peppr.PLIFRecovery(),
     peppr.ChiralityViolations(),
 ]
+
+
+def _empty_atom_array():
+    atoms = struc.AtomArray(0)
+    atoms.bonds = struc.BondList(0)
+    return atoms
+
+
+def _no_bond_atom_array(is_small_molecule):
+    atoms = info.residue("ALA")
+    atoms = atoms[atoms.element != "H"]
+    atoms.hetero[:] = is_small_molecule
+    atoms.bonds = struc.BondList(atoms.array_length())
+    return atoms
 
 
 @pytest.mark.parametrize(
@@ -96,16 +111,25 @@ def test_no_modification(metric):
     assert np.all(pose == original_pose)
 
 
+@pytest.mark.parametrize(
+    "atoms",
+    [
+        _empty_atom_array(),
+        _no_bond_atom_array(is_small_molecule=False),
+        _no_bond_atom_array(is_small_molecule=True),
+    ],
+    ids=["empty", "no_bond_protein", "no_bond_small_mol"],
+)
 @pytest.mark.parametrize("metric", ALL_METRICS, ids=lambda metric: metric.name)
-def test_unsuitable_system(metric):
+def test_edge_case_systems(metric, atoms):
     """
+    Even if the input structures are 'weird' (e.g. empty or no bonds), the metrics
+    should never fail.
     If a system is unsuitable for the metric, *NaN* should be returned.
     There should never be an exception raised.
-    To check this, run all metrics on an empty system, which is never suitable.
+    To check this, run different variations of edge case systems.
     """
-    reference = struc.AtomArray(0)
-    pose = struc.AtomArray(0)
-    assert np.isnan(metric.evaluate(reference, pose))
+    metric.evaluate(atoms, atoms)
 
 
 def test_unique_names():
