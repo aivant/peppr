@@ -2,6 +2,7 @@ import copy
 import itertools
 from collections import OrderedDict
 from pathlib import Path
+import biotite.structure as struc
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
@@ -325,3 +326,76 @@ def test_individual_match_method(model_num, optimal_bisy_rmsd):
     assert exhaustive_bisy_rmsd > optimal_bisy_rmsd + TOLERANCE
     # The individual method should be able to find the optimal value
     assert individual_bisy_rmsd <= optimal_bisy_rmsd + TOLERANCE
+
+
+@pytest.mark.parametrize(
+    "match_method",
+    [
+        peppr.Evaluator.MatchMethod.HEURISTIC,
+        peppr.Evaluator.MatchMethod.EXHAUSTIVE,
+        peppr.Evaluator.MatchMethod.INDIVIDUAL,
+    ],
+)
+def test_disabled_atom_matching(match_method):
+    """
+    Check if metrics that disable atom matching actually obtained an unmatched reference
+    and pose.
+    """
+
+    class MetricWithDisabledMatching(peppr.Metric):
+        """
+        Placeholder metric that disables atom matching.
+        """
+
+        @property
+        def name(self):
+            return "Disabled atom matching"
+
+        def evaluate(self, reference, poses):
+            assert reference.array_length() != poses.array_length(), (
+                "Reference and pose were matched"
+            )
+            return np.nan
+
+        def smaller_is_better(self):
+            return False
+
+        def disable_atom_matching(self):
+            return True
+
+    class MetricWithEnabledMatching(peppr.Metric):
+        """
+        Placeholder metric that requires atom matching.
+        """
+
+        @property
+        def name(self):
+            return "Enabled atom matching"
+
+        def evaluate(self, reference, poses):
+            assert reference.array_length() == poses.array_length(), (
+                "Reference and pose were unmatched"
+            )
+            return np.nan
+
+        def smaller_is_better(self):
+            return False
+
+        def disable_atom_matching(self):
+            return False
+
+    evaluator = peppr.Evaluator(
+        # Mix in a metric that requires atom matching
+        # To ensure that matching is only disabled for the first metric
+        [MetricWithDisabledMatching(), MetricWithEnabledMatching()],
+        match_method,
+    )
+    system_id = list_test_predictions()[0]
+    reference, _ = assemble_predictions(system_id)
+    # For simplicity only use a monomer
+    reference = next(struc.chain_iter(reference))
+    # The pose is the same as the reference - except that it misses the first residue
+    residue_starts = struc.get_residue_starts(reference)
+    pose = reference[residue_starts[1] :]
+
+    evaluator.feed("test", reference, pose)

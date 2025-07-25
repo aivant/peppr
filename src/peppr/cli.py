@@ -315,6 +315,11 @@ def run(
     metric = _METRICS[metric]
     reference = _load_system(reference)
     pose = _load_system(pose)
+    if metric.disable_atom_matching():
+        result = metric.evaluate(reference, pose)
+        print(f"{result:.3f}", file=sys.stdout)
+        return
+
     match Evaluator.MatchMethod(match_method):
         case Evaluator.MatchMethod.HEURISTIC | Evaluator.MatchMethod.EXHAUSTIVE:
             use_heuristic = (
