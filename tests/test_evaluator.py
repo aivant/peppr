@@ -386,7 +386,7 @@ def test_disabled_atom_matching(match_method):
 
     evaluator = peppr.Evaluator(
         # Mix in a metric that requires atom matching
-        # To ensure that it actually
+        # To ensure that matching is only disabled for the first metric
         [MetricWithDisabledMatching(), MetricWithEnabledMatching()],
         match_method,
     )
