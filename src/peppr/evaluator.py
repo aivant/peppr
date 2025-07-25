@@ -413,6 +413,7 @@ class Evaluator(Mapping):
                     f"Failed to match reference and pose in system '{system_id}': {e}"
                 ),
             )
+            return results
 
         for i, metric in enumerate(self._metrics):
             try:
