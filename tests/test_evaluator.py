@@ -392,7 +392,7 @@ def test_disabled_atom_matching(match_method):
     )
     system_id = list_test_predictions()[0]
     reference, _ = assemble_predictions(system_id)
-    # For simplicity one use a monomer
+    # For simplicity only use a monomer
     reference = next(struc.chain_iter(reference))
     # The pose is the same as the reference - except that it misses the first residue
     residue_starts = struc.get_residue_starts(reference)
