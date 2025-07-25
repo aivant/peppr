@@ -1467,12 +1467,14 @@ def _match_receptors_only(
     reference, pose : struc.AtomArray
         The input structures, but with matched receptor chains.
     """
+    reference_receptor = reference[~reference.hetero]
+    pose_receptor = pose[~pose.hetero]
     reference_receptor_order, pose_receptor_order = find_optimal_match(
-        reference[~reference.hetero],
-        pose[~pose.hetero],
+        reference_receptor,
+        pose_receptor,
     )
-    matched_reference_receptor = reference[reference_receptor_order]
-    matched_pose_receptor = pose[pose_receptor_order]
+    matched_reference_receptor = reference_receptor[reference_receptor_order]
+    matched_pose_receptor = pose_receptor[pose_receptor_order]
     return (
         # Re-append the small molecules to the matched receptor chains
         matched_reference_receptor + reference[reference.hetero],
