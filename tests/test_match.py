@@ -453,6 +453,22 @@ def test_exhaustive_mappings():
 
 def test_no_matching_avoids_sequence_mismatch_exception():
     """Test that NONE doesn't raise exception when sequences differ, but HEURISTIC does."""
+
+    class PlacheholderMetric(peppr.Metric):
+        """
+        Placeholder metric that does not fail for unmatched atoms.
+        """
+
+        @property
+        def name(self):
+            return "Enabled atom matching"
+
+        def evaluate(self, reference, poses):
+            return np.nan
+
+        def smaller_is_better(self):
+            return False
+
     # Create reference structure - single chain
     reference = info.residue("ALA")
     reference = reference[reference.element != "H"]
@@ -471,7 +487,7 @@ def test_no_matching_avoids_sequence_mismatch_exception():
 
     # Test with HEURISTIC - should raise UnmappableEntityError due to different number of chains
     evaluator_heuristic = peppr.Evaluator(
-        [peppr.BondLengthViolations()],
+        [PlacheholderMetric()],
         match_method=peppr.Evaluator.MatchMethod.HEURISTIC,
     )
 
@@ -480,7 +496,7 @@ def test_no_matching_avoids_sequence_mismatch_exception():
 
     # Test with NONE - should not raise exception
     evaluator_no_matching = peppr.Evaluator(
-        [peppr.BondLengthViolations()],
+        [PlacheholderMetric()],
         match_method=peppr.Evaluator.MatchMethod.NONE,
     )
 

@@ -52,6 +52,7 @@ from peppr.dockq import (
 )
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
+from peppr.match import find_optimal_match
 
 
 class Metric(ABC):
@@ -130,6 +131,26 @@ class Metric(ABC):
             Otherwise, a larger value is considered a better prediction.
         """
         raise NotImplementedError
+
+    def disable_atom_matching(self) -> bool:
+        """
+        Defines whether the upstream atom matching is disabled for this metric.
+
+        By default the `reference` and `pose` are already matched by the calling
+        :class:`Evaluator`.
+        This behavior can be disabled by overriding this method.
+
+        Returns
+        -------
+        bool
+            If set to true, the upstream atom matching using
+            :func:`find_optimal_match()` is disabled.
+            Note that this causes the `reference` and `pose` passed to
+            :meth:`evaluate()` to be unmatched to each other.
+            Hence, if some kind of matching is still required, it must be done
+            inside the :meth:`evaluate()` method.
+        """
+        return False
 
 
 class MonomerRMSD(Metric):
@@ -759,6 +780,10 @@ class BondLengthViolations(Metric):
     def smaller_is_better(self) -> bool:
         return True
 
+    def disable_atom_matching(self) -> bool:
+        # This metric does not use the reference anyway
+        return True
+
 
 class BondAngleViolations(Metric):
     """
@@ -831,6 +856,10 @@ class BondAngleViolations(Metric):
     def smaller_is_better(self) -> bool:
         return True
 
+    def disable_atom_matching(self) -> bool:
+        # This metric does not use the reference anyway
+        return True
+
 
 class ClashCount(Metric):
     """
@@ -847,6 +876,10 @@ class ClashCount(Metric):
         return len(find_clashes(pose))
 
     def smaller_is_better(self) -> bool:
+        return True
+
+    def disable_atom_matching(self) -> bool:
+        # This metric does not use the reference anyway
         return True
 
 
@@ -980,6 +1013,14 @@ class PLIFRecovery(Metric):
         if ligand.array_length() == 0 or receptor.array_length() == 0:
             return {}
 
+        # The original residue numbering between the reference and pose may be different
+        # However the residue ID is important for this metric, as it is used to
+        # identify the interactions
+        # -> Create consistent residue numbering by just counting up
+        receptor.res_id = struc.create_continuous_res_ids(
+            receptor, restart_each_chain=False
+        )
+
         contact_measurement = ContactMeasurement(
             receptor=receptor,
             ligand=ligand,
@@ -1109,11 +1150,19 @@ class PLIFRecovery(Metric):
         if reference.array_length() == 0 or pose.array_length() == 0:
             return np.nan
 
-        # Only evaluate on PLI systems - check for both ligands and proteins
-        ligand_mask = reference.hetero
-        protein_mask = ~ligand_mask
+        reference, pose = _match_receptors_only(reference, pose)
 
-        if not ligand_mask.any() or not protein_mask.any():
+        # Only evaluate on PLI systems - check for both ligands and proteins
+        protein_mask = ~reference.hetero
+        # As no global atom matching is performed, the pose and reference may have
+        # different ligands
+        reference_ligand_mask = reference.hetero
+        pose_ligand_mask = pose.hetero
+        if (
+            not reference_ligand_mask.any()
+            or not pose_ligand_mask.any()
+            or not protein_mask.any()
+        ):
             return np.nan
 
         try:
@@ -1125,6 +1174,12 @@ class PLIFRecovery(Metric):
 
     def smaller_is_better(self) -> bool:
         return False
+
+    def disable_atom_matching(self) -> bool:
+        # This metric should also be especially suitable for small molecule design,
+        # i.e. the small molecules may be different between the reference and pose as
+        # only the types of interactions to the receptor residues are checked
+        return True
 
     @property
     def thresholds(self) -> "OrderedDict[str, float]":
@@ -1392,3 +1447,36 @@ def _select_receptor_and_ligand(
         return (reference_chain1, reference_chain2, pose_chain1, pose_chain2)
     else:
         return (reference_chain2, reference_chain1, pose_chain2, pose_chain1)
+
+
+def _match_receptors_only(
+    reference: struc.AtomArray, pose: struc.AtomArray
+) -> tuple[struc.AtomArray, struc.AtomArray]:
+    """
+    Create matched receptor chains from the given reference and pose.
+    Small molecules are kept as they are, but are appended to the end of the respective
+    structure.
+
+    Parameters
+    ----------
+    reference, pose : struc.AtomArray
+        The structures to be matched.
+
+    Returns
+    -------
+    reference, pose : struc.AtomArray
+        The input structures, but with matched receptor chains.
+    """
+    reference_receptor = reference[~reference.hetero]
+    pose_receptor = pose[~pose.hetero]
+    reference_receptor_order, pose_receptor_order = find_optimal_match(
+        reference_receptor,
+        pose_receptor,
+    )
+    matched_reference_receptor = reference_receptor[reference_receptor_order]
+    matched_pose_receptor = pose_receptor[pose_receptor_order]
+    return (
+        # Re-append the small molecules to the matched receptor chains
+        matched_reference_receptor + reference[reference.hetero],
+        matched_pose_receptor + pose[pose.hetero],
+    )
