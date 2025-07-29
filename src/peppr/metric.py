@@ -209,6 +209,17 @@ class MonomerTMScore(Metric):
     def name(self) -> str:
         return "TM-score"
 
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        # Bins are adopted from https://doi.org/10.1093/nar/gki524
+        return OrderedDict(
+            [
+                ("random", 0.00),
+                ("ambiguous", 0.17),
+                ("similar", 0.50),
+            ]
+        )
+
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         def superimpose_and_tm_score(reference, pose):  # type: ignore[no-untyped-def]
             # Use 'superimpose_structural_homologs()' instead of 'superimpose()',

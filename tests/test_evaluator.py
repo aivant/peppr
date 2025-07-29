@@ -139,6 +139,9 @@ def test_summarize_metrics(
         "intra protein lDDT median",
         "TM-score mean",
         "TM-score median",
+        "TM-score random",
+        "TM-score ambiguous",
+        "TM-score similar",
     ]
     SELECTOR_NAMES = ["mean", "Oracle"]
 
