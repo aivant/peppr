@@ -18,6 +18,7 @@ __all__ = [
     "ClashCount",
     "PLIFRecovery",
     "ChiralityViolations",
+    "PocketDistance",
 ]
 
 import itertools
@@ -52,7 +53,7 @@ from peppr.dockq import (
 )
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
-from peppr.match import find_optimal_match
+from peppr.match import find_matching_centroids, find_optimal_match
 
 
 class Metric(ABC):
@@ -1193,7 +1194,7 @@ class PLIFRecovery(Metric):
         return True
 
     @property
-    def thresholds(self) -> "OrderedDict[str, float]":
+    def thresholds(self) -> OrderedDict[str, float]:
         return OrderedDict([("Low", 0.0), ("Medium", 0.5), ("High", 0.9)])
 
 
@@ -1251,6 +1252,102 @@ class ChiralityViolations(Metric):
         return float(violation_count / chiral_count)
 
     def smaller_is_better(self) -> bool:
+        return True
+
+
+class PocketDistance(Metric):
+    r"""
+    Calculates the distance between the centroid of the reference ligand
+    (i.e. the pocket center) and the pose in the ligand. [1]_
+
+    If multiple pockets are present, the average distance is calculated.
+
+    Parameters
+    ----------
+    use_pose_centroids : bool, optional
+        If ``True``, the metric quantifies the distance between the pocket center and
+        the pose ligand centroid (also called DCC [2]_).
+        Otherwise, the metric is more permissive and takes the minimum distance of any
+        pose ligand atom to the pocket center (also called DCA).
+
+    Notes
+    -----
+    Note that for ``use_pose_centroids=False`` even a perfect match might not have
+    a distance of zero, as centroid may not lie directly on some ligand atom directly.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1073/pnas.0707684105
+    .. [2] https://doi.org/10.1016/j.str.2011.02.015
+    """
+
+    def __init__(
+        self,
+        use_pose_centroids: bool = True,
+    ) -> None:
+        self._use_pose_centroids = use_pose_centroids
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "DCC" if self._use_pose_centroids else "DCA"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        # Based on the 'average radius of gyration for ligand molecules'
+        # (https://doi.org/10.1073/pnas.0707684105)
+        return OrderedDict([("good", 0.0), ("bad", 4.0)])
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        for atoms in (reference, pose):
+            if atoms.array_length() == 0:
+                # No atoms present
+                return np.nan
+            if np.all(atoms.hetero) or np.all(~atoms.hetero):
+                # Either no polymer or ligand present
+                return np.nan
+
+        reference, pose = _match_receptors_only(reference, pose)
+
+        # Superimpose on polymer chains
+        _, transform = struc.superimpose(
+            reference[~reference.hetero], pose[~pose.hetero]
+        )
+        pose = transform.apply(pose)
+
+        ref_ligands = list(struc.chain_iter(reference[reference.hetero]))
+        pose_ligands = list(struc.chain_iter(pose[pose.hetero]))
+        if len(ref_ligands) != len(pose_ligands):
+            raise IndexError(
+                f"Reference has {len(ref_ligands)} ligands, "
+                f"but pose has {len(pose_ligands)} ligands"
+            )
+        ref_centroids = np.array([struc.centroid(lig) for lig in ref_ligands])
+        pose_centroids = np.array([struc.centroid(lig) for lig in pose_ligands])
+        pose_ligand_order = find_matching_centroids(ref_centroids, pose_centroids)
+
+        if self._use_pose_centroids:
+            pose_centroids = pose_centroids[pose_ligand_order]
+            return np.mean(
+                np.linalg.norm(pose_centroids - ref_centroids, axis=1)
+            ).item()
+        else:
+            pose_ligands = [pose_ligands[i] for i in pose_ligand_order]
+            min_distances = np.array(
+                [
+                    np.min(struc.distance(pose_ligand, pocket_center))
+                    for pose_ligand, pocket_center in zip(pose_ligands, ref_centroids)
+                ]
+            )
+            return np.mean(min_distances).item()
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+    def disable_atom_matching(self) -> bool:
+        # This metric should also be especially suitable for small molecule design,
+        # i.e. the small molecules may be different between the reference and pose as
+        # only the types of interactions to the receptor residues are checked
         return True
 
 

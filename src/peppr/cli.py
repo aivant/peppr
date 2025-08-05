@@ -40,6 +40,8 @@ _METRICS = {
     "chirality-violations": ChiralityViolations(),
     "clash-count": ClashCount(),
     "plif-recovery": PLIFRecovery(),
+    "dcc": PocketDistance(use_pose_centroids=True),
+    "dca": PocketDistance(use_pose_centroids=False),
 }
 
 

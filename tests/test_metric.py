@@ -34,6 +34,8 @@ ALL_METRICS = [
     peppr.BondAngleViolations(),
     peppr.PLIFRecovery(),
     peppr.ChiralityViolations(),
+    peppr.PocketDistance(use_pose_centroids=True),
+    peppr.PocketDistance(use_pose_centroids=False),
 ]
 
 
@@ -75,6 +77,8 @@ def _no_bond_atom_array(is_small_molecule):
         (peppr.ClashCount(), (0, 10000)),
         (peppr.BondAngleViolations(), (0.0, 1.0)),
         (peppr.ChiralityViolations(), (0.0, 1.0)),
+        (peppr.PocketDistance(use_pose_centroids=True), (0.0, 20.0)),
+        (peppr.PocketDistance(use_pose_centroids=False), (0.0, 20.0)),
     ],
     ids=lambda x: x.name if isinstance(x, peppr.Metric) else "",
 )
@@ -324,6 +328,17 @@ def test_ligand_only_system(metric):
 
 
 @pytest.mark.parametrize(
+    ["metric", "perfect_value", "bad_value"],
+    [
+        (peppr.LDDTPLIScore(), 1.0, 0.0),
+        (peppr.PocketAlignedLigandRMSD(), 0.0, None),
+        (peppr.BiSyRMSD(5.0), 0.0, None),
+        (peppr.PLIFRecovery(), 1.0, 0.0),
+        (peppr.PocketDistance(use_pose_centroids=True), 0.0, None),
+    ],
+    ids=lambda x: x.name if isinstance(x, peppr.Metric) else "",
+)
+@pytest.mark.parametrize(
     "pdb_id",  # structures containing ligands
     [
         "2rtg",
@@ -333,11 +348,11 @@ def test_ligand_only_system(metric):
     ],
     ids=lambda x: x,
 )
-def test_plif_recovery_sanity_check(pdb_id):
+def test_perfect_pli_metrics(metric, perfect_value, bad_value, pdb_id):
     """
-    Test :meth:`PLIFRecovery.evaluate()` with real PDB structures.
-    When reference and model are identical, should return 1.0.
-    For different structures, should return a value between 0.0 and 1.0.
+    Test a PLI :class:`Metric` on cases where the pose matches the reference
+    perfectly and cases where the pose is heavily misplaced, and expect according
+    metric values.
     """
     data_dir = Path(__file__).parent / "data" / "pdb"
     pdbx_file = pdbx.CIFFile.read(data_dir / f"{pdb_id}.cif")
@@ -347,45 +362,37 @@ def test_plif_recovery_sanity_check(pdb_id):
         include_bonds=True,
     )
 
-    # Apply same preprocessing as test_contacts.py
-    # Remove salt and water
-    atoms = atoms[~struc.filter_solvent(atoms) & ~struc.filter_monoatomic_ions(atoms)]
+    atoms = peppr.standardize(atoms)
     # Focus on a single monomer if multiple chains exist
     if len(np.unique(atoms.chain_id)) > 1:
         atoms = atoms[atoms.chain_id == atoms.chain_id[0]]
-    # Remove hydrogen atoms (ContactMeasurement requires heavy atoms only)
-    atoms = atoms[atoms.element != "H"]
+    # Assign unique chain IDs to receptor and ligand
+    atoms.chain_id[~atoms.hetero] = "A"
+    atoms.chain_id[atoms.hetero] = "B"
 
     reference = atoms
-    model = reference
-    # Include all interactions for testing
-    interactions = list(peppr.PLIFRecovery.InteractionType)
-    metric = peppr.PLIFRecovery(include_interactions=interactions)
-
-    # Test with same structure - should return 1.0 (perfect recovery)
-    recovery_score = metric.evaluate(reference, model)
-    assert recovery_score == pytest.approx(1.0), (
-        f"Identical structures should have perfect PLIF recovery for {pdb_id}"
-    )
-
-    # Move the ligand to a different position
-    model = reference.copy()
-    ligand_mask = model.hetero
+    # Move the pose ligand to a different position
+    pose = reference.copy()
+    ligand_mask = pose.hetero
     translation_vector = np.array([100.0, 100.0, 100.0])
-    model.coord[ligand_mask] += translation_vector
-    recovery_score = metric.evaluate(reference, model)
+    pose.coord[ligand_mask] += translation_vector
 
-    assert recovery_score == pytest.approx(0.0), (
-        f"A model with a displaced ligand for {pdb_id} should have a recovery "
-        f"score of 0.0, but got {recovery_score} instead."
-    )
+    # Test with same structure - should return perfect score
+    recovery_score = metric.evaluate(reference, reference)
+    assert recovery_score == pytest.approx(perfect_value, abs=1e-6)
 
-    model = atoms.copy()
-    model.coord += np.random.normal(0, 0.5, model.coord.shape)  # Add small random noise
-    recovery_score_model = metric.evaluate(reference, model)
-    assert 0.0 <= recovery_score_model <= 1.0, (
-        f"PLIF recovery should be between 0.0 and 1.0 for {pdb_id}, got {recovery_score_model}"
-    )
+    # If the pose ligand is heavily misplaced, the score should be bad
+    recovery_score = metric.evaluate(reference, pose)
+    if bad_value is not None:
+        # Expect the worst possible score
+        assert recovery_score == pytest.approx(bad_value, abs=1e-6)
+    else:
+        # There are no bounds how bad the metric can get
+        # -> Expect the score to be worse than the perfect score
+        if metric.smaller_is_better():
+            assert recovery_score > perfect_value
+        else:
+            assert recovery_score < perfect_value
 
 
 def test_chirality_violations():
