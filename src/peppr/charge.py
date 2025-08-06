@@ -72,7 +72,7 @@ def estimate_formal_charges(
     # Initialize with the original charges
     charges = rdkit_interface.from_mol(mol, add_hydrogen=False).charge
     # Remove hydrogen atoms to correctly match SMARTS atoms with the '[D<n>]' property
-    mol = Chem.RemoveAllHs(mol, sanitize=False)
+    mol = Chem.RemoveAllHs(mol, sanitize=False)  # type: ignore[attr-defined]
 
     for pattern, charge in patterns:
         matches = mol.GetSubstructMatches(pattern)
@@ -133,7 +133,7 @@ def _get_pattern(group_pattern: str) -> Chem.Mol:
     mol : Chem.Mol
         The pattern as :class:`Mol`.
     """
-    return Chem.MolFromSmarts(group_pattern)
+    return Chem.MolFromSmarts(group_pattern)  # type: ignore[attr-defined]
 
 
 def _is_active(ph: float, ph_condition: str) -> bool:
