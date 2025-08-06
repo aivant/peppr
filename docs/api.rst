@@ -41,6 +41,7 @@ The metrics for pose evaluation.
     ClashCount
     PLIFRecovery
     PocketDistance
+    PocketVolumeOverlap
 
 Selectors
 ---------
@@ -76,6 +77,8 @@ that are not directly implemented :mod:`biotite.structure`.
     fnat
     DockQ
     ContactMeasurement
+    volume
+    volume_overlap
 
 Atom Matching
 -------------

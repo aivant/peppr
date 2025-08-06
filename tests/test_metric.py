@@ -36,6 +36,7 @@ ALL_METRICS = [
     peppr.ChiralityViolations(),
     peppr.PocketDistance(use_pose_centroids=True),
     peppr.PocketDistance(use_pose_centroids=False),
+    peppr.PocketVolumeOverlap(),
 ]
 
 
@@ -79,6 +80,7 @@ def _no_bond_atom_array(is_small_molecule):
         (peppr.ChiralityViolations(), (0.0, 1.0)),
         (peppr.PocketDistance(use_pose_centroids=True), (0.0, 20.0)),
         (peppr.PocketDistance(use_pose_centroids=False), (0.0, 20.0)),
+        (peppr.PocketVolumeOverlap(), (0.0, 1.0)),
     ],
     ids=lambda x: x.name if isinstance(x, peppr.Metric) else "",
 )
@@ -335,6 +337,7 @@ def test_ligand_only_system(metric):
         (peppr.BiSyRMSD(5.0), 0.0, None),
         (peppr.PLIFRecovery(), 1.0, 0.0),
         (peppr.PocketDistance(use_pose_centroids=True), 0.0, None),
+        (peppr.PocketVolumeOverlap(), 1.0, 0.0),
     ],
     ids=lambda x: x.name if isinstance(x, peppr.Metric) else "",
 )
