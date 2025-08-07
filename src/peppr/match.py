@@ -3,6 +3,7 @@ __all__ = [
     "UnmappableEntityError",
     "find_optimal_match",
     "find_all_matches",
+    "find_matching_centroids",
 ]
 
 
@@ -223,7 +224,7 @@ def _find_optimal_match_fast(
             transform = _get_superimposition_transform(
                 reference_chain, pose_chains[anchor_index]
             )
-            chain_order = _find_matching_centroids(
+            chain_order = find_matching_centroids(
                 reference_centroids,
                 pose_centroids,
                 reference_entity_ids,
@@ -248,6 +249,63 @@ def _find_optimal_match_fast(
         # Superimposition is defined by centroids
         superimpose=False,
     )
+
+
+def find_matching_centroids(
+    reference_centroids: NDArray[np.floating],
+    pose_centroids: NDArray[np.floating],
+    reference_entity_ids: NDArray[np.int_] | None = None,
+    pose_entity_ids: NDArray[np.int_] | None = None,
+    transform: struc.AffineTransformation | None = None,
+) -> NDArray[np.int_]:
+    """
+    Greedily find pairs of chains (each represented by its centroid) between the
+    reference and the pose that are closest to each other.
+
+    This functions iteratively chooses pairs with the smallest centroid distance, i.e.
+    first the pair with the smallest centroid distance is chosen, then the pair with the
+    second smallest centroid distance and so on.
+
+    Parameters
+    ----------
+    reference_centroids, pose_centroids : np.ndarray, shape=(n,3)
+        The centroids of the reference and pose chains.
+    reference_entity_ids, pose_entity_ids : np.ndarray, shape=(n,), dtype=int, optional
+        The entity IDs of the chains.
+        Only centroids of chains with the same entity ID can be matched.
+        By default, all can be matched to each other.
+    transform : AffineTransformation, optional
+        The transformation that superimposes the pose centroids onto the reference
+        centroids.
+        By default, no transformation is applied.
+
+    Returns
+    -------
+    np.ndarray, shape=(n,)
+        The permutation of the pose chains that gives the pairs with the smallest
+        distance, i.e. ``pose_order[i] == j`` if the ``i``-th reference chain and
+        ``j``-th pose chain are closest to each other.
+    """
+    if len(pose_centroids) != len(reference_centroids):
+        raise IndexError(
+            f"Reference has {len(reference_centroids)} entities, "
+            f"but pose has {len(pose_centroids)} entities"
+        )
+    if transform is not None:
+        pose_centroids = transform.apply(pose_centroids)
+    distances = struc.distance(reference_centroids[:, None], pose_centroids[None, :])
+    if reference_entity_ids is not None and pose_entity_ids is not None:
+        # Different entities must not be matched
+        distances[reference_entity_ids[:, None] != pose_entity_ids[None, :]] = np.inf
+    pose_order = np.zeros(len(pose_centroids), dtype=int)
+    # n chains -> n pairs -> n iterations
+    for _ in range(len(pose_centroids)):
+        min_distance = np.min(distances)
+        min_reference_i, min_pose_i = np.argwhere(distances == min_distance)[0]
+        pose_order[min_reference_i] = min_pose_i
+        distances[min_reference_i, :] = np.inf
+        distances[:, min_pose_i] = np.inf
+    return pose_order
 
 
 def _find_optimal_match_precise(
@@ -520,54 +578,6 @@ def _combine_inter_and_intra_chain_orders(
         atom_indices = atom_indices[atom_orders[chain_i]]
         order_chunks.append(atom_indices)
     return np.concatenate(order_chunks)
-
-
-def _find_matching_centroids(
-    reference_centroids: NDArray[np.floating],
-    pose_centroids: NDArray[np.floating],
-    reference_entity_ids: NDArray[np.int_],
-    pose_entity_ids: NDArray[np.int_],
-    transform: struc.AffineTransformation,
-) -> NDArray[np.int_]:
-    """
-    Find pairs of chains (each represented by its centroid) between the reference and
-    the pose that are closest to each other und the given transformation.
-
-    This functions iteratively chooses pairs with the smallest centroid distance, i.e.
-    first the pair with the smallest centroid distance is chosen, then the pair with the
-    second smallest centroid distance and so on.
-
-    Parameters
-    ----------
-    reference_centroids, pose_centroids : np.ndarray, shape=(n,3)
-        The centroids of the reference and pose chains.
-    reference_entity_ids, pose_entity_ids : np.ndarray, shape=(n,), dtype=int
-        The entity IDs of the chains.
-        Only centroids of chains with the same entity ID can be matched.
-    transform : AffineTransformation
-        The transformation that superimposes the pose centroids onto the reference
-        centroids.
-
-    Returns
-    -------
-    pose_order : np.ndarray, shape=(n,)
-        The permutation of the pose chains that gives the pairs with the smallest
-        distance, i.e. ``pose_order[i] == j`` if the ``i``-th reference chain and
-        ``j``-th pose chain are closest to each other.
-    """
-    pose_centroids = transform.apply(pose_centroids)
-    distances = struc.distance(reference_centroids[:, None], pose_centroids[None, :])
-    # Different entities must not be matched
-    distances[reference_entity_ids[:, None] != pose_entity_ids[None, :]] = np.inf
-    pose_order = np.zeros(len(pose_centroids), dtype=int)
-    # n chains -> n pairs -> n iterations
-    for _ in range(len(pose_centroids)):
-        min_distance = np.min(distances)
-        min_reference_i, min_pose_i = np.argwhere(distances == min_distance)[0]
-        pose_order[min_reference_i] = min_pose_i
-        distances[min_reference_i, :] = np.inf
-        distances[:, min_pose_i] = np.inf
-    return pose_order
 
 
 def _find_common_residues(

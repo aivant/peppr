@@ -10,3 +10,4 @@ from .metric import *
 from .sanitize import *
 from .selector import *
 from .version import *
+from .volume import *
