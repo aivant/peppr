@@ -116,16 +116,12 @@ def test_dockq_with_no_contacts(data_dir):
     reference_ligand = struc.translate(reference_ligand, [200, 200, 200])
 
     # align pose and reference and then run dockq
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_receptor, pose_receptor
+    reference_receptor, pose_receptor = peppr.filter_matched(
+        *peppr.find_optimal_match(reference_receptor, pose_receptor)
     )
-    reference_receptor = reference_receptor[reference_indices]
-    pose_receptor = pose_receptor[pose_indices]
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_ligand, pose_ligand
+    reference_ligand, pose_ligand = peppr.filter_matched(
+        *peppr.find_optimal_match(reference_ligand, pose_ligand)
     )
-    reference_ligand = reference_ligand[reference_indices]
-    pose_ligand = pose_ligand[pose_indices]
     dockq_result = peppr.dockq(
         reference_receptor, reference_ligand, pose_receptor, pose_ligand
     )
@@ -147,16 +143,12 @@ def test_contact_parity(data_dir):
     reference_chain_1, reference_chain_2 = _get_protein_receptor_and_ligand(
         data_dir / "1A2K" / "native.pdb", "B", "C"
     )
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_chain_1, pose_chain_1
+    reference_chain_1, pose_chain_1 = peppr.filter_matched(
+        *peppr.find_optimal_match(reference_chain_1, pose_chain_1)
     )
-    reference_chain_1 = reference_chain_1[reference_indices]
-    pose_chain_1 = pose_chain_1[pose_indices]
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_chain_2, pose_chain_2
+    reference_chain_2, pose_chain_2 = peppr.filter_matched(
+        *peppr.find_optimal_match(reference_chain_2, pose_chain_2)
     )
-    reference_chain_2 = reference_chain_2[reference_indices]
-    pose_chain_2 = pose_chain_2[pose_indices]
 
     dockq_result_1 = peppr.dockq(
         reference_chain_1,
@@ -204,16 +196,16 @@ def test_reference_consistency(
     reference_receptor, reference_ligand = _get_protein_receptor_and_ligand(
         data_dir / entry / "native.pdb", receptor_chain, ligand_chain
     )
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_receptor, pose_receptor, min_sequence_identity=0.9
+    reference_receptor, pose_receptor = peppr.filter_matched(
+        *peppr.find_optimal_match(
+            reference_receptor, pose_receptor, min_sequence_identity=0.9
+        )
     )
-    reference_receptor = reference_receptor[reference_indices]
-    pose_receptor = pose_receptor[pose_indices]
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_ligand, pose_ligand, min_sequence_identity=0.9
+    reference_ligand, pose_ligand = peppr.filter_matched(
+        *peppr.find_optimal_match(
+            reference_ligand, pose_ligand, min_sequence_identity=0.9
+        )
     )
-    reference_ligand = reference_ligand[reference_indices]
-    pose_ligand = pose_ligand[pose_indices]
 
     # Ensure the reference DockQ implementation gets the same atom matching
     pose_tmp_file = tmp_path / "pose.cif"
@@ -278,16 +270,12 @@ def test_reference_consistency_small_molecule(tmp_path, data_dir):
         reference_receptor,
         reference_ligand,
     ) = _get_receptor_and_small_molecule(data_dir / "6J6J" / "native.pdb", "A")
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_receptor, pose_receptor
+    reference_receptor, pose_receptor = peppr.filter_matched(
+        *peppr.find_optimal_match(reference_receptor, pose_receptor)
     )
-    reference_receptor = reference_receptor[reference_indices]
-    pose_receptor = pose_receptor[pose_indices]
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_ligand, pose_ligand
+    reference_ligand, pose_ligand = peppr.filter_matched(
+        *peppr.find_optimal_match(reference_ligand, pose_ligand)
     )
-    reference_ligand = reference_ligand[reference_indices]
-    pose_ligand = pose_ligand[pose_indices]
     test_dockq = peppr.dockq(
         reference_receptor, reference_ligand, pose_receptor, pose_ligand
     )
@@ -330,16 +318,12 @@ def test_multi_model(data_dir):
     reference_receptor, reference_ligand = _get_protein_receptor_and_ligand(
         data_dir / "1A2K" / "native.pdb", "C", "B"
     )
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_receptor, pose_receptor
+    reference_receptor, pose_receptor = peppr.filter_matched(
+        *peppr.find_optimal_match(reference_receptor, pose_receptor)
     )
-    reference_receptor = reference_receptor[reference_indices]
-    pose_receptor = pose_receptor[pose_indices]
-    reference_indices, pose_indices = peppr.find_optimal_match(
-        reference_ligand, pose_ligand
+    reference_ligand, pose_ligand = peppr.filter_matched(
+        *peppr.find_optimal_match(reference_ligand, pose_ligand)
     )
-    reference_ligand = reference_ligand[reference_indices]
-    pose_ligand = pose_ligand[pose_indices]
     ref_dockq = peppr.dockq(
         reference_receptor, reference_ligand, pose_receptor, pose_ligand
     )
