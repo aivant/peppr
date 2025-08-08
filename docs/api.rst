@@ -40,6 +40,8 @@ The metrics for pose evaluation.
     ChiralityViolations
     ClashCount
     PLIFRecovery
+    PocketDistance
+    PocketVolumeOverlap
 
 Selectors
 ---------
@@ -75,6 +77,8 @@ that are not directly implemented :mod:`biotite.structure`.
     fnat
     DockQ
     ContactMeasurement
+    volume
+    volume_overlap
 
 Atom Matching
 -------------
@@ -84,6 +88,7 @@ Atom Matching
 
     find_optimal_match
     find_all_matches
+    find_matching_centroids
     GraphMatchWarning
     UnmappableEntityError
 
