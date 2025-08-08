@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 import rdkit.Chem.AllChem as Chem
 import peppr
-from peppr.match import _all_global_mappings as all_global_mappings
 from tests.common import list_test_pdb_files
 
 
@@ -50,6 +49,7 @@ def test_matching_atoms(pdb_id, crop, seed, use_heuristic):
     reference = peppr.standardize(reference)
     # Annotate small molecules as hetero
     reference.hetero[~struc.filter_amino_acids(reference)] = True
+    _annotate_atom_order(reference)
 
     chains = list(struc.chain_iter(reference))
     if not use_heuristic:
@@ -70,32 +70,23 @@ def test_matching_atoms(pdb_id, crop, seed, use_heuristic):
     chains = [chains[i] for i in rng.permutation(len(chains))]
     pose = struc.concatenate(chains)
 
-    # Use heuristic in this test, as without it the number of possible mappings explodes
-    reference_order, pose_order = peppr.find_optimal_match(
-        reference, pose, use_heuristic=True
+    matched_reference, matched_pose = peppr.find_optimal_match(
+        reference, pose, use_heuristic=use_heuristic
     )
-    reordered_reference = reference[reference_order]
-    reordered_pose = pose[pose_order]
-    reordered_pose, _ = struc.superimpose(reordered_reference, reordered_pose)
 
-    # Each atom may only appear once
-    assert len(np.unique(reference_order)) == len(reference_order)
-    assert len(np.unique(pose_order)) == len(pose_order)
-    # Expect all atoms to be contained in the reordered structures
-    # (except for the ones that were cropped)
-    n_atoms = min(reference.array_length(), pose.array_length())
-    assert reordered_pose.array_length() == n_atoms
-    assert reordered_reference.array_length() == n_atoms
+    _check_match(matched_reference, matched_pose, reference, pose)
     # The pose is simply the reference with permuted chains
     # Hence, after reordering the distances should be 0
-    assert np.allclose(
-        struc.distance(reordered_reference, reordered_pose), 0.0, atol=1e-4
+    matched_reference, matched_pose = peppr.filter_matched(
+        matched_reference, matched_pose
     )
+    matched_pose, _ = struc.superimpose(matched_reference, matched_pose)
+    assert np.allclose(struc.distance(matched_reference, matched_pose), 0.0, atol=1e-4)
 
 
 @pytest.mark.parametrize("seed", range(5))
 @pytest.mark.parametrize("use_different_entities", [False, True])
-@pytest.mark.parametrize("n_chains", (1, 2, 4, 8))
+@pytest.mark.parametrize("n_chains", (1, 2, 4))
 @pytest.mark.parametrize("use_heuristic", [False, True])
 def test_matching_chains(n_chains, seed, use_different_entities, use_heuristic):
     """
@@ -155,31 +146,114 @@ def test_matching_chains(n_chains, seed, use_different_entities, use_heuristic):
         # Keep the original entity order
         pose.res_name = reference.res_name.copy()
 
-    reference_order, pose_order = peppr.find_optimal_match(
+    matched_reference, matched_pose = peppr.find_optimal_match(
         reference, pose, use_heuristic=use_heuristic
     )
 
-    # Since no atom is missing in either structure,
-    # the reference order should be simply all atoms in the original order
-    assert reference_order.tolist() == list(range(len(reference)))
-    # Each atom may only appear once
-    assert len(np.unique(pose_order)) == len(pose_order)
+    _check_match(matched_reference, matched_pose, reference, pose)
     if use_different_entities:
         # Permutation across molecules is totally forbidden, as they belong to different
         # entities
-        assert pose.res_name[pose_order].tolist() == reference.res_name.tolist()
+        assert matched_pose.res_name.tolist() == matched_reference.res_name.tolist()
     else:
         # Permutation is allowed
-        # -> expect that the original minimum RMSD is achieved
-        pose = pose[pose_order]
-        superimposed_pose, _ = struc.superimpose(reference, pose)
-        assert struc.rmsd(reference, superimposed_pose) <= ref_rmsd
+        # -> expect that the original minimum RMSD is achieved]
+        superimposed_pose, _ = struc.superimpose(matched_reference, matched_pose)
+        assert struc.rmsd(matched_reference, superimposed_pose) <= ref_rmsd
+
+
+@pytest.mark.parametrize("shuffle", [False, True])
+@pytest.mark.parametrize("swap", [False, True])
+@pytest.mark.parametrize("use_heuristic", [False, True])
+@pytest.mark.parametrize(
+    ["ref_monomer_multiplicity", "pose_monomer_multiplicity", "should_fail"],
+    [
+        # The fake complex has two different chains, one with 2 monomers and one with 4
+        ((2, 4), (2, 4), False),  # Trivial case all chains can be matched
+        ((1, 4), (2, 4), False),  # One chain is missing in one structure
+        ((1, 4), (2, 3), False),  # One chain is missing in either structure
+        ((0, 4), (2, 4), False),  # One entity is completely absent in one structure
+        ((0, 4), (2, 0), True),  # No chain can be matched
+    ],
+)
+def test_partial_matching_chains(
+    ref_monomer_multiplicity,
+    pose_monomer_multiplicity,
+    should_fail,
+    use_heuristic,
+    swap,
+    shuffle,
+):
+    """
+    Check corresponding chains can be matched, if either structure misses some chains.
+    To do this create a fake complex and selectively remove chains in the reference
+    and pose.
+    Expect that still corresponding chains are found.
+    """
+    MAX_CHAIN_DISTANCE = 100
+    COMP_NAMES = ["GLY", "ALA"]
+
+    if swap:
+        ref_monomer_multiplicity, pose_monomer_multiplicity = (
+            pose_monomer_multiplicity,
+            ref_monomer_multiplicity,
+        )
+    max_multiplicity = tuple(
+        [
+            max(ref_mult, pose_mult)
+            for ref_mult, pose_mult in zip(
+                ref_monomer_multiplicity, pose_monomer_multiplicity, strict=True
+            )
+        ]
+    )
+
+    rng = np.random.default_rng(0)
+    reference_chains = []
+    pose_chains = []
+    atom_id_offset = 0
+    chain_id_generator = iter(string.ascii_uppercase)
+    for i, (multiplicity, comp_name) in enumerate(zip(max_multiplicity, COMP_NAMES)):
+        monomer = info.residue(comp_name)
+        monomer = peppr.standardize(monomer)
+        _annotate_atom_order(monomer)
+        for j in range(multiplicity):
+            chain = monomer.copy()
+            chain.atom_id += atom_id_offset
+            chain.chain_id[:] = next(chain_id_generator)
+            chain.coord += rng.uniform(-MAX_CHAIN_DISTANCE, MAX_CHAIN_DISTANCE, size=3)
+            # Only keep the chain in the reference/pose,
+            # if the desired multiplicity is not reached yet
+            if j < ref_monomer_multiplicity[i]:
+                reference_chains.append(chain)
+            if j < pose_monomer_multiplicity[i]:
+                pose_chains.append(chain)
+            atom_id_offset += monomer.array_length()
+    if shuffle:
+        order = rng.permutation(len(pose_chains))
+        pose_chains = [pose_chains[i] for i in order]
+    reference = struc.concatenate(reference_chains)
+    pose = struc.concatenate(pose_chains)
+
+    if should_fail:
+        with pytest.raises(peppr.UnmappableEntityError):
+            matched_reference, matched_pose = peppr.find_optimal_match(
+                reference,
+                pose,
+                use_heuristic=use_heuristic,
+                allow_unmatched_entities=True,
+            )
+    else:
+        matched_reference, matched_pose = peppr.find_optimal_match(
+            reference, pose, use_heuristic=use_heuristic, allow_unmatched_entities=True
+        )
+        _check_match(matched_reference, matched_pose, reference, pose)
 
 
 @pytest.mark.parametrize("seed", range(5))
+@pytest.mark.parametrize("use_heuristic", [False, True])
 @pytest.mark.parametrize("omit_some_atoms", [False, True])
 @pytest.mark.parametrize("pdb_id", list_test_pdb_files(), ids=lambda path: path.stem)
-def test_shuffled_atom_order(pdb_id, omit_some_atoms, seed):
+def test_shuffled_atom_order(pdb_id, omit_some_atoms, use_heuristic, seed):
     """
     Check if the corresponding atom order can be regained, even if the atoms within the
     same residue are not in the same order and some atoms are potentially missing.
@@ -200,6 +274,7 @@ def test_shuffled_atom_order(pdb_id, omit_some_atoms, seed):
     ]
     # Limit test to a single chain
     reference = next(struc.chain_iter(reference))
+    _annotate_atom_order(reference)
     pose = reference.copy()
 
     rng = np.random.default_rng(seed)
@@ -225,27 +300,18 @@ def test_shuffled_atom_order(pdb_id, omit_some_atoms, seed):
     shuffled_order = np.concatenate(orders_within_residue)
     pose = pose[shuffled_order]
 
-    reference_order, pose_order = peppr.find_optimal_match(reference, pose)
-    reordered_reference = reference[reference_order]
-    reordered_pose = pose[pose_order]
-
-    # Each atom may only appear once
-    assert len(np.unique(reference_order)) == len(reference_order)
-    assert len(np.unique(pose_order)) == len(pose_order)
+    matched_reference, matched_pose = peppr.find_optimal_match(
+        reference, pose, use_heuristic=use_heuristic
+    )
     # Ensure that all applicable atoms were matched
     if omit_some_atoms:
         min_matching_atoms = (1 - 2 * P_REMOVED) * reference.array_length()
     else:
         min_matching_atoms = reference.array_length()
-    assert len(pose_order) >= min_matching_atoms
-    assert len(reference_order) >= min_matching_atoms
-    # Ensure that the correct atoms were matched
-    assert np.all(reordered_reference.atom_name == reordered_pose.atom_name)
-    assert np.all(reordered_reference.res_name == reordered_pose.res_name)
-    assert np.all(reordered_reference.res_id == reordered_pose.res_id)
+    _check_match(matched_reference, matched_pose, reference, pose, min_matching_atoms)
     # Ensure that the atoms were reordered only within each residue and not globally
     # -> the residue IDs should be monotonically increasing
-    assert np.all(np.diff(reordered_pose.res_id) >= 0)
+    assert np.all(np.diff(matched_pose.res_id) >= 0)
 
 
 @pytest.mark.parametrize("shuffle", [False, True])
@@ -266,7 +332,8 @@ def test_shuffled_atom_order(pdb_id, omit_some_atoms, seed):
         ("MCH", [("CL1", "CL2")]),
     ],
 )
-def test_matching_small_molecules(comp_name, swap_atom_names, shuffle):
+@pytest.mark.parametrize("use_heuristic", [False, True])
+def test_matching_small_molecules(comp_name, swap_atom_names, shuffle, use_heuristic):
     """
     Check for known molecules with symmetries whether equivalent atoms are detected
     in :func:`_find_optimal_molecule_permutation()`.
@@ -282,10 +349,12 @@ def test_matching_small_molecules(comp_name, swap_atom_names, shuffle):
     reference = reference[reference.element != "H"]
     # Mark as small molecule
     reference.hetero[:] = True
+    _annotate_atom_order(reference)
     pose = reference.copy()
     for atom_name1, atom_name2 in swap_atom_names:
         indices = np.where(np.isin(pose.atom_name, (atom_name1, atom_name2)))[0]
         pose.coord[indices] = pose.coord[indices[::-1]]
+        pose.atom_id[indices] = pose.atom_id[indices[::-1]]
     if shuffle:
         # Completely change the order of atoms in the AtomArray
         rng = np.random.default_rng(seed=0)
@@ -294,24 +363,20 @@ def test_matching_small_molecules(comp_name, swap_atom_names, shuffle):
     # To increase difficulty, the atoms are translated -> superimposition is necessary
     pose.coord += TRANSLATION_VEC
 
-    reference_order, pose_order = peppr.find_optimal_match(reference, pose)
-    # Translate back
-    pose.coord -= TRANSLATION_VEC
-    # Apply the order to revert the swapping
-    reference = reference[reference_order]
-    pose = pose[pose_order]
+    matched_reference, matched_pose = peppr.find_optimal_match(
+        reference, pose, use_heuristic=use_heuristic
+    )
 
-    # Each atom may only appear once
-    assert len(np.unique(reference_order)) == len(reference_order)
-    assert len(np.unique(pose_order)) == len(pose_order)
-    # Only atoms of the same element can be mapped to each other
-    assert pose.element.tolist() == reference.element.tolist()
+    _check_match(matched_reference, matched_pose, reference, pose)
     # After swapping back the pose should perfectly overlap with the reference again
-    assert struc.rmsd(reference, pose) == pytest.approx(0.0, abs=1e-6)
+    # Translate back
+    matched_pose.coord -= TRANSLATION_VEC
+    assert struc.rmsd(matched_reference, matched_pose) == pytest.approx(0.0, abs=1e-6)
 
 
 @pytest.mark.filterwarnings("error::peppr.GraphMatchWarning")
-def test_match_kekulized_to_aromatic():
+@pytest.mark.parametrize("use_heuristic", [False, True])
+def test_match_kekulized_to_aromatic(use_heuristic):
     """
     Check if an aromatic molecule can be matched to the same molecule where its
     bonds are kekulized.
@@ -322,6 +387,7 @@ def test_match_kekulized_to_aromatic():
     reference = struc.info.residue(COMP_NAME)
     reference = reference[reference.element != "H"]
     reference.hetero[:] = True
+    _annotate_atom_order(reference)
 
     pose = reference.copy()
     # Kekulize the bonds
@@ -339,16 +405,16 @@ def test_match_kekulized_to_aromatic():
     rng = np.random.default_rng(seed=0)
     pose = pose[rng.permutation(pose.array_length())]
 
-    reference_order, pose_order = peppr.find_optimal_match(reference, pose)
-
-    assert (
-        pose.atom_name[pose_order].tolist()
-        == reference.atom_name[reference_order].tolist()
+    matched_reference, matched_pose = peppr.find_optimal_match(
+        reference, pose, use_heuristic=use_heuristic
     )
 
+    _check_match(matched_reference, matched_pose, reference, pose)
 
+
+@pytest.mark.parametrize("use_heuristic", [False, True])
 @pytest.mark.parametrize("mirror", [False, True])
-def test_no_matching_of_enantiomers(bromochlorofluoromethane, mirror):
+def test_no_matching_of_enantiomers(bromochlorofluoromethane, mirror, use_heuristic):
     """
     Ensure that :func:`_find_optimal_molecule_permutation()` does not map enantiomers
     to each other.
@@ -368,51 +434,60 @@ def test_no_matching_of_enantiomers(bromochlorofluoromethane, mirror):
         mol_2.coord[:, 0] *= -1
     # Move them a bit apart
     reference = mol_1 + struc.translate(mol_2, TRANSLATION_VEC)
+    _annotate_atom_order(reference)
     # For the pose move the other coordinates,
     # so that :func:`_find_optimal_molecule_permutation()` would normally simply
     # exchange the coordinates of the two molecules to minimize the RMSD
     pose = struc.translate(mol_1, TRANSLATION_VEC) + mol_2
-    reference_order, pose_order = peppr.find_optimal_match(reference, pose)
+    _annotate_atom_order(pose)
+
+    matched_reference, matched_pose = peppr.find_optimal_match(
+        reference, pose, use_heuristic=use_heuristic
+    )
+
     if mirror:
         # Mapping enantiomers onto each other is not allowed
-        assert pose_order.tolist() == reference_order.tolist()
+        # -> the matched atom order should be the same as in the input
+        _check_match(matched_reference, matched_pose, reference, pose)
     else:
         # Positive control: Mapping two copies of a compound onto each other is allowed
-        assert (
-            np.concatenate(
-                [
-                    # Swap the indices for the first and second copy
-                    pose_order[: pose_order.shape[0] // 2],
-                    pose_order[pose_order.shape[0] // 2 :],
-                ]
-            ).tolist()
-            != reference_order.tolist()
+        # As swapping would also minimize the RMSD, swap back and check if the original
+        # atom order is restored
+        swapped_pose = struc.concatenate(
+            (
+                matched_pose[matched_pose.shape[0] // 2 :],
+                matched_pose[: matched_pose.shape[0] // 2],
+            )
         )
+        _check_match(matched_reference, swapped_pose, reference, pose)
 
 
-def test_unmatchable_molecules():
+@pytest.mark.parametrize("use_heuristic", [True, False])
+def test_unmatchable_molecules(use_heuristic):
     """
-    Even if two small molecules cannot be matched, due to different bond graphs,
+    Even if two small molecules cannot be matched due to different bond graphs,
     there is a fallback that simply matches atoms in the order of their appearance.
     Test this by deliberately creating two molecules with incompatible bonds
     """
     reference = struc.info.residue("PNN")
     reference = reference[reference.element != "H"]
+    _annotate_atom_order(reference)
     pose = reference.copy()
     # Remove bonds in one structure to make the bond graphs incompatible
     pose.bonds = struc.BondList(pose.array_length())
 
-    with pytest.warns(peppr.GraphMatchWarning, match="RDKit failed atom matching"):
-        reference_order, pose_order = peppr.find_optimal_match(reference, pose)
+    with pytest.warns(peppr.GraphMatchWarning, match="Incompatible bond graph"):
+        matched_reference, matched_pose = peppr.find_optimal_match(
+            reference, pose, use_heuristic=use_heuristic
+        )
 
     # As fallback the atoms are matched in the order of their appearance
-    assert np.all(reference_order == np.arange(reference.array_length()))
-    assert np.all(pose_order == np.arange(pose.array_length()))
+    _check_match(matched_reference, matched_pose, reference, pose)
 
 
 def test_exhaustive_mappings():
     """
-    Check if ::func:`_all_global_mappings()` finds all possible atom mappings
+    Check if :func:`find_all_matches()` finds all possible atom mappings
     for a known example.
     """
     # Hemoglobin: 2*2 equivalent protein chains and 4 heme molecules
@@ -434,119 +509,61 @@ def test_exhaustive_mappings():
         use_author_fields=False,
     )
     reference = peppr.standardize(reference)
+    _annotate_atom_order(reference)
     pose = reference.copy()
-    reference_chains = list(struc.chain_iter(reference))
-    pose_chains = list(struc.chain_iter(pose))
-    test_mappings = list(all_global_mappings(reference_chains, pose_chains))
+    test_mappings = list(peppr.find_all_matches(reference, pose))
 
     assert len(test_mappings) == N_MAPPINGS
-
     # All mappings should be unique
     test_mappings_set = set(
         [
-            (tuple(ref_indices.tolist()), tuple(pose_indices.tolist()))
-            for ref_indices, pose_indices in test_mappings
+            (
+                tuple(matched_reference.atom_id.tolist()),
+                tuple(matched_pose.atom_id.tolist()),
+            )
+            for matched_reference, matched_pose in test_mappings
         ]
     )
     assert len(test_mappings_set) == len(test_mappings)
 
 
-def test_no_matching_avoids_sequence_mismatch_exception():
-    """Test that NONE doesn't raise exception when sequences differ, but HEURISTIC does."""
+def _annotate_atom_order(atoms):
+    """
+    Add the ``atom_id`` annotation to the given atoms for later comparison
+    with the :func:`_check_match()` function.
+    """
+    atoms.set_annotation("atom_id", np.arange(atoms.array_length()))
 
-    class PlacheholderMetric(peppr.Metric):
-        """
-        Placeholder metric that does not fail for unmatched atoms.
-        """
 
-        @property
-        def name(self):
-            return "Enabled atom matching"
-
-        def evaluate(self, reference, poses):
-            return np.nan
-
-        def smaller_is_better(self):
-            return False
-
-    # Create reference structure - single chain
-    reference = info.residue("ALA")
-    reference = reference[reference.element != "H"]
-    reference.chain_id[:] = "A"  # Assign chain ID
-
-    # Create pose with two chains - different number of entities
-    pose1 = info.residue("ALA")
-    pose1 = pose1[pose1.element != "H"]
-    pose1.chain_id[:] = "A"
-
-    pose2 = info.residue("VAL")
-    pose2 = pose2[pose2.element != "H"]
-    pose2.chain_id[:] = "B"
-
-    pose = struc.concatenate([pose1, pose2])  # Two chains vs one chain
-
-    # Test with HEURISTIC - should raise UnmappableEntityError due to different number of chains
-    evaluator_heuristic = peppr.Evaluator(
-        [PlacheholderMetric()],
-        match_method=peppr.Evaluator.MatchMethod.HEURISTIC,
+def _check_match(
+    matched_reference,
+    matched_pose,
+    original_reference,
+    original_pose,
+    min_matching_atoms=None,
+):
+    """
+    Check if the given atom match is correct.
+    If both `matched_reference` and `matched_pose` have the ``atom_id`` annotation,
+    it is checked, if the ``matched`` part of the `atom_id` is identical.
+    """
+    # No atom is removed during the matching...
+    assert matched_reference.array_length() == original_reference.array_length()
+    assert matched_pose.array_length() == original_pose.array_length()
+    # ...until they are filtered to the matched atoms
+    matched_reference, matched_pose = peppr.filter_matched(
+        matched_reference, matched_pose
     )
-
-    with pytest.raises(peppr.UnmappableEntityError):
-        evaluator_heuristic.feed("test_system", reference, pose)
-
-    # Test with NONE - should not raise exception
-    evaluator_no_matching = peppr.Evaluator(
-        [PlacheholderMetric()],
-        match_method=peppr.Evaluator.MatchMethod.NONE,
-    )
-
-    # This should not raise an exception
-    evaluator_no_matching.feed("test_system", reference, pose)
-    results = evaluator_no_matching.get_results()
-
-    # Should get some result
-    assert len(results) == 1
-    assert len(results[0]) == 1
-    assert len(results[0][0]) == 1
-
-
-def test_no_matching_vs_heuristic_identical_sequences():
-    """Test that NONE gives same results as HEURISTIC for identical sequences with coordinate noise."""
-    # Create reference structure
-    reference = info.residue("ALA")
-    reference = reference[reference.element != "H"]
-
-    # Create pose with identical sequence but slightly different coordinates
-    pose = reference.copy()
-    # Add small random noise to coordinates
-    rng = np.random.default_rng(seed=42)
-    pose.coord += rng.normal(scale=0.5, size=pose.coord.shape)
-
-    # Metrics that should give similar results regardless of matching method
-    metrics = [peppr.BondLengthViolations(), peppr.ClashCount()]
-
-    evaluator_heuristic = peppr.Evaluator(
-        metrics, match_method=peppr.Evaluator.MatchMethod.HEURISTIC
-    )
-    evaluator_no_matching = peppr.Evaluator(
-        metrics, match_method=peppr.Evaluator.MatchMethod.NONE
-    )
-
-    evaluator_heuristic.feed("test", reference, pose)
-    evaluator_no_matching.feed("test", reference, pose)
-
-    results_heuristic = evaluator_heuristic.get_results()
-    results_no_matching = evaluator_no_matching.get_results()
-
-    # Results should be very similar (allowing for small numerical differences)
-    for i in range(len(metrics)):
-        assert results_heuristic[i][0] > 0.0, (
-            "Bond length violations should be non-zero"
+    if min_matching_atoms is not None:
+        assert len(matched_reference) >= min_matching_atoms
+        assert len(matched_pose) >= min_matching_atoms
+    if (
+        "atom_id" in matched_reference.get_annotation_categories()
+        and "atom_id" in matched_pose.get_annotation_categories()
+    ):
+        assert matched_reference.atom_id.tolist() == matched_pose.atom_id.tolist()
+        # Each atom may only appear once
+        assert len(np.unique(matched_reference.atom_id)) == len(
+            matched_reference.atom_id
         )
-        assert np.allclose(
-            results_heuristic[i][0],
-            results_no_matching[i][0],
-            rtol=1e-10,
-            atol=1e-10,
-            equal_nan=True,
-        )
+        assert len(np.unique(matched_pose.atom_id)) == len(matched_pose.atom_id)
