@@ -54,9 +54,9 @@ from peppr.dockq import (
 )
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
+
 from peppr.match import find_matching_centroids, find_optimal_match
 from peppr.volume import volume_overlap
-
 
 class Metric(ABC):
     """
@@ -848,11 +848,9 @@ class BondAngleViolations(Metric):
         """
         if pose.array_length() == 0:
             return np.nan
+
         # Idealize the pose local geometry to make the reference
-        try:
-            reference = idealize_bonds(pose)
-        except struc.BadStructureError:
-            return np.nan
+        reference = idealize_bonds(pose)
 
         # Check the angle of all bonded triples
         bonded_triples = graph_to_connected_triples(reference.bonds.as_graph())
@@ -874,6 +872,62 @@ class BondAngleViolations(Metric):
         # This metric does not use the reference anyway
         return True
 
+
+
+class RotamerViolations(Metric):
+    """
+    Check for rotamer violations in the structure by comparing against rotamers
+    of the same amino acid type in crystal structures based on the Top8000
+    dataset from the Richardson Lab.
+
+    Parameters
+    ----------
+    tolerance : float | None, optional
+        The tolerance in radians for acceptable deviation from ideal bond angles.
+    """
+
+    def __init__(self, tolerance: float | None = None) -> None:
+        self._tolerance = tolerance
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "Rotamer-violation"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        return OrderedDict(
+            [
+                ("poor", 0.05),
+                ("good", 0.02),
+                ("excellent", 0.01),
+            ]
+        )
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """
+        Calculate the percentage of bonds that are outside acceptable ranges.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            Not used in this metric as we compare against ideal bond angles.
+        pose : AtomArray
+            The structure to evaluate.
+
+        Returns
+        -------
+        float
+            Percentage of bonds outside acceptable ranges (0.0 to 1.0).
+        """
+        if pose.array_length() == 0:
+            return np.nan
+
+        # Get rotamer violation fraction
+        return get_fraction_of_rotamer_outliers(pose)
+
+    def smaller_is_better(self) -> bool:
+        return True
 
 class ClashCount(Metric):
     """
