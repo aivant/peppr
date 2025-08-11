@@ -58,6 +58,9 @@ from peppr.idealize import idealize_bonds
 from peppr.match import find_matching_centroids, find_optimal_match
 from peppr.volume import volume_overlap
 
+from peppr.rotamer import (
+    get_fraction_of_rotamer_outliers,
+    get_fraction_of_rama_outliers)
 class Metric(ABC):
     """
     The base class for all evaluation metrics.
@@ -929,6 +932,55 @@ class RotamerViolations(Metric):
     def smaller_is_better(self) -> bool:
         return True
 
+
+class RamachandranViolations(Metric):
+    """
+    Check for Ramachandran violations in the structure by comparing against
+    allowed regions in the Ramachandran plot.
+    """
+    def __init__(self, tolerance: float | None = None) -> None:
+        self._tolerance = tolerance
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "Ramachandran-violation"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        return OrderedDict(
+            [
+                ("poor", 0.005),
+                ("good", 0.002),
+            ]
+        )
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """
+        Calculate the percentage of bonds that are outside acceptable ranges.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            Not used in this metric as we compare against ideal bond angles.
+        pose : AtomArray
+            The structure to evaluate.
+
+        Returns
+        -------
+        float
+            Percentage of bonds outside acceptable ranges (0.0 to 1.0).
+        """
+        if pose.array_length() == 0:
+            return np.nan
+
+        # Get rotamer violation fraction
+        return get_fraction_of_rama_outliers(pose)
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+get_fraction_of_rama_outliers
 class ClashCount(Metric):
     """
     Count the number of clashes between atoms in the pose.

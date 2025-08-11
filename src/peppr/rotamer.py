@@ -6,12 +6,15 @@ https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
 This is the library useful programs like MolProbity's "rotamer" validation, which uses
 mmtbx.rotamer.rotamer_eval and mmtbx.validation.rotalyze under the hood.
 """
+__all__ = ["get_fraction_of_rotamer_outliers"]
+
 import functools
 import logging
 import math
 import requests
 import numpy as np
 from pathlib import Path
+from pydantic import BaseModel, Field, ConfigDict
 import biotite.structure as struc
 
 from biotite.structure.io import load_structure
@@ -23,8 +26,12 @@ from scipy.interpolate import RegularGridInterpolator
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 LOG = logging.getLogger(__name__)
 
-OUTLIER_THRESHOLD = 0.003
-ALLOWED_THRESHOLD = 0.02
+ROTA_OUTLIER_THRESHOLD = 0.003
+ROTA_ALLOWED_THRESHOLD = 0.02
+RAMA_FAVORED_THRESHOLD = 0.02
+RAMA_ALLOWED_THRESHOLD = 0.001
+RAMA_GENERAL_ALLOWED_THRESHOLD = 0.0005
+RAMA_CISPRO_ALLOWED_THRESHOLD = 0.0020
 
 
 grid_residue_map = {
@@ -60,7 +67,7 @@ ROTAMER_CSV_URL = ("https://raw.githubusercontent.com/rlabduke/reference_data/re
 CONTOUR_BASE_URL = ("https://raw.githubusercontent.com/rlabduke/reference_data/master/"
                     "Top8000/Top8000_rotamer_pct_contour_grids/")
 
-_ROTAMER_BASE_DIR =  Path.home() / ".local/share/rotamer_lib"
+_ROTAMER_BASE_DIR =  Path.home() / ".local/share/top8000_lib"
 _ROTAMER_DIR = _ROTAMER_BASE_DIR / "reference_data-master" / "Top8000"
 
 
@@ -166,7 +173,7 @@ def get_residue_chis(atom_array: struc.AtomArray, res_id_mask: np.ndarray) -> di
 
 
 @functools.lru_cache
-def download_top1000_rotamer_lib() -> Path:
+def download_top1000_lib() -> Path:
     """
     Download the Top8000 rotamer library from the Richardson Lab GitHub.
     This is a convenience function to download the entire library.
@@ -182,7 +189,7 @@ def download_top1000_rotamer_lib() -> Path:
 
 
 @functools.lru_cache
-def load_contour_grid_text(resname_tag: str) -> dict[str, np.ndarray]:
+def load_contour_grid_text(resname_grid_data: Path | str) -> dict[str, np.ndarray]:
     """
     Parse a Top8000 pct_contour_grid text file into a numpy grid and axis coordinate arrays.
     Returns:
@@ -193,12 +200,12 @@ def load_contour_grid_text(resname_tag: str) -> dict[str, np.ndarray]:
       }
     """
     # Download data
-    grid_data = _ROTAMER_DIR / f"Top8000_rotamer_pct_contour_grids/rota8000-{resname_tag}.data"
-    if isinstance(grid_data, Path):
-        with open(grid_data, "r") as f:
+    #grid_data = _ROTAMER_DIR / f"Top8000_rotamer_pct_contour_grids/rota8000-{resname_tag}.data"
+    if isinstance(resname_grid_data, Path):
+        with open(resname_grid_data, "r") as f:
             text = f.read()
     else:
-        text = grid_data
+        text = resname_grid_data
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     # Parse header
     n_dims = 0
@@ -247,49 +254,65 @@ def load_contour_grid_text(resname_tag: str) -> dict[str, np.ndarray]:
         'wrap': wraps
     }
 
-@functools.lru_cache
-def get_contour_grid(resname: str) -> dict[str, np.ndarray]:
-    resname_tag = grid_residue_map.get(resname)
-    if resname_tag is None:
-        return
-    return load_contour_grid_text(resname_tag)
 
 @functools.lru_cache
-def load_contour_grid_for_residue(resname: str) -> dict[str, np.ndarray]:
+def load_contour_grid_for_residue(
+    grid_dirname: str,
+    resname_tag: str,
+    grid_data_tag: str = "rota8000",
+    files_to_skip: tuple[str, ...] | None = None) -> dict[str, np.ndarray]:
     """
     Load contour grid for a given residue name.
     Returns a dict with 'grid', 'axes' (list of axis arrays), and 'wrap' (list of bools).
     """
-    resname_tag = grid_residue_map.get(resname.upper())
-    if resname_tag is None:
-        raise ValueError(f"No contour grid mapping for residue {resname}")
+    #resname_tag = grid_residue_map.get(resname.upper())
+    #if resname_tag is None:
+    #    raise ValueError(f"No contour grid mapping for residue {resname}")
 
     # Check if the grid is already loaded
-    all_dict_contour = load_all_contour_grid_from_pickle()
-    if resname in all_dict_contour:
-        return all_dict_contour[resname]
+    all_dict_contour = load_all_contour_grid_from_pickle(
+        grid_dirname=grid_dirname,
+        grid_data_tag=grid_data_tag,
+        files_to_skip=files_to_skip
+    )
+    if resname_tag in all_dict_contour:
+        return all_dict_contour[resname_tag]
 
 
 @functools.lru_cache
-def generate_contour_grids_data() -> None:
+def generate_contour_grids_data(
+    grid_dirname: str,
+    grid_data_tag: str,
+    files_to_skip: tuple[str, ...] | None = None)  -> None:
     """
     """
     # Save dictionary to a single pickle file
-    output_path = _ROTAMER_DIR / "Top8000_rotamer_pct_contour_grids.pkl"
+    output_path = _ROTAMER_DIR / f"{grid_dirname}.pkl"
     if output_path.exists():
         LOG.info(f"Contour grids already generated at {output_path}. Skipping generation.")
         return
     data_dict = {}
-    data_dir = download_top1000_rotamer_lib()
+    data_dir = download_top1000_lib()
     if data_dir is None or not data_dir.exists():
         raise RuntimeError("Top8000 rotamer library not found; cannot generate contour grids.")
-    for resname in grid_residue_map.keys():
-        LOG.info(f"Generating contour grid for {resname}...")
-        tmp_contour = get_contour_grid(resname)
+    all_grid_files = list(data_dir.glob(f"{grid_dirname}/{grid_data_tag}-*.data"))
+
+    if files_to_skip is not None:
+        all_grid_files = [f for f in all_grid_files if f.name not in files_to_skip]
+
+    if not all_grid_files:
+        raise RuntimeError(f"No contour grid files found in {data_dir / grid_dirname}")
+    LOG.info(f"Found {len(all_grid_files)} contour grid files in {data_dir / grid_dirname}")
+    for grid_file in all_grid_files:
+        resname_tag = grid_file.stem.split("-")[1].lower()  # e.g. "rota8000-arg.data" -> "arg"
+    #for resname in grid_residue_map.keys():
+        LOG.info(f"Generating contour grid for {grid_file.stem}...")
+        #tmp_contour = get_contour_grid(grid_file)
+        tmp_contour = load_contour_grid_text(grid_file)
         if tmp_contour is None:
-            LOG.warning(f"No contour grid found for {resname}, skipping.")
+            LOG.warning(f"No contour grid found for {grid_file.stem}, skipping.")
             continue
-        data_dict[resname] = tmp_contour
+        data_dict[resname_tag] = tmp_contour
 
     with open(output_path, "wb") as f:
         pickle.dump(data_dict, f)
@@ -297,34 +320,56 @@ def generate_contour_grids_data() -> None:
 
 
 @functools.lru_cache
-def load_all_contour_grid_from_pickle() -> dict[str, dict[str, np.ndarray]]:
+def load_all_contour_grid_from_pickle(
+    grid_dirname: str,
+    grid_data_tag: str,
+    files_to_skip: tuple[str, ...] | None = None) -> dict[str, dict[str, np.ndarray]]:
     """
     Load all contour grids for a given residue name from a pickle file.
     """
      # Save dictionary to a single pickle file
-    contour_path = _ROTAMER_DIR / "Top8000_rotamer_pct_contour_grids.pkl"
+    contour_path = _ROTAMER_DIR / f"{grid_dirname}.pkl"
     if not contour_path.exists():
         LOG.info(f"Contour grids pickle file {contour_path} does not exist. Generating...")
-        generate_contour_grids_data()
+        generate_contour_grids_data(
+            grid_dirname=grid_dirname,
+            grid_data_tag=grid_data_tag,
+            files_to_skip=files_to_skip)
     with open(contour_path, "rb") as f:
         data = pickle.load(f)
     return data
 
 
-def interp_wrapped(grid_obj, coords_deg):
+def circular_diff_deg(a, b):
+    """Return minimal difference (a - b) in degrees on [-180,180]."""
+    d = (a - b + 180.0) % 360.0 - 180.0
+    return d
+
+
+def interp_wrapped(
+        grid_obj: dict[str, np.ndarray],
+        coords_deg: list[float],
+        range_180: bool = False) -> float:
     """Interpolate value at given χ coords (deg), handling wrapping axes."""
     axes = []
     coords = []
     for val, centers, wrap in zip(coords_deg, grid_obj['axes'], grid_obj['wrap']):
         if wrap:
-            val = val % 360.0
+            if range_180:
+                val = ((val + 180.0) % 360.0) - 180.0
+            else:
+                val = val % 360.0
         coords.append(val)
         axes.append(centers)
-    interp_func = RegularGridInterpolator(tuple(axes), grid_obj['grid'], bounds_error=False, fill_value=np.nan)
+    interp_func = RegularGridInterpolator(
+        tuple(axes),
+        grid_obj['grid'],
+        bounds_error=False,
+        fill_value=np.nan)
     return float(interp_func(coords))
 
 
-def check_rotamer_backbone_dependent(atom_array, res_id, chain_id):
+def check_rotamer(atom_array, res_id, chain_id):
     """
     Compute rotamer classification based on backbone-dependent pct_contour_grids.
     Uses grid text parser for wrapping and bin centers.
@@ -337,9 +382,14 @@ def check_rotamer_backbone_dependent(atom_array, res_id, chain_id):
     resname = atom_array.res_name[mask][0].upper()
     observed = get_residue_chis(atom_array, mask)
     if not observed:
-        return {'resname': resname, 'error': 'no chis computable'}
+        return {'resname': resname, "resid": int(res_id), 'error': 'no chis computable'}
 
-    grid_obj = load_contour_grid_for_residue(resname)
+    grid_obj = load_contour_grid_for_residue(
+        grid_dirname="Top8000_rotamer_pct_contour_grids",
+        resname_tag=grid_residue_map.get(resname),
+        grid_data_tag="rota8000",
+        files_to_skip=("rota8000-leu-raw.data",) # Use rota8000-leu.data instead
+    )
 
     # Build coords in same order as grid dims
     coords_list = []
@@ -351,19 +401,212 @@ def check_rotamer_backbone_dependent(atom_array, res_id, chain_id):
     if np.isnan(pct):
         classification = "UNKNOWN"
 
-    elif pct >= ALLOWED_THRESHOLD:
+    elif pct >= ROTA_ALLOWED_THRESHOLD:
         classification = "FAVORED"
-    elif pct >= OUTLIER_THRESHOLD:
+    elif pct >= ROTA_OUTLIER_THRESHOLD:
         classification = "ALLOWED"
     else:
         classification = "OUTLIER"
 
     return {
         'resname': resname,
+        "resid": int(res_id),
         'observed': observed,
         'rotamer_score_pct': pct,
         'classification': classification
     }
+
+
+def get_residue_phi_psi_omega(atom_array: struc.AtomArray) -> dict:
+    phi, psi, omega = struc.dihedral_backbone(atom_array)
+    phi = np.rad2deg(phi)
+    psi = np.rad2deg(psi)
+    omega = np.rad2deg(omega)
+    # Remo`ve invalid values (NaN) at first and last position
+    phi = phi[1:-1]
+    psi = psi[1:-1]
+    omega = omega[1:-1]
+    return {
+        "phi": phi,
+        "psi": psi,
+        "omega": omega
+    }
+
+def assign_rama_types(atom_array: struc.AtomArray) -> dict:
+    phi_psi_omega_dict = get_residue_phi_psi_omega(atom_array)
+    omega = phi_psi_omega_dict["omega"]
+
+    res_ids, res_names = struc.get_residues(atom_array)
+    next_res_names = np.roll(res_names, -1)[1:-1]  # Shifted by -1, remove first and last
+    def rama_type(res_name, next_res_name, omega_val):
+        if res_name == "GLY":
+            return "gly"
+        elif res_name == "PRO":
+            return "cispro" if abs(omega_val) < 30 else "transpro"
+        elif next_res_name == "PRO":
+            return "prepro"
+        elif res_name in ["ILE", "VAL"]:
+            return "ileval"
+        else:
+            return "general"
+    rama_types = [
+        rama_type(res_name, next_res_name, omega_val) \
+            for res_name, next_res_name, omega_val \
+                in zip(res_names[1:-1], next_res_names, omega)
+    ]
+    phi_psi_omega_dict['rama_types'] = rama_types
+    return phi_psi_omega_dict
+
+
+
+def check_rama(phi, psi, omega, res_id, resname, resname_tag):
+    """
+    Compute rotamer classification based on backbone-dependent pct_contour_grids.
+    Uses grid text parser for wrapping and bin centers.
+    """
+
+    grid_obj = load_contour_grid_for_residue(
+        grid_dirname="Top8000_ramachandran_pct_contour_grids",
+        resname_tag=resname_tag,
+        grid_data_tag="rama8000",
+        files_to_skip=None
+    )
+
+    # Build coords in same order as grid dims
+    coords_list = [phi, psi]
+    pct = interp_wrapped(grid_obj, coords_list, range_180=True)
+    if pct >= RAMA_FAVORED_THRESHOLD:
+        classification = "FAVORED"
+    if resname_tag == "general":
+        if pct >= RAMA_GENERAL_ALLOWED_THRESHOLD:
+            classification = "ALLOWED"
+        else:
+
+            classification = "OUTLIER"
+    elif resname_tag == "cispro":
+        if pct >= RAMA_CISPRO_ALLOWED_THRESHOLD:
+            classification = "ALLOWED"
+        else:
+            classification = "OUTLIER"
+    else:
+        if pct >= RAMA_ALLOWED_THRESHOLD:
+            classification = "ALLOWED"
+        else:
+            classification = "OUTLIER"
+
+    return {
+        'resname': resname,
+        "resid": int(res_id),
+        'observed': {"phi": phi, "psi": psi, "omega": omega},
+        'rotamer_score_pct': pct,
+        'classification': classification
+    }
+
+
+class ResidueRotamerScore(BaseModel):
+    """Rotamer score for a residue.
+    """
+    resname: str = Field(description="Residue name")
+    resid: int = Field(description="Residue ID")
+    observed: dict[str, float] = Field(
+        description="Observed chi angles for the residue, e.g. {'chi1': 60.0, 'chi2': -45.0}")
+    rotamer_score_pct: float = Field(
+        description="Rotamer score percentage, e.g. 0.01 for 1% favored")
+    classification: str = Field(
+        description="Rotamer classification: FAVORED, ALLOWED, OUTLIER, UNKNOWN",
+        examples=["FAVORED", "ALLOWED", "OUTLIER", "UNKNOWN"]
+    )
+    @classmethod
+    def from_residue(cls, atom_array: struc.AtomArray, res_id: int, chain_id: str) -> 'ResidueRotamerScore':
+        """Create ResidueRotamerScore from a residue object."""
+        result = check_rotamer(atom_array, res_id, chain_id)
+
+        return cls(
+            **result
+        )
+
+class ResidueRamaScore(BaseModel):
+    """Ramachandran score for a residue.
+    """
+    resname: str = Field(description="Residue name")
+    resid: int = Field(description="Residue ID")
+    observed: dict[str, float] = Field(
+        description="Observed phi, psi, omega angles for the residue, e.g. {'phi': -60.0, 'psi': 45.0, 'omega': 180.0}")
+    rotamer_score_pct: float = Field(
+        description="Ramachandran score percentage, e.g. 0.01 for 1% favored")
+    classification: str = Field(
+        description="Ramachandran classification: FAVORED, ALLOWED, OUTLIER",
+        examples=["FAVORED", "ALLOWED", "OUTLIER"]
+    )
+    @classmethod
+    def from_residue(cls, atom_array: struc.AtomArray, res_id: int, chain_id: str) -> 'ResidueRamaScore':
+        """Create ResidueRamaScore from a residue object."""
+        res_ids, res_names = struc.get_residues(atom_array)
+        mask = (atom_array.chain_id == chain_id) & (atom_array.res_id == res_id)
+        if not np.any(mask):
+            raise ValueError("Residue not found")
+        resname = atom_array.res_name[mask][0].upper()
+        rama_input = assign_rama_types(atom_array)
+        phi = rama_input["phi"][np.where(res_ids == res_id)[0][0]]
+        psi = rama_input["psi"][np.where(res_ids == res_id)[0][0]]
+        omega = rama_input["omega"][np.where(res_ids == res_id)[0][0]]
+        result = check_rama(phi, psi, omega, res_id, resname, rama_input['rama_types'][np.where(res_ids == res_id)[0][0]])
+        return cls(
+            **result
+        )
+
+class ResidueRotamerScore(BaseModel):
+    """
+    Rotamer score for a given protein structure.
+    """
+    model_config = ConfigDict(from_attributes=True)
+    res_scores: list[ResidueRotamerScore] = Field(
+        description="List of rotamer scores for each residue in the structure."
+    )
+
+    @classmethod
+    def from_structure(cls, atom_array: struc.AtomArray) -> 'ResidueRotamerScore':
+        """
+        Create ResidueRotamerScore from a protein structure.
+        """
+        res_ids, res_names = struc.get_residues(atom_array)
+        res_scores = []
+        for res_id, res_name in zip(res_ids, res_names):
+            chain_id = atom_array.chain_id[atom_array.res_id == res_id][0]
+            if res_name not in grid_residue_map or res_name == "GLY" or res_name == "ALA":
+                continue
+            result = check_rotamer(atom_array, res_id, chain_id)
+            if 'error' in result:
+                continue
+            res_score = ResidueRotamerScore(
+                **result
+            )
+            res_scores.append(res_score)
+        return cls(res_scores=res_scores)
+
+class RamaScore(BaseModel):
+    """
+    Ramachandran score for a given protein structure.
+    """
+    model_config = ConfigDict(from_attributes=True)
+    res_scores: list[ResidueRamaScore] = Field(
+        description="List of ramachandran scores for each residue in the structure."
+    )
+
+    @classmethod
+    def from_structure(cls, atom_array: struc.AtomArray) -> 'RamaScore':
+        """
+        Create RamaScore from a protein structure.
+        """
+        res_ids, res_names = struc.get_residues(atom_array)
+        res_scores = []
+        for res_id, res_name in zip(res_ids, res_names):
+            chain_id = atom_array.chain_id[atom_array.res_id == res_id][0]
+            if res_name not in grid_residue_map or res_name == "GLY" or res_name == "ALA":
+                continue
+            rama_score = ResidueRamaScore.from_residue(atom_array, res_id, chain_id)
+            res_scores.append(rama_score)
+        return cls(res_scores=res_scores)
 
 
 def get_fraction_of_rotamer_outliers(atom_array: struc.AtomArray) -> float:
@@ -378,7 +621,7 @@ def get_fraction_of_rotamer_outliers(atom_array: struc.AtomArray) -> float:
         # Check rotamer classification
         if res_name not in grid_residue_map or res_name == "GLY" or res_name == "ALA":
             continue
-        result = check_rotamer_backbone_dependent(atom_array, res_id, chain_id)
+        result = check_rotamer(atom_array, res_id, chain_id)
         if result.get('classification') == "OUTLIER":
             # If any residue is an outlier, return 1.0
             outlier_rotamers += 1
@@ -386,12 +629,44 @@ def get_fraction_of_rotamer_outliers(atom_array: struc.AtomArray) -> float:
     return outlier_rotamers / total_rotamers if total_rotamers > 0 else 0.0
 
 
+def get_fraction_of_rama_outliers(atom_array: struc.AtomArray) -> float:
+    """
+    Compute the fraction of ramachandran outliers for given model.
+    """
+    outlier_rama = 0
+    total_rama = 0
+    res_ids, res_names = struc.get_residues(atom_array)
+    rama_input = assign_rama_types(atom_array)
+    for phi, psi, omega, res_id, res_name, rama_type in zip(
+        rama_input["phi"],
+        rama_input["psi"],
+        rama_input["omega"],
+        res_ids[1:-1],
+        res_names[1:-1],
+        rama_input["rama_types"]):
+        result = check_rama(
+            phi=phi,
+            psi=psi,
+            omega=omega,
+            res_id=res_id,
+            resname=res_name,
+            resname_tag=rama_type
+        )
+
+        if result.get('classification') == "OUTLIER":
+            print(f"RAMA Outlier found: {result}")
+            outlier_rama += 1
+        total_rama += 1
+    return outlier_rama / total_rama if total_rama > 0 else 0.0
+
+
+
 if __name__ == "__main__":
     # Example usage of loading contour grids for all residues
     #generate_contour_grids_npz_data()
     #atom_array = atom_array_from_file("/Users/yusuf/1yhr.pdb")  # change to your file
-    atom_array = load_structure("/Users/yusuf/1ohj.pdb")  # change to your file
-    a=check_rotamer_backbone_dependent(atom_array, 122, "A")
-
-
-
+    atom_array = load_structure("/Users/yusuf/1ohj.cif")  # change to your file
+    #a=check_rotamer(atom_array, 122, "A")
+    #print(a)
+    #print(get_fraction_of_rotamer_outliers(atom_array))
+    print(get_fraction_of_rama_outliers(atom_array[~atom_array.hetero]))
