@@ -675,7 +675,7 @@ def get_residue_phi_psi_omega(atom_array: struc.AtomArray) -> dict:
     """
     try:
         phi, psi, omega = struc.dihedral_backbone(atom_array)
-    except Exception as e:
+    except Exception:
         phi, psi, omega = np.array([np.nan]), np.array([np.nan]), np.array([np.nan])
     phi = np.rad2deg(phi)
     psi = np.rad2deg(psi)
@@ -708,7 +708,9 @@ def assign_rama_types(atom_array: struc.AtomArray) -> dict:
     if not isinstance(atom_array, struc.AtomArray):
         raise TypeError("atom_array must be a biotite structure AtomArray")
     if atom_array.shape[0] < 4:
-        raise ValueError("atom_array must contain at least 4 atoms for phi, psi, omega calculation")
+        raise ValueError(
+            "atom_array must contain at least 4 atoms for phi, psi, omega calculation"
+        )
     phi_psi_omega_dict = get_residue_phi_psi_omega(atom_array)
     omega = phi_psi_omega_dict["omega"]
 
@@ -954,14 +956,22 @@ class RotamerScore(BaseModel):
             An instance of RotamerScore containing the rotamer scores for the structure.
         """
         if all(atom_array.hetero):
-            LOG.warning(f"RotamerScore: Cannot be computed for model {model_no}; atom_array must contain some protein residues")
+            LOG.warning(
+                f"RotamerScore: Cannot be computed for model {model_no}; atom_array must contain some protein residues"
+            )
             return cls(rotamer_scores=[])
-        atom_array = atom_array[struc.filter_animo_acids[atom_array] & ~atom_array.hetero]
+        atom_array = atom_array[
+            struc.filter_animo_acids[atom_array] & ~atom_array.hetero
+        ]
         if not isinstance(atom_array, struc.AtomArray):
-            LOG.warning(f"RotamerScore: Cannot be computed for model {model_no}; atom_array must be a biotite structure AtomArray")
+            LOG.warning(
+                f"RotamerScore: Cannot be computed for model {model_no}; atom_array must be a biotite structure AtomArray"
+            )
             return cls(rotamer_scores=[])
         if atom_array.array_length == 0:
-            LOG.warning(f"RotamerScore: Cannot be computed for model {model_no};atom_array must contain at least one residue")
+            LOG.warning(
+                f"RotamerScore: Cannot be computed for model {model_no};atom_array must contain at least one residue"
+            )
             return cls(rotamer_scores=[])
         atom_array = atom_array[~atom_array.hetero]  # Remove hetero
         res_ids, res_names = struc.get_residues(atom_array)
@@ -1097,14 +1107,22 @@ class RamaScore(BaseModel):
             An instance of RamaScore containing the ramachandran scores for the structure.
         """
         if all(atom_array.hetero):
-            LOG.warning(f"RotamerScore: Cannot be computed for model {model_no}; atom_array must contain some protein residues")
+            LOG.warning(
+                f"RotamerScore: Cannot be computed for model {model_no}; atom_array must contain some protein residues"
+            )
             return cls(rama_scores=[])
-        atom_array = atom_array[struc.filter_animo_acids[atom_array] & ~atom_array.hetero]
+        atom_array = atom_array[
+            struc.filter_animo_acids[atom_array] & ~atom_array.hetero
+        ]
         if not isinstance(atom_array, struc.AtomArray):
-            LOG.warning(f"RamaScore: Cannot be computed for model {model_no}; atom_array must be a biotite structure AtomArray")
+            LOG.warning(
+                f"RamaScore: Cannot be computed for model {model_no}; atom_array must be a biotite structure AtomArray"
+            )
             return cls(rama_scores=[])
-        if  atom_array.array_length == 0:
-            LOG.warning(f"RamaScore: Cannot be computed for model {model_no};atom_array must contain at least one residue")
+        if atom_array.array_length == 0:
+            LOG.warning(
+                f"RamaScore: Cannot be computed for model {model_no};atom_array must contain at least one residue"
+            )
             return cls(rama_scores=[])
 
         rama_input = assign_rama_types(atom_array)

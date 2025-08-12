@@ -990,6 +990,7 @@ class RamachandranViolations(Metric):
     def smaller_is_better(self) -> bool:
         return False
 
+
 class ClashCount(Metric):
     """
     Count the number of clashes between atoms in the pose.
