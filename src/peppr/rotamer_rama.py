@@ -1252,6 +1252,7 @@ def get_fraction_of_rama_outliers(
 
 if __name__ == "__main__":
     from biotite.structure import io as strucio
+
     cif_path = Path("/Users/yusuf/peppr/test_small_mol.cif")
     atom_array = strucio.load_structure(cif_path)
     rotamer_score = RotamerScore.from_atom_array(atom_array)
