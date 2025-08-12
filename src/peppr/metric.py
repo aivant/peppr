@@ -897,7 +897,7 @@ class RotamerViolations(Metric):
 
     @property
     def name(self) -> str:
-        return "Rotamer-violation"
+        return "Rotamer-violations"
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
@@ -953,7 +953,7 @@ class RamachandranViolations(Metric):
 
     @property
     def name(self) -> str:
-        return "Ramachandran-violation"
+        return "Ramachandran-violations"
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:

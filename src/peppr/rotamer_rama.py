@@ -9,8 +9,6 @@ mmtbx.rotamer.rotamer_eval and mmtbx.validation.rotalyze and  mmtbx.validation.r
 
 __all__ = [
     "RotamerScore",
-    "ResidueRotamerScore",
-    "ResidueRamaScore",
     "RamaScore",
     "get_fraction_of_rotamer_outliers",
     "get_fraction_of_rama_outliers",
