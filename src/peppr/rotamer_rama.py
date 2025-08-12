@@ -18,17 +18,14 @@ __all__ =[
 import functools
 import logging
 import math
-import requests
-import numpy as np
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-import biotite.structure as struc
-
-from biotite.structure.io import load_structure
-from biotite import structure as struc
 import pickle
+from pathlib import Path
+import numpy as np
+import requests
+from biotite import structure as struc
+from pydantic import BaseModel, ConfigDict, Field
 from scipy.interpolate import RegularGridInterpolator
-
+from typing import Any
 # Configure basic logging to the console
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -90,27 +87,7 @@ _ROTAMER_BASE_DIR = Path.home() / ".local/share/top8000_lib"
 _ROTAMER_DIR = _ROTAMER_BASE_DIR / "reference_data-master" / "Top8000"
 
 
-def wrap_angle_180(angle_deg: float) -> float:
-    """
-    Wrap an angle to the range [-180, 180] degrees.
-    This is useful for angles that need to be normalized to a standard range.
-    """
-    return ((angle_deg + 180) % 360) - 180
-
-def wrap_angle_0_to_180(angle_degrees):
-    """
-    Wraps an angle (in degrees) to the range [0, 180).
-    For example, 270 degrees becomes 90 degrees, and -30 degrees becomes 150 degrees.
-    """
-    wrapped_angle = angle_degrees % 360  # First, wrap to [0, 360)
-    if wrapped_angle >= 180:
-        wrapped_angle = 180 - (wrapped_angle - 180)  # Reflect angles > 180
-    elif wrapped_angle < 0:  # Handle negative angles that might result from % if input was negative
-        wrapped_angle = 180 - abs(wrapped_angle)
-    return wrapped_angle
-
-
-def wrap_angle(angle_deg, mode="±180"):
+def wrap_angle(angle_deg: float, mode: str="±180") -> float:
     """
     Wrap an angle (in degrees) to a specified range.
 
@@ -129,23 +106,22 @@ def wrap_angle(angle_deg, mode="±180"):
     wrapped : float or ndarray
         Wrapped angle(s) in the chosen range.
     """
-    angle = np.asarray(angle_deg, dtype=float)
 
     if mode == "±180":
-        return ((angle + 180.0) % 360.0) - 180.0
+        return ((angle_deg + 180.0) % 360.0) - 180.0
 
     elif mode == "0-360":
-        return angle % 360.0
+        return angle_deg % 360.0
 
     elif mode == "0-180":
-        a = angle % 360.0
-        return np.where(a > 180.0, a-180.0, abs(a))
+        a = angle_deg % 360.0
+        if a > 180.0:
+            return a - 180.0
+        else:
+            return abs(a)
 
     else:
         raise ValueError(f"Unknown mode '{mode}', choose from '±180', '0-360', '0-180'.")
-
-# 77.12211113), 282.87787
-
 
 
 def download_and_extract(url: str, dest_path: Path | None = None) -> Path | None:
@@ -167,7 +143,7 @@ def download_and_extract(url: str, dest_path: Path | None = None) -> Path | None
         The path where the file was saved or extracted.
     """
     if dest_path is None:
-        dest_path = Path(url).name
+        dest_path = Path(Path(url).name)
     dest_path = Path(dest_path)
     # Ensure parent directory exists
     dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -196,7 +172,7 @@ def download_and_extract(url: str, dest_path: Path | None = None) -> Path | None
     return None
 
 
-def get_residue_chis(atom_array: struc.AtomArray, res_id_mask: np.ndarray) -> dict:
+def get_residue_chis(atom_array: struc.AtomArray, res_id_mask: np.ndarray) -> dict[str, float]:
     """
     Compute the chi angles for a given residue.
 
@@ -273,7 +249,7 @@ def get_residue_chis(atom_array: struc.AtomArray, res_id_mask: np.ndarray) -> di
     }
     # detect residue type name
     resname = res_atoms.res_name[0].upper()
-    chis = {}
+    chis: dict[str, float] = {}
     if resname not in CHI_DEFS:
         return chis
     from biotite.structure import dihedral
@@ -284,6 +260,7 @@ def get_residue_chis(atom_array: struc.AtomArray, res_id_mask: np.ndarray) -> di
             ang = math.degrees(dihedral(*p))
             chis[f"chi{i}"] = ang
         except Exception as e:
+            LOG.warning(f"Failed to compute chi angle {i} for residue {resname}: {e}")
             # Skip if any atom is missing
             pass
     return chis
@@ -312,7 +289,7 @@ def download_top1000_lib() -> Path:
 
 
 @functools.lru_cache
-def load_contour_grid_text(resname_grid_data: Path | str) -> dict[str, np.ndarray]:
+def load_contour_grid_text(resname_grid_data: Path | Any) -> dict[str, Any]:
     """
     Parse a Top8000 pct_contour_grid text file into a numpy grid and axis coordinate arrays.
 
@@ -355,12 +332,11 @@ def load_contour_grid_text(resname_grid_data: Path | str) -> dict[str, np.ndarra
         text = resname_grid_data
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     # Parse header
-    n_dims = 0
     axes_meta = []
     data_start_idx = 0
     for i, ln in enumerate(lines):
         if ln.lower().startswith("# number of dimensions"):
-            n_dims = int(ln.split(":")[1])
+            continue
         elif ln.strip().startswith("#   x"):
             # Format: "#   x1: 0.0  360.0  36 true"
             parts = ln.split(":")[1].split()
@@ -404,7 +380,7 @@ def load_contour_grid_text(resname_grid_data: Path | str) -> dict[str, np.ndarra
             idxs.append(bin_idx)
         grid[tuple(idxs)] = val
 
-    return {"grid": grid, "axes": axes_coords, "wrap": wraps, "span": [am[:2] for am in axes_meta]}
+    return {"grid": grid, "axes": axes_coords, "wrap": wraps, "span": np.array([am[:2] for am in axes_meta])}
 
 
 @functools.lru_cache
@@ -438,8 +414,8 @@ def load_contour_grid_for_residue(
         grid_data_tag=grid_data_tag,
         files_to_skip=files_to_skip,
     )
-    if resname_tag in all_dict_contour:
-        return all_dict_contour[resname_tag]
+
+    return all_dict_contour.get(resname_tag, {})
 
 
 @functools.lru_cache
@@ -543,7 +519,7 @@ def load_all_contour_grid_from_pickle(
 def interp_wrapped(
     grid_obj: dict[str, np.ndarray],
     coords_deg: list[float],
-) -> float:
+) -> tuple[float, list[float]]:
     """Interpolate value at given χ coords (deg), handling wrapping axes.
 
     Parameters
@@ -555,8 +531,10 @@ def interp_wrapped(
 
     Returns
     -------
-    float
-        The interpolated value at the given [phi, psi]/ [χ1, χ2, ...] coordinates.
+    tuple[float, list[float]]
+        A tuple containing:
+        - The interpolated value at the given coordinates.
+        - The wrapped coordinates used for interpolation.
     """
     axes = []
     coords = []
@@ -703,7 +681,7 @@ def assign_rama_types(atom_array: struc.AtomArray) -> dict:
         1:-1
     ]  # Shifted by -1, remove first and last
 
-    def rama_type(res_name, next_res_name, omega_val):
+    def rama_type(res_name: str, next_res_name: str, omega_val: float) -> str:
         if res_name == "GLY":
             return "gly"
         elif res_name == "PRO":
@@ -733,7 +711,7 @@ def check_rama(
     resname: str,
     chain_id: str,
     resname_tag: str,
-    model_no: int = 0) -> dict[str, any]:
+    model_no: int = 0) -> dict[str, Any]:
     """
     Check the Ramachandran classification for a given residue based on its phi, psi, and omega angles.
 
@@ -900,7 +878,7 @@ class RotamerScore(BaseModel):
     )
 
     @classmethod
-    def from_atom_array(cls, atom_array: struc.AtomArray, model_no: int) -> "RotamerScore":
+    def from_atom_array(cls, atom_array: struc.AtomArray, model_no: int=0) -> "RotamerScore":
         """
         Create ResidueRotamerScore from a protein structure.
         """
@@ -1061,9 +1039,17 @@ def get_fraction_of_rotamer_outliers(atom_array: struc.AtomArray) -> float:
     total_rotamers = 0
     result = RotamerScore.from_atom_array_or_stack(atom_array)
     for rotamer_score in result.rotamer_scores:
-        if rotamer_score.classification == "OUTLIER":
-            outlier_rotamers += 1
-        total_rotamers += 1
+        if isinstance(rotamer_score, list):
+            # If it's a stack, we need to iterate through each score
+            for score in rotamer_score:
+                if score.classification == "OUTLIER":
+                    outlier_rotamers += 1
+                total_rotamers += 1
+        elif isinstance(rotamer_score, ResidueRotamerScore):
+            # If it's a single score, check its classification
+            if rotamer_score.classification == "OUTLIER":
+                outlier_rotamers += 1
+            total_rotamers += 1
     return outlier_rotamers / total_rotamers if total_rotamers > 0 else 0.0
 
 

@@ -10,6 +10,7 @@ from peppr.rotamer_rama import (
     interp_wrapped
 )
 from biotite import structure as struc
+import biotite.structure.io as strucio
 import numpy as np
 import pytest
 
@@ -19,7 +20,7 @@ def input_pose() -> struc.AtomArray:
     """
     Make an atom array for testing.
     """
-    pose = struc.io.load_structure(Path(__file__).parent / "data" / "pdb"/ "1a3n.cif")
+    pose = strucio.load_structure(Path(__file__).parent / "data" / "pdb"/ "1a3n.cif")
     return pose
 
 @pytest.fixture
