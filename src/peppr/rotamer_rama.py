@@ -673,19 +673,16 @@ def get_residue_phi_psi_omega(atom_array: struc.AtomArray) -> dict:
     dict[str, np.ndarray]
         A dictionary containing the phi, psi, and omega angles in degrees.
     """
-    print(f"Computing dihedral angles... for {atom_array}")
-    if len(atom_array.bonds.as_array()) == 0:
-        raise ValueError("No bonds found in atom_array")
-    try:
-
-        phi, psi, omega = struc.dihedral_backbone(atom_array)
-    except Exception:
-        phi, psi, omega = np.array([np.nan]), np.array([np.nan]), np.array([np.nan])
+    if atom_array.shape[0] < 4:
+        raise ValueError(
+            "atom_array must contain at least 4 atoms for dihedral angle calculation"
+        )
+    phi, psi, omega = struc.dihedral_backbone(atom_array)
     phi = np.rad2deg(phi)
     psi = np.rad2deg(psi)
     omega = np.rad2deg(omega)
 
-    # Remo`ve invalid values (NaN) at first and last position
+    # Remove invalid values (NaN) at first and last position
     phi = phi[1:-1]
     psi = psi[1:-1]
     omega = omega[1:-1]
@@ -711,14 +708,11 @@ def assign_rama_types(atom_array: struc.AtomArray) -> dict:
     # It should not contain water or other non-protein residues.
     if not isinstance(atom_array, struc.AtomArray):
         raise TypeError("atom_array must be a biotite structure AtomArray")
-    if atom_array.shape[0] < 4:
-        raise ValueError(
-            "atom_array must contain at least 4 atoms for phi, psi, omega calculation"
-        )
+
     phi_psi_omega_dict = get_residue_phi_psi_omega(atom_array)
     omega = phi_psi_omega_dict["omega"]
 
-    res_ids, res_names = struc.get_residues(atom_array)
+    _, res_names = struc.get_residues(atom_array)
     next_res_names = np.roll(res_names, -1)[
         1:-1
     ]  # Shifted by -1, remove first and last
@@ -959,19 +953,20 @@ class RotamerScore(BaseModel):
         RotamerScore
             An instance of RotamerScore containing the rotamer scores for the structure.
         """
+        if not isinstance(atom_array, struc.AtomArray):
+            LOG.warning(
+                f"RotamerScore: Cannot be computed for model {model_no}; atom_array must be a biotite structure AtomArray"
+            )
+            return cls(rotamer_scores=[])
+
         if all(atom_array.hetero):
             LOG.warning(
                 f"RotamerScore: Cannot be computed for model {model_no}; atom_array must contain some protein residues"
             )
             return cls(rotamer_scores=[])
         atom_array = atom_array[
-            struc.filter_amino_acids[atom_array] & ~atom_array.hetero
+            struc.filter_amino_acids(atom_array) & ~atom_array.hetero
         ]
-        if not isinstance(atom_array, struc.AtomArray):
-            LOG.warning(
-                f"RotamerScore: Cannot be computed for model {model_no}; atom_array must be a biotite structure AtomArray"
-            )
-            return cls(rotamer_scores=[])
         if atom_array.array_length == 0:
             LOG.warning(
                 f"RotamerScore: Cannot be computed for model {model_no};atom_array must contain at least one residue"
@@ -1115,14 +1110,14 @@ class RamaScore(BaseModel):
                 f"RotamerScore: Cannot be computed for model {model_no}; atom_array must contain some protein residues"
             )
             return cls(rama_scores=[])
-        atom_array = atom_array[
-            struc.filter_amino_acids[atom_array] & ~atom_array.hetero
-        ]
         if not isinstance(atom_array, struc.AtomArray):
             LOG.warning(
                 f"RamaScore: Cannot be computed for model {model_no}; atom_array must be a biotite structure AtomArray"
             )
             return cls(rama_scores=[])
+        atom_array = atom_array[
+            struc.filter_amino_acids(atom_array) & ~atom_array.hetero
+        ]
         if atom_array.array_length == 0:
             LOG.warning(
                 f"RamaScore: Cannot be computed for model {model_no};atom_array must contain at least one residue"
@@ -1239,7 +1234,6 @@ def get_fraction_of_rama_outliers(
     """
     outlier_rama = 0
     total_rama = 0
-    print("XXX", atom_array)
     result = RamaScore.from_atom_array_or_stack(atom_array)
 
     for rama_score in result.rama_scores:
