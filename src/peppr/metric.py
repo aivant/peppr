@@ -925,7 +925,6 @@ class RotamerViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
-        pose = pose[struc.filter_amino_acids(pose)]
         if pose.array_length() == 0:
             return np.nan
 
@@ -982,19 +981,14 @@ class RamachandranViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
-        pose = pose[struc.filter_amino_acids(pose)]
         if pose.array_length() == 0:
             return np.nan
 
-        # Get fraction of allowed anc favored phi/psi angles
+        # Get fraction of allowed and favored phi/psi angles
         return 1 - get_fraction_of_rama_outliers(pose)
 
     def smaller_is_better(self) -> bool:
         return False
-
-
-get_fraction_of_rama_outliers
-
 
 class ClashCount(Metric):
     """

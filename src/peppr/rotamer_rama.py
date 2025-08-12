@@ -258,12 +258,11 @@ def get_residue_chis(
     chis: dict[str, float] = {}
     if resname not in CHI_DEFS:
         return chis
-    from biotite.structure import dihedral
 
     for i, atom_tuple in enumerate(CHI_DEFS[resname], start=1):
         try:
             p = [coords[a] for a in atom_tuple]
-            ang = math.degrees(dihedral(*p))
+            ang = math.degrees(struc.dihedral(*p))
             chis[f"chi{i}"] = ang
         except Exception as e:
             LOG.warning(f"Failed to compute chi angle {i} for residue {resname}: {e}")
@@ -674,7 +673,10 @@ def get_residue_phi_psi_omega(atom_array: struc.AtomArray) -> dict:
     dict[str, np.ndarray]
         A dictionary containing the phi, psi, and omega angles in degrees.
     """
-    phi, psi, omega = struc.dihedral_backbone(atom_array)
+    try:
+        phi, psi, omega = struc.dihedral_backbone(atom_array)
+    except Exception as e:
+        phi, psi, omega = np.array([np.nan]), np.array([np.nan]), np.array([np.nan])
     phi = np.rad2deg(phi)
     psi = np.rad2deg(psi)
     omega = np.rad2deg(omega)
@@ -705,6 +707,8 @@ def assign_rama_types(atom_array: struc.AtomArray) -> dict:
     # It should not contain water or other non-protein residues.
     if not isinstance(atom_array, struc.AtomArray):
         raise TypeError("atom_array must be a biotite structure AtomArray")
+    if atom_array.shape[0] < 4:
+        raise ValueError("atom_array must contain at least 4 atoms for phi, psi, omega calculation")
     phi_psi_omega_dict = get_residue_phi_psi_omega(atom_array)
     omega = phi_psi_omega_dict["omega"]
 
@@ -949,8 +953,16 @@ class RotamerScore(BaseModel):
         RotamerScore
             An instance of RotamerScore containing the rotamer scores for the structure.
         """
+        if all(atom_array.hetero):
+            LOG.warning(f"RotamerScore: Cannot be computed for model {model_no}; atom_array must contain some protein residues")
+            return cls(rotamer_scores=[])
+        atom_array = atom_array[struc.filter_animo_acids[atom_array] & ~atom_array.hetero]
         if not isinstance(atom_array, struc.AtomArray):
-            raise TypeError("atom_array must be a biotite structure AtomArray")
+            LOG.warning(f"RotamerScore: Cannot be computed for model {model_no}; atom_array must be a biotite structure AtomArray")
+            return cls(rotamer_scores=[])
+        if atom_array.array_length == 0:
+            LOG.warning(f"RotamerScore: Cannot be computed for model {model_no};atom_array must contain at least one residue")
+            return cls(rotamer_scores=[])
         atom_array = atom_array[~atom_array.hetero]  # Remove hetero
         res_ids, res_names = struc.get_residues(atom_array)
         rotamer_scores = []
@@ -1084,10 +1096,17 @@ class RamaScore(BaseModel):
         RamaScore
             An instance of RamaScore containing the ramachandran scores for the structure.
         """
+        if all(atom_array.hetero):
+            LOG.warning(f"RotamerScore: Cannot be computed for model {model_no}; atom_array must contain some protein residues")
+            return cls(rama_scores=[])
+        atom_array = atom_array[struc.filter_animo_acids[atom_array] & ~atom_array.hetero]
         if not isinstance(atom_array, struc.AtomArray):
-            raise TypeError("atom_array must be a biotite structure AtomArray")
+            LOG.warning(f"RamaScore: Cannot be computed for model {model_no}; atom_array must be a biotite structure AtomArray")
+            return cls(rama_scores=[])
+        if  atom_array.array_length == 0:
+            LOG.warning(f"RamaScore: Cannot be computed for model {model_no};atom_array must contain at least one residue")
+            return cls(rama_scores=[])
 
-        atom_array = atom_array[~atom_array.hetero]
         rama_input = assign_rama_types(atom_array)
         res_ids, res_names = struc.get_residues(atom_array)
         rama_scores = []
