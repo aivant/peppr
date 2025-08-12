@@ -43,6 +43,8 @@ _METRICS = {
     "dcc": PocketDistance(use_pose_centroids=True),
     "dca": PocketDistance(use_pose_centroids=False),
     "dvo": PocketVolumeOverlap(),
+    "rotamer-violations": RotamerViolations(),
+    "ramachandran-violations": RamachandranViolations(),
 }
 
 
