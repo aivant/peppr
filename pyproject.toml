@@ -25,6 +25,7 @@ dependencies = [
   "pandas >= 2.0.0",
   "rdkit >= 2024.09.1",
   "click >= 8.0.0",
+  "pydantic >= 2.11.2",
 ]
 dynamic = ["version"]
 
