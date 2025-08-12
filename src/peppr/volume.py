@@ -105,6 +105,8 @@ def _create_voxel_grid(
         The size of the voxels.
     padding : float
         The 'buffer' around the molecule.
+        This makes sure that voxels span not only the molecule centers, but also
+        their radii.
 
     Returns
     -------
