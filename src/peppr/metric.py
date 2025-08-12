@@ -20,6 +20,8 @@ __all__ = [
     "ChiralityViolations",
     "PocketDistance",
     "PocketVolumeOverlap",
+    "RotamerViolations",
+    "RamachandranViolations"
 ]
 
 import itertools
@@ -58,7 +60,7 @@ from peppr.idealize import idealize_bonds
 from peppr.match import find_matching_centroids, find_optimal_match
 from peppr.volume import volume_overlap
 
-from peppr.rotamer import (
+from peppr.rotamer_rama import (
     get_fraction_of_rotamer_outliers,
     get_fraction_of_rama_outliers)
 class Metric(ABC):
@@ -901,9 +903,9 @@ class RotamerViolations(Metric):
     def thresholds(self) -> OrderedDict[str, float]:
         return OrderedDict(
             [
-                ("poor", 0.05),
-                ("good", 0.02),
-                ("excellent", 0.01),
+                ("poor", 0.95),
+                ("acceptable", 0.98),
+                ("excellent", 0.99),
             ]
         )
 
@@ -923,15 +925,15 @@ class RotamerViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
+        pose = pose[struc.filter_amino_acids(pose)]
         if pose.array_length() == 0:
             return np.nan
 
-        # Get rotamer violation fraction
-        return get_fraction_of_rotamer_outliers(pose)
+        # Fraction of good rotamers
+        return 1 - get_fraction_of_rotamer_outliers(pose)
 
     def smaller_is_better(self) -> bool:
-        return True
-
+        return False
 
 class RamachandranViolations(Metric):
     """
@@ -950,8 +952,9 @@ class RamachandranViolations(Metric):
     def thresholds(self) -> OrderedDict[str, float]:
         return OrderedDict(
             [
-                ("poor", 0.005),
-                ("good", 0.002),
+                ("poor", 0.980),
+                ("acceptable", 0.990),
+                ("excellent", 0.995),
             ]
         )
 
@@ -971,14 +974,15 @@ class RamachandranViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
+        pose = pose[struc.filter_amino_acids(pose)]
         if pose.array_length() == 0:
             return np.nan
 
-        # Get rotamer violation fraction
-        return get_fraction_of_rama_outliers(pose)
+        # Get fraction of allowed anc favored phi/psi angles
+        return 1 - get_fraction_of_rama_outliers(pose)
 
     def smaller_is_better(self) -> bool:
-        return True
+        return False
 
 get_fraction_of_rama_outliers
 class ClashCount(Metric):

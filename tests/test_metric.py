@@ -37,6 +37,8 @@ ALL_METRICS = [
     peppr.PocketDistance(use_pose_centroids=True),
     peppr.PocketDistance(use_pose_centroids=False),
     peppr.PocketVolumeOverlap(),
+    peppr.RotamerViolations(),
+    peppr.RamachandranViolations()
 ]
 
 
@@ -81,6 +83,8 @@ def _no_bond_atom_array(is_small_molecule):
         (peppr.PocketDistance(use_pose_centroids=True), (0.0, 20.0)),
         (peppr.PocketDistance(use_pose_centroids=False), (0.0, 20.0)),
         (peppr.PocketVolumeOverlap(), (0.0, 1.0)),
+        (peppr.RotamerViolations(), (0.0, 1.0)),
+        (peppr.RamachandranViolations(), (0.0, 1.0)),
     ],
     ids=lambda x: x.name if isinstance(x, peppr.Metric) else "",
 )
