@@ -7,8 +7,8 @@ from .dockq import *
 from .evaluator import *
 from .match import *
 from .metric import *
+from .rotamer_rama import *
 from .sanitize import *
 from .selector import *
 from .version import *
 from .volume import *
-from .rotamer_rama import *

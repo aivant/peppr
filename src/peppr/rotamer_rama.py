@@ -21,12 +21,12 @@ import logging
 import math
 import pickle
 from pathlib import Path
+from typing import Any
 import numpy as np
 import requests
 from biotite import structure as struc
 from pydantic import BaseModel, ConfigDict, Field
 from scipy.interpolate import RegularGridInterpolator
-from typing import Any
 
 # Configure basic logging to the console
 logging.basicConfig(
@@ -105,7 +105,7 @@ def wrap_angle(angle_deg: float, mode: str = "±180") -> float:
 
     Returns
     -------
-    wrapped : float or ndarray
+    float
         Wrapped angle(s) in the chosen range.
     """
 
@@ -139,7 +139,7 @@ def download_and_extract(url: str, dest_path: Path | None = None) -> Path | None
     url : str
         The URL to download the file from.
     dest_path : Path | None
-        The destination path where the file should be saved. If None, uses the URL's name
+        The destination path where the file should be saved. If None, uses the URL's name.
 
     Returns
     -------
@@ -192,7 +192,7 @@ def get_residue_chis(
     Returns
     -------
     dict
-        A dictionary with chi angles, e.g. {'chi1': angle_deg, 'chi2': angle_deg, ...}
+        A dictionary with chi angles, e.g. {'chi1': angle_deg, 'chi2': angle_deg, ...}.
     """
     # We'll compute common chis by looking up named atoms for each residue type.
     res_atoms = atom_array[res_id_mask]
@@ -306,13 +306,13 @@ def load_contour_grid_text(resname_grid_data: Path | Any) -> dict[str, Any]:
 
     Returns
     -------
-    dict
+    dict[str, Any]
         A dictionary containing the grid data, axes, and wrap information.
         {
         'grid': np.ndarray,
         'axes': [axis1_centers, axis2_centers, ...],
         'wrap': [True/False per axis]
-    }
+        }.
 
     Notes
     -----
@@ -531,7 +531,8 @@ def interp_wrapped(
     grid_obj: dict[str, np.ndarray],
     coords_deg: list[float],
 ) -> tuple[float, list[float]]:
-    """Interpolate value at given χ coords (deg), handling wrapping axes.
+    """
+    Interpolate value at given χ coords (deg), handling wrapping axes.
 
     Parameters
     ----------
@@ -572,7 +573,7 @@ def interp_wrapped(
 
 def check_rotamer(
     atom_array: struc.AtomArray, res_id: int, chain_id: str, model_no: int
-) -> dict:
+) -> dict[str, Any]:
     """
     Check the rotamer classification for a given residue in the atom array.
 
@@ -584,6 +585,23 @@ def check_rotamer(
         The residue ID to check.
     chain_id : str
         The chain ID to check.
+    model_no : int
+        The model number to check (usually 0 for single model structures).
+
+    Returns
+    -------
+    dict[str, Any]
+        A dictionary containing the rotamer classification results:
+        {
+            "model_no": int,
+            "resname": str,
+            "resid": int,
+            "observed": dict,
+            "chain_id": str,
+            "rotamer_score_pct": float,
+            "classification": str,
+            "error": str | None
+        }.
     """
     if not isinstance(atom_array, struc.AtomArray):
         raise TypeError("atom_array must be a biotite structure AtomArray")
@@ -751,7 +769,7 @@ def check_rama(
 
     Returns
     -------
-    dict
+    dict[str, Any]
         A dictionary containing the Ramachandran classification result.
         {
         'resname': str,
@@ -761,11 +779,8 @@ def check_rama(
         'classification': str
         'model_no': int,
         'chain_id': str
-        }
-    Raises
-    ------
-    ValueError
-        If the residue name is not recognized or if the angles are invalid.
+        }.
+
     Notes
     -----
     This function uses the Top8000 Ramachandran contour grids to classify the residue.
@@ -778,7 +793,6 @@ def check_rama(
     or RAMA_CISPRO_ALLOWED_THRESHOLD for "cispro" residues)
     - OUTLIER: pct < RAMA_ALLOWED_THRESHOLD (or RAMA_GENERAL_ALLOWED_THRESHOLD for "general" residues,
     or RAMA_CISPRO_ALLOWED_THRESHOLD for "cispro" residues)
-
     """
 
     grid_obj = load_contour_grid_for_residue(
@@ -825,7 +839,8 @@ def check_rama(
 
 
 class ResidueRotamerScore(BaseModel):
-    """Rotamer score for a residue in a protein structure.
+    """
+    Rotamer score for a residue in a protein structure.
 
     This class represents the rotamer score for a single residue, including its name,
     ID, observed chi angles, rotamer score percentage, and classification.
@@ -880,7 +895,25 @@ class ResidueRotamerScore(BaseModel):
     def from_residue(
         cls, atom_array: struc.AtomArray, res_id: int, chain_id: str, model_no: int
     ) -> "ResidueRotamerScore":
-        """Create ResidueRotamerScore from a residue object."""
+        """
+        Create ResidueRotamerScore from a residue object.
+
+        Parameters
+        ----------
+        atom_array : struc.AtomArray
+            The AtomArray containing the structure.
+        res_id : int
+            The residue ID to check.
+        chain_id : str
+            The chain ID to check.
+        model_no : int
+            The model number to check (usually 0 for single model structures).
+
+        Returns
+        -------
+        ResidueRotamerScore
+            An instance of ResidueRotamerScore containing the rotamer score for the residue.
+        """
         result = check_rotamer(atom_array, res_id, chain_id, model_no=model_no)
         return cls(**result)
 
@@ -903,6 +936,18 @@ class RotamerScore(BaseModel):
     ) -> "RotamerScore":
         """
         Create ResidueRotamerScore from a protein structure.
+
+        Parameters
+        ----------
+        atom_array : struc.AtomArray
+            The AtomArray containing the structure.
+        model_no : int, optional
+            The model number to use for classification (default is 0).
+
+        Returns
+        -------
+        RotamerScore
+            An instance of RotamerScore containing the rotamer scores for the structure.
         """
         if not isinstance(atom_array, struc.AtomArray):
             raise TypeError("atom_array must be a biotite structure AtomArray")
@@ -934,6 +979,16 @@ class RotamerScore(BaseModel):
     ) -> "RotamerScore":
         """
         Create RotamerScore from a protein structure or a stack of structures.
+
+        Parameters
+        ----------
+        atom_array : struc.AtomArray | struc.AtomArrayStack
+            The AtomArray or AtomArrayStack containing the structure(s).
+
+        Returns
+        -------
+        RotamerScore
+            An instance of RotamerScore containing the rotamer scores for the structure(s).
         """
         if isinstance(atom_array, struc.AtomArray):
             return cls.from_atom_array(atom_array, model_no=0)
@@ -1016,6 +1071,18 @@ class RamaScore(BaseModel):
     ) -> "RamaScore":
         """
         Create RamaScore from a protein structure.
+
+        Parameters
+        ----------
+        atom_array : struc.AtomArray
+            The AtomArray containing the structure.
+        model_no : int, optional
+            The model number to use for classification (default is 0).
+
+        Returns
+        -------
+        RamaScore
+            An instance of RamaScore containing the ramachandran scores for the structure.
         """
         if not isinstance(atom_array, struc.AtomArray):
             raise TypeError("atom_array must be a biotite structure AtomArray")
@@ -1053,6 +1120,16 @@ class RamaScore(BaseModel):
     ) -> "RamaScore":
         """
         Create RamaScore from a protein structure or a stack of structures.
+
+        Parameters
+        ----------
+        atom_array : struc.AtomArray | struc.AtomArrayStack
+            The AtomArray or AtomArrayStack containing the structure(s).
+
+        Returns
+        -------
+        RamaScore
+            An instance of RamaScore containing the ramachandran scores for the structure(s).
         """
         if isinstance(atom_array, struc.AtomArray):
             return cls.from_atom_array(atom_array, model_no=0)
@@ -1072,6 +1149,17 @@ class RamaScore(BaseModel):
 def get_fraction_of_rotamer_outliers(atom_array: struc.AtomArray) -> float:
     """
     Compute the fraction of rotamer outliers for given model.
+
+    Parameters
+    ----------
+    atom_array : struc.AtomArray
+        The AtomArray containing the structure.
+
+    Returns
+    -------
+    float
+        The fraction of rotamer outliers in the structure, calculated as the number of outlier
+        rotamers divided by the total number of rotamers.
     """
     outlier_rotamers = 0
     total_rotamers = 0
@@ -1096,6 +1184,17 @@ def get_fraction_of_rama_outliers(
 ) -> float:
     """
     Compute the fraction of ramachandran outliers for given model.
+
+    Parameters
+    ----------
+    atom_array : struc.AtomArray | struc.AtomArrayStack
+        The AtomArray or AtomArrayStack containing the structure(s).
+
+    Returns
+    -------
+    float
+        The fraction of ramachandran outliers in the structure, calculated as the number of outlier
+        ramachandran angles divided by the total number of ramachandran angles.
     """
     outlier_rama = 0
     total_rama = 0

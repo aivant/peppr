@@ -56,14 +56,12 @@ from peppr.dockq import (
 )
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
-
 from peppr.match import find_matching_centroids, find_optimal_match
-from peppr.volume import volume_overlap
-
 from peppr.rotamer_rama import (
-    get_fraction_of_rotamer_outliers,
     get_fraction_of_rama_outliers,
+    get_fraction_of_rotamer_outliers,
 )
+from peppr.volume import volume_overlap
 
 
 class Metric(ABC):
@@ -942,6 +940,12 @@ class RamachandranViolations(Metric):
     """
     Check for Ramachandran violations in the structure by comparing against
     allowed regions in the Ramachandran plot.
+
+    Parameters
+    ----------
+    tolerance : float | None, optional
+        The tolerance for acceptable deviation from ideal phi/psi angles.
+        This is not used in this metric, it's added to keep the interface consistent.
     """
 
     def __init__(self, tolerance: float | None = None) -> None:

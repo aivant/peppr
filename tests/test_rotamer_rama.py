@@ -1,18 +1,16 @@
 from pathlib import Path
-import math
-from unittest import result
-from peppr.rotamer_rama import (
-    get_residue_chis,
-    get_residue_phi_psi_omega,
-    check_rama,
-    check_rotamer,
-    RamaScore,
-    interp_wrapped,
-)
-from biotite import structure as struc
 import biotite.structure.io as strucio
 import numpy as np
 import pytest
+from biotite import structure as struc
+from peppr.rotamer_rama import (
+    RamaScore,
+    check_rama,
+    check_rotamer,
+    get_residue_chis,
+    get_residue_phi_psi_omega,
+    interp_wrapped,
+)
 
 
 @pytest.fixture
