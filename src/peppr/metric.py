@@ -21,7 +21,7 @@ __all__ = [
     "PocketDistance",
     "PocketVolumeOverlap",
     "RotamerViolations",
-    "RamachandranViolations"
+    "RamachandranViolations",
 ]
 
 import itertools
@@ -62,7 +62,10 @@ from peppr.volume import volume_overlap
 
 from peppr.rotamer_rama import (
     get_fraction_of_rotamer_outliers,
-    get_fraction_of_rama_outliers)
+    get_fraction_of_rama_outliers,
+)
+
+
 class Metric(ABC):
     """
     The base class for all evaluation metrics.
@@ -878,7 +881,6 @@ class BondAngleViolations(Metric):
         return True
 
 
-
 class RotamerViolations(Metric):
     """
     Check for rotamer violations in the structure by comparing against rotamers
@@ -935,11 +937,13 @@ class RotamerViolations(Metric):
     def smaller_is_better(self) -> bool:
         return False
 
+
 class RamachandranViolations(Metric):
     """
     Check for Ramachandran violations in the structure by comparing against
     allowed regions in the Ramachandran plot.
     """
+
     def __init__(self, tolerance: float | None = None) -> None:
         self._tolerance = tolerance
         super().__init__()
@@ -984,7 +988,10 @@ class RamachandranViolations(Metric):
     def smaller_is_better(self) -> bool:
         return False
 
+
 get_fraction_of_rama_outliers
+
+
 class ClashCount(Metric):
     """
     Count the number of clashes between atoms in the pose.

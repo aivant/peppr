@@ -38,7 +38,7 @@ ALL_METRICS = [
     peppr.PocketDistance(use_pose_centroids=False),
     peppr.PocketVolumeOverlap(),
     peppr.RotamerViolations(),
-    peppr.RamachandranViolations()
+    peppr.RamachandranViolations(),
 ]
 
 
