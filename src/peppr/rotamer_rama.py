@@ -673,7 +673,11 @@ def get_residue_phi_psi_omega(atom_array: struc.AtomArray) -> dict:
     dict[str, np.ndarray]
         A dictionary containing the phi, psi, and omega angles in degrees.
     """
+    print(f"Computing dihedral angles... for {atom_array}")
+    if len(atom_array.bonds.as_array()) == 0:
+        raise ValueError("No bonds found in atom_array")
     try:
+
         phi, psi, omega = struc.dihedral_backbone(atom_array)
     except Exception:
         phi, psi, omega = np.array([np.nan]), np.array([np.nan]), np.array([np.nan])
@@ -961,7 +965,7 @@ class RotamerScore(BaseModel):
             )
             return cls(rotamer_scores=[])
         atom_array = atom_array[
-            struc.filter_animo_acids[atom_array] & ~atom_array.hetero
+            struc.filter_amino_acids[atom_array] & ~atom_array.hetero
         ]
         if not isinstance(atom_array, struc.AtomArray):
             LOG.warning(
@@ -1112,7 +1116,7 @@ class RamaScore(BaseModel):
             )
             return cls(rama_scores=[])
         atom_array = atom_array[
-            struc.filter_animo_acids[atom_array] & ~atom_array.hetero
+            struc.filter_amino_acids[atom_array] & ~atom_array.hetero
         ]
         if not isinstance(atom_array, struc.AtomArray):
             LOG.warning(
@@ -1235,6 +1239,7 @@ def get_fraction_of_rama_outliers(
     """
     outlier_rama = 0
     total_rama = 0
+    print("XXX", atom_array)
     result = RamaScore.from_atom_array_or_stack(atom_array)
 
     for rama_score in result.rama_scores:
@@ -1249,3 +1254,13 @@ def get_fraction_of_rama_outliers(
                 outlier_rama += 1
             total_rama += 1
     return outlier_rama / total_rama if total_rama > 0 else 0.0
+
+
+if __name__ == "__main__":
+    from biotite.structure import io as strucio
+    cif_path = Path("/Users/yusuf/peppr/test_small_mol.cif")
+    atom_array = strucio.load_structure(cif_path)
+    rotamer_score = RotamerScore.from_atom_array(atom_array)
+    rama_score = RamaScore.from_atom_array(atom_array)
+    print(rotamer_score)
+    print(rama_score)

@@ -981,6 +981,7 @@ class RamachandranViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
+
         if pose.array_length() == 0:
             return np.nan
 
@@ -1803,3 +1804,14 @@ def _match_receptors_only(
         matched_reference_receptor + reference[reference.hetero],
         matched_pose_receptor + pose[pose.hetero],
     )
+
+if __name__ == "__main__":
+    from biotite.structure import io as strucio
+    from pathlib import Path
+
+    cif_path = Path("/Users/yusuf/peppr/test_small_mol.cif")
+    atom_array = strucio.load_structure(cif_path)
+    rotamer_score = RotamerViolations().evaluate(atom_array, atom_array)
+    rama_score =  RamachandranViolations().evaluate(atom_array, atom_array)
+    print(rotamer_score)
+    print(rama_score)
