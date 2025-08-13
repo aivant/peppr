@@ -42,6 +42,8 @@ The metrics for pose evaluation.
     PLIFRecovery
     PocketDistance
     PocketVolumeOverlap
+    RotamerViolations
+    RamachandranViolations
 
 Selectors
 ---------
@@ -79,6 +81,10 @@ that are not directly implemented :mod:`biotite.structure`.
     ContactMeasurement
     volume
     volume_overlap
+    RotamerScore
+    RamaScore
+    get_fraction_of_rotamer_outliers
+    get_fraction_of_rama_outliers
 
 Atom Matching
 -------------
