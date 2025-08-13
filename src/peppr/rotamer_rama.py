@@ -1,10 +1,6 @@
 """
-Backbone-dependent and backbone-independent rotamer checking using
-Richardson Lab Top8000 rotamer library.
-https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
-
-This is the library useful programs like MolProbity's "rotamer" validation, which uses
-mmtbx.rotamer.rotamer_eval and mmtbx.validation.rotalyze and  mmtbx.validation.ramalyze under the hood.
+Backbone and sidechain checking using
+Richardson Lab Top8000 rotamer library from https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
 """
 
 __all__ = [

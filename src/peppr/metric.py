@@ -886,12 +886,19 @@ class RotamerViolations(Metric):
     """
     Check for rotamer violations in the structure by comparing against rotamers
     of the same amino acid type in crystal structures based on the Top8000
-    dataset from the Richardson Lab.
+    dataset from the Richardson Lab. Rotamer violation occurs when the probability of
+    chi angles of a residue occuring in known crystal structures
+    is below a certain threshold as described in the references below.
 
     Parameters
     ----------
     tolerance : float | None, optional
         The tolerance in radians for acceptable deviation from ideal bond angles.
+
+    References
+    ----------
+    .. [1] http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
+    .. [2] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
     """
 
     def __init__(self, tolerance: float | None = None) -> None:
@@ -904,17 +911,18 @@ class RotamerViolations(Metric):
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
+        # http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
         return OrderedDict(
             [
-                ("poor", 0.95),
-                ("acceptable", 0.98),
-                ("excellent", 0.99),
+                ("good", 0.003),
+                ("warning", 0.015),
+                ("bad", 1.0000),
             ]
         )
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         """
-        Calculate the percentage of bonds that are outside acceptable ranges.
+        Calculate the percentage of residues with chi angles that are outside acceptable ranges.
 
         Parameters
         ----------
@@ -931,23 +939,30 @@ class RotamerViolations(Metric):
         if pose.array_length() == 0:
             return np.nan
 
-        # Fraction of good rotamers
-        return 1 - get_fraction_of_rotamer_outliers(pose)
+        return get_fraction_of_rotamer_outliers(pose)
 
     def smaller_is_better(self) -> bool:
-        return False
+        return True
 
 
 class RamachandranViolations(Metric):
     """
-    Check for Ramachandran violations in the structure by comparing against
-    allowed regions in the Ramachandran plot.
+    Check for phi/psi violations in the structure by comparing against rotamers
+    of the same amino acid type in crystal structures based on the Top8000
+    dataset from the Richardson Lab. Ramachandran violation occurs when the probability of
+    phi/psi angles of a residue occuring in known crystal structures
+    is below a certain threshold as described in the references below.
 
     Parameters
     ----------
     tolerance : float | None, optional
         The tolerance for acceptable deviation from ideal phi/psi angles.
         This is not used in this metric, it's added to keep the interface consistent.
+
+    References
+    ----------
+    .. [1] http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
+    .. [2] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
     """
 
     def __init__(self, tolerance: float | None = None) -> None:
@@ -956,15 +971,16 @@ class RamachandranViolations(Metric):
 
     @property
     def name(self) -> str:
-        return "Ramachandran-violations"
+        return "Ramachandran violations"
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
+        # http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
         return OrderedDict(
             [
-                ("poor", 0.980),
-                ("acceptable", 0.990),
-                ("excellent", 0.995),
+                ("good", 0.0005),
+                ("warning", 0.0050),
+                ("bad", 1.0000),
             ]
         )
 
@@ -988,8 +1004,7 @@ class RamachandranViolations(Metric):
         if pose.array_length() == 0:
             return np.nan
 
-        # Get fraction of allowed and favored phi/psi angles
-        return 1 - get_fraction_of_rama_outliers(pose)
+        return get_fraction_of_rama_outliers(pose)
 
     def smaller_is_better(self) -> bool:
         return False
@@ -1807,15 +1822,3 @@ def _match_receptors_only(
         matched_reference_receptor + reference[reference.hetero],
         matched_pose_receptor + pose[pose.hetero],
     )
-
-
-if __name__ == "__main__":
-    from pathlib import Path
-    from biotite.structure import io as strucio
-
-    cif_path = Path("/Users/yusuf/peppr/test_small_mol.cif")
-    atom_array = strucio.load_structure(cif_path)
-    rotamer_score = RotamerViolations().evaluate(atom_array, atom_array)
-    rama_score = RamachandranViolations().evaluate(atom_array, atom_array)
-    print(rotamer_score)
-    print(rama_score)
