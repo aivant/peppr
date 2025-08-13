@@ -617,7 +617,7 @@ def check_rotamer(
             "chain_id": chain_id,
             "observed": observed,
             "rotamer_score_pct": 1.0,  # ALA and GLY have no chi angles
-            "classification": "UNKNOWN",
+            "classification": "FAVORED",
             "error": "no chis computable",
         }
 
@@ -637,7 +637,8 @@ def check_rotamer(
     observed = {f"chi{i + 1}": wrapped_angles[i] for i in range(len(wrapped_angles))}
 
     if np.isnan(pct):
-        classification = "UNKNOWN"
+        #classification = "UNKNOWN"
+        classification = "OUTLIER"
 
     elif pct >= ROTA_ALLOWED_THRESHOLD:
         classification = "FAVORED"
