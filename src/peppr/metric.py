@@ -897,7 +897,7 @@ class RotamerViolations(Metric):
 
     @property
     def name(self) -> str:
-        return "Rotamer-violations"
+        return "Rotamer violations"
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
