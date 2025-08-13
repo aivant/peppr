@@ -55,7 +55,7 @@ grid_residue_map = {
     "LYS": "lys",
     "MET": "met",
     "PHE": "phetyr",
-    "PRO": "pro3d",
+    "PRO": "pro",
     "SER": "ser",
     "THR": "thr",
     "TRP": "trp",
@@ -87,43 +87,113 @@ _ROTAMER_BASE_DIR = Path.home() / ".local/share/top8000_lib"
 _ROTAMER_DIR = _ROTAMER_BASE_DIR / "reference_data-master" / "Top8000"
 
 
-def wrap_angle(angle_deg: float, mode: str = "±180") -> float:
+def get_mmtbx_neg180_to_180_value(
+    angle_deg: float | np.ndarray
+) -> float | np.ndarray:
     """
-    Wrap an angle (in degrees) to a specified range.
+    Convert phi and psi angles to the range [-180, 180).
+    Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
 
     Parameters
     ----------
-    angle_deg : float or array-like
-        Input angle(s) in degrees.
-    mode : str
-        Wrapping mode:
-        - "±180"   : range [-180, 180)
-        - "0-360"  : range [0, 360)
-        - "0-180"  : range [0, 180] (folded)
+    phi : float
+        The phi angle in degrees.
+    psi : float
+        The psi angle in degrees.
 
     Returns
     -------
-    float
-        Wrapped angle(s) in the chosen range.
+    tuple
+        A tuple containing the converted phi and psi angles.
     """
+    if angle_deg > 180:
+        angle_deg -= -360
+    elif angle_deg <= -180:
+        angle_deg += 360
+    assert -180 <= angle_deg < 180, "Angle must be in the range [-180, 180)"
+    return angle_deg
 
-    if mode == "±180":
-        return ((angle_deg + 180.0) % 360.0) - 180.0
 
-    elif mode == "0-360":
-        return angle_deg % 360.0
 
-    elif mode == "0-180":
-        a = angle_deg % 360.0
-        if a > 180.0:
-            return a - 180.0
+def wrap_phi_psi(phi: float, psi: float) -> list[float]:
+    """
+    Wrap phi and psi angles to the range [-180, 180).
+    Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
+
+    Parameters
+    ----------
+    phi : float
+        The phi angle in degrees.
+    psi : float
+        The psi angle in degrees.
+
+    Returns
+    -------
+    tuple
+        A tuple containing the converted phi and psi angles.
+    """
+    return [get_mmtbx_neg180_to_180_value(phi),
+            get_mmtbx_neg180_to_180_value(psi)]
+
+
+def _wrap_symmetrical(residue_tag: str, wrapped_chis: list) -> list:
+    """
+    Apply symmetrical wrapping to chi angles for specific amino acids.
+    Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/rotamer/rotamer_eval.py#L368
+
+    Parameters
+    ----------
+    residue_tag : str
+        The residue tag (e.g., "asp", "glu", "phetyr").
+    wrapped_chis : list
+        The list of wrapped chi angles.
+
+    Returns
+    -------
+    list
+        The list of symmetrically wrapped chi angles.
+    """
+    residue_tag = residue_tag.lower()
+    if (residue_tag == "asp" or residue_tag == "glu" or residue_tag == "phetyr"):
+        i = len(wrapped_chis) - 1
+        if wrapped_chis[i] is not None:
+            wrapped_chis[i] = wrapped_chis[i] % 180
+            if wrapped_chis[i] < 0:
+                wrapped_chis[i] += 180
+    return wrapped_chis
+
+
+def wrap_chis(residue_tag: str, chis: list, symmetry=True) -> list:
+    """
+    Wrap chi angles to the range [0, 360) or [-180, 180) depending on the residue type.
+    Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/rotamer/rotamer_eval.py#L368
+
+    Parameters
+    ----------
+    residue_tag : str
+        The residue tag (e.g., "asp", "glu", "phetyr").
+    chis : list
+        The list of chi angles.
+    symmetry : bool
+        Whether to apply symmetrical wrapping.
+
+    Returns
+    -------
+    list
+        The list of wrapped chi angles.
+    """
+    residue_tag = residue_tag.lower()
+    wrapped_chis = []
+    for i in range(0, len(chis)):
+        if chis[i] is not None:
+            wrapped_chis.append(chis[i] % 360)
+            if wrapped_chis[i] < 0:
+                wrapped_chis[i] += 360
         else:
-            return abs(a)
-
-    else:
-        raise ValueError(
-            f"Unknown mode '{mode}', choose from '±180', '0-360', '0-180'."
-        )
+            wrapped_chis.append(None)
+    if (symmetry==True):
+      wrapped_chis = _wrap_symmetrical(residue_tag, wrapped_chis)
+    return wrapped_chis
 
 
 def download_and_extract(url: str, dest_path: Path | None = None) -> Path | None:
@@ -227,22 +297,25 @@ def get_residue_chis(
         "PHE": [
             ("N", "CA", "CB", "CG"),
             ("CA", "CB", "CG", "CD1"),
-            ("CB", "CG", "CD1", "CE1"),
         ],
         "TRP": [
             ("N", "CA", "CB", "CG"),
             ("CA", "CB", "CG", "CD1"),
-            ("CB", "CG", "CD1", "CE2"),
         ],
         "TYR": [
             ("N", "CA", "CB", "CG"),
             ("CA", "CB", "CG", "CD1"),
-            ("CB", "CG", "CD1", "CE1"),
         ],
         "ASN": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "OD1")],
-        "GLN": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "OE1")],
+        "GLN": [("N", "CA", "CB", "CG"),
+                ("CA", "CB", "CG", "CD"),
+                ("CB", "CG", "CD", "OE1")],
         "ASP": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "OD1")],
-        "GLU": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "OE1")],
+        "GLU": [
+            ("N", "CA", "CB", "CG"),
+            ("CA", "CB", "CG", "CD"),
+            ("CB", "CG", "CD", "OE1"),
+        ],
         "CYS": [("N", "CA", "CB", "SG")],
         "HIS": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "ND1")],
         "PRO": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "CD")],
@@ -526,8 +599,10 @@ def load_all_contour_grid_from_pickle(
 
 
 def interp_wrapped(
+    resname_tag: str,
     grid_obj: dict[str, np.ndarray],
     coords_deg: list[float],
+    coords_type: str,
 ) -> tuple[float, list[float]]:
     """
     Interpolate value at given χ coords (deg), handling wrapping axes.
@@ -538,6 +613,8 @@ def interp_wrapped(
         The grid object containing 'grid', 'axes', and 'wrap' information.
     coords_deg : list[float]
         List of coordinates in degrees, which could be [phi, psi] / [χ1, χ2, ...].
+    coords_type : str
+        The type of coordinates being interpolated (e.g., "phi-psi" or "chi").
 
     Returns
     -------
@@ -548,23 +625,19 @@ def interp_wrapped(
     """
     axes = []
     coords = []
-    for val, centers, span, wrap in zip(
-        coords_deg, grid_obj["axes"], grid_obj["span"], grid_obj["wrap"]
-    ):
-        if wrap:
-            if (span[0] == 0) and (span[1] == 360):
-                # Wrap to [0, 360)
-                val = wrap_angle(val, mode="0-360")
-            elif (span[0] == -180) and (span[1] == 180):
-                # Wrap to [-180, 180)
-                val = wrap_angle(val, mode="±180")
-            elif (span[0] == 0) and (span[1] == 180):
-                # Wrap to [0, 180]
-                val = wrap_angle(val, mode="0-180")
-        coords.append(val)
-        axes.append(centers)
+    if coords_type not in ["phi-psi", "chi"]:
+        raise ValueError(
+            f"Invalid coords_type: {coords_type}. Expected 'phi-psi' or 'chi'."
+        )
+    if (coords_type == "phi-psi") and all(grid_obj["wrap"]):
+        # Wrap phi and psi angles to [-180, 180)
+        coords = wrap_phi_psi(coords_deg[0], coords_deg[1])
+    elif (coords_type == "chi") and all(grid_obj["wrap"]):
+        # Wrap chi angles to [0, 360) or [-180, 180) depending on residue type
+        coords = wrap_chis(resname_tag, coords_deg, symmetry=True)
+
     interp_func = RegularGridInterpolator(
-        tuple(axes), grid_obj["grid"], bounds_error=False, fill_value=np.nan
+        tuple(grid_obj["axes"]), grid_obj["grid"], bounds_error=False, fill_value=np.nan
     )
     return float(interp_func(coords)[0]), coords
 
@@ -620,10 +693,10 @@ def check_rotamer(
             "classification": "FAVORED",
             "error": "no chis computable",
         }
-
+    resname_tag=grid_residue_map.get(resname)
     grid_obj = load_contour_grid_for_residue(
         grid_dirname="Top8000_rotamer_pct_contour_grids",
-        resname_tag=grid_residue_map.get(resname),
+        resname_tag=resname_tag,
         grid_data_tag="rota8000",
         files_to_skip=("rota8000-leu-raw.data",),  # Use rota8000-leu.data instead
     )
@@ -633,12 +706,11 @@ def check_rotamer(
     for i in range(len(grid_obj["axes"])):
         coords_list.append(observed.get(f"chi{i + 1}", 0.0))
 
-    pct, wrapped_angles = interp_wrapped(grid_obj, coords_list)
+    pct, wrapped_angles = interp_wrapped(resname_tag, grid_obj, coords_list, "chi")
     observed = {f"chi{i + 1}": wrapped_angles[i] for i in range(len(wrapped_angles))}
 
     if np.isnan(pct):
-        #classification = "UNKNOWN"
-        classification = "OUTLIER"
+        classification = "FAVORED"
 
     elif pct >= ROTA_ALLOWED_THRESHOLD:
         classification = "FAVORED"
@@ -808,7 +880,8 @@ def check_rama(
 
     # Build coords in same order as grid dims
     coords_list = [phi, psi]
-    pct, wrapped_coords = interp_wrapped(grid_obj, coords_list)
+    pct, wrapped_coords = interp_wrapped(resname_tag, grid_obj, coords_list, "phi-psi")
+
     if resname_tag == "general":
         if pct >= RAMA_GENERAL_ALLOWED_THRESHOLD:
             classification = "ALLOWED"
