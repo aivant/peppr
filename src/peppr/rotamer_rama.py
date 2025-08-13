@@ -426,11 +426,14 @@ def load_contour_grid_text(resname_grid_data: Path | Any) -> dict[str, Any]:
     # Build coordinate arrays (bin centers)
     axes_coords = []
     wraps = []
+    steps = []
     for low, high, nbins, wrap in axes_meta:
         step = (high - low) / nbins
         centers = np.linspace(low + step / 2, high - step / 2, nbins)
+        #centers = np.linspace(low, high, nbins)
         axes_coords.append(centers)
         wraps.append(wrap)
+        steps.append(step)
 
     # Prepare empty grid
     shape = [meta[2] for meta in axes_meta]
@@ -458,6 +461,7 @@ def load_contour_grid_text(resname_grid_data: Path | Any) -> dict[str, Any]:
         "axes": axes_coords,
         "wrap": wraps,
         "span": np.array([am[:2] for am in axes_meta]),
+        "steps": steps,
     }
 
 
@@ -594,6 +598,17 @@ def load_all_contour_grid_from_pickle(
     return data
 
 
+def truncate_angles_within_a_step_of_grid_span(coord, low, high, step):
+    # Handle edge cases
+    if coord < low:
+        if abs(coord - low) < step:
+            return coord - low
+    elif coord > high:
+        if abs(coord - high) < step:
+            return coord - high
+    return coord
+
+
 def interp_wrapped(
     resname_tag: str,
     grid_obj: dict[str, np.ndarray],
@@ -635,6 +650,11 @@ def interp_wrapped(
     interp_func = RegularGridInterpolator(
         tuple(grid_obj["axes"]), grid_obj["grid"], bounds_error=False, fill_value=np.nan
     )
+    if interp_func(coords)[0] is np.nan:
+        LOG.warning(
+            f"Interpolated value is NaN for residue {resname_tag} at coords {coords}. Check if coords are within grid span {grid_obj['span']}."
+        )
+
     return float(interp_func(coords)[0]), coords
 
 
@@ -701,6 +721,11 @@ def check_rotamer(
     coords_list = []
     for i in range(len(grid_obj["axes"])):
         coords_list.append(observed.get(f"chi{i + 1}", 0.0))
+
+    coords_list = [
+        truncate_angles_within_a_step_of_grid_span(coord, grid_obj['axes'][i][0], grid_obj['axes'][i][-1], grid_obj["steps"][i])
+        for i, coord in enumerate(coords_list)
+    ]
 
     pct, wrapped_angles = interp_wrapped(resname_tag, grid_obj, coords_list, "chi")
     observed = {f"chi{i + 1}": wrapped_angles[i] for i in range(len(wrapped_angles))}
