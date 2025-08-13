@@ -106,7 +106,7 @@ def get_mmtbx_neg180_to_180_value(
         angle_deg -= -360
     elif angle_deg <= -180:
         angle_deg += 360
-    assert -180 <= angle_deg < 180, "Angle must be in the range [-180, 180)"
+    assert -180 <= angle_deg <= 180, f"Angle must be in the range [-180, 180), but we got {angle_deg}"
     return angle_deg
 
 
@@ -640,12 +640,20 @@ def interp_wrapped(
         raise ValueError(
             f"Invalid coords_type: {coords_type}. Expected 'phi-psi' or 'chi'."
         )
+    if np.isnan(coords_deg).any():
+        return np.nan, coords_deg
+
     if (coords_type == "phi-psi") and all(grid_obj["wrap"]):
         # Wrap phi and psi angles to [-180, 180)
         coords = wrap_phi_psi(coords_deg[0], coords_deg[1])
     elif (coords_type == "chi") and all(grid_obj["wrap"]):
         # Wrap chi angles to [0, 360) or [-180, 180) depending on residue type
         coords = wrap_chis(resname_tag, coords_deg, symmetry=True)
+
+    coords = [
+        truncate_angles_within_a_step_of_grid_span(coord, grid_obj['axes'][i][0], grid_obj['axes'][i][-1], grid_obj["steps"][i])
+        for i, coord in enumerate(coords)
+    ]
 
     interp_func = RegularGridInterpolator(
         tuple(grid_obj["axes"]), grid_obj["grid"], bounds_error=False, fill_value=np.nan
@@ -722,16 +730,11 @@ def check_rotamer(
     for i in range(len(grid_obj["axes"])):
         coords_list.append(observed.get(f"chi{i + 1}", 0.0))
 
-    coords_list = [
-        truncate_angles_within_a_step_of_grid_span(coord, grid_obj['axes'][i][0], grid_obj['axes'][i][-1], grid_obj["steps"][i])
-        for i, coord in enumerate(coords_list)
-    ]
-
     pct, wrapped_angles = interp_wrapped(resname_tag, grid_obj, coords_list, "chi")
     observed = {f"chi{i + 1}": wrapped_angles[i] for i in range(len(wrapped_angles))}
 
     if np.isnan(pct):
-        classification = "FAVORED"
+        classification = "FAVORED" # ALA and GLY have no chi angles
 
     elif pct >= ROTA_ALLOWED_THRESHOLD:
         classification = "FAVORED"
@@ -902,7 +905,6 @@ def check_rama(
     # Build coords in same order as grid dims
     coords_list = [phi, psi]
     pct, wrapped_coords = interp_wrapped(resname_tag, grid_obj, coords_list, "phi-psi")
-
     if resname_tag == "general":
         if pct >= RAMA_GENERAL_ALLOWED_THRESHOLD:
             classification = "ALLOWED"
