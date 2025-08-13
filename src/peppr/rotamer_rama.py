@@ -690,7 +690,7 @@ def check_rotamer(
             "chain_id": chain_id,
             "observed": observed,
             "rotamer_score_pct": 1.0,  # ALA and GLY have no chi angles
-            "classification": "FAVORED",
+            "classification": "UNKNOWN",
             "error": "no chis computable",
         }
     resname_tag=grid_residue_map.get(resname)
