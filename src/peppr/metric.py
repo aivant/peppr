@@ -856,7 +856,10 @@ class BondAngleViolations(Metric):
             return np.nan
 
         # Idealize the pose local geometry to make the reference
-        reference = idealize_bonds(pose)
+        try:
+            reference = idealize_bonds(pose)
+        except struc.BadStructureError:
+            return np.nan
 
         # Check the angle of all bonded triples
         bonded_triples = graph_to_connected_triples(reference.bonds.as_graph())
