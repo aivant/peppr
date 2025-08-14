@@ -511,20 +511,22 @@ def test_exhaustive_mappings():
     reference = peppr.standardize(reference)
     _annotate_atom_order(reference)
     pose = reference.copy()
-    test_mappings = list(peppr.find_all_matches(reference, pose))
+
+    # Only save the matched `atom_id` annotation for each match,
+    # as otherwise a lot of memory would be used for the test
+    # Also use a memory efficient (and also hashable) representation of the integers
+    # -> use 'tobytes()'
+    test_mappings = [
+        (
+            matched_reference.atom_id.tobytes(),
+            matched_pose.atom_id.tobytes(),
+        )
+        for matched_reference, matched_pose in peppr.find_all_matches(reference, pose)
+    ]
 
     assert len(test_mappings) == N_MAPPINGS
     # All mappings should be unique
-    test_mappings_set = set(
-        [
-            (
-                tuple(matched_reference.atom_id.tolist()),
-                tuple(matched_pose.atom_id.tolist()),
-            )
-            for matched_reference, matched_pose in test_mappings
-        ]
-    )
-    assert len(test_mappings_set) == len(test_mappings)
+    assert len(set(test_mappings)) == len(test_mappings)
 
 
 def _annotate_atom_order(atoms):
