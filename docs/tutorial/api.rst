@@ -86,15 +86,18 @@ and returns a scalar value.
     print(lddt_metric.evaluate(ref, pose))
 
 Note that :meth:`Metric.evaluate()` requires that the reference and pose have matching
-atoms, i.e. ``ref[i]`` and ``pose[i]`` should point to corresponding atoms.
-If this is not the case, you can use :func:`find_optimal_match()` to get indices that
-bring the atoms into the correct order.
+atoms.
+This means that both `AtomArray` objects need to have a `matched` annotation that
+filters corresponding atoms, i.e. ``ref[ref.matched][i]`` and ``pose[pose.matched][i]``
+should point to corresponding atoms.
+You can use :func:`find_optimal_match()` to get matched structures.
 
 .. jupyter-execute::
 
-    ref_indices, pose_indices = peppr.find_optimal_match(ref, pose)
-    ref = ref[ref_indices]
-    pose = pose[pose_indices]
+    import numpy as np
+
+    ref, pose = peppr.find_optimal_match(ref, pose)
+    print(np.count_nonzero(ref.matched), np.count_nonzero(pose.matched))
 
 Some metrics may not be defined for a given system.
 For example, if we remove the second protein chain from the current system, the
