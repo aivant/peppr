@@ -963,7 +963,7 @@ class RotamerScore(BaseModel):
             )
             return cls(rotamer_scores=[])
         atom_array = atom_array[
-            struc.filter_amino_acids(atom_array) & ~atom_array.hetero
+            struc.filter_canonical_amino_acids(atom_array) & ~atom_array.hetero
         ]
         if atom_array.array_length == 0:
             LOG.warning(
