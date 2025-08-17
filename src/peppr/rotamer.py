@@ -584,10 +584,8 @@ def _generate_contour_grids_data(
             1
         ].lower()  # e.g. "rota8000-arg.data" -> "arg"
 
-        print(f"Generating contour grid for {grid_file.stem}...")
         tmp_contour = _load_contour_grid_text(grid_file)
         if tmp_contour is None:
-            warnings.warn(f"No contour grid found for {grid_file.stem}, skipping.")
             continue
         data_dict[resname_tag] = tmp_contour
     with open(output_path, "wb") as f:
@@ -618,9 +616,6 @@ def _load_all_contour_grid_from_pickle(
     """
     contour_path = _ROTAMER_DIR / f"{grid_dirname}.pkl"
     if not contour_path.exists():
-        warnings.warn(
-            f"Contour grids pickle file {contour_path} does not exist. Generating..."
-        )
         _generate_contour_grids_data(
             grid_dirname=grid_dirname,
             grid_data_tag=grid_data_tag,
