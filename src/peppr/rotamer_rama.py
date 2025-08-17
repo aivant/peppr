@@ -260,12 +260,13 @@ def get_residue_chis(
     for i, atom_tuple in enumerate(CHI_DEFS[resname], start=1):
         try:
             p = [coords[a] for a in atom_tuple]
+        except KeyError as e:
+            warnings.warn(f"Skipping chi angle {i} for residue {resname}: {e} due to missing atoms")
+            # Skip if any atom is missing
+            continue
+        else:
             ang = math.degrees(struc.dihedral(*p))
             chis[f"chi{i}"] = ang
-        except Exception as e:
-            LOG.warning(f"Failed to compute chi angle {i} for residue {resname}: {e}")
-            # Skip if any atom is missing
-            pass
     return chis
 
 
