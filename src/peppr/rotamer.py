@@ -110,12 +110,8 @@ class DihedralScore:
     .. [1] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
     """
 
-    pct: float = field(metadata={"description": "Percentile score"})
-    classification: ConformerClass = field(
-        metadata={
-            "description": "Classification of the score (e.g., FAVORED, ALLOWED, OUTLIER)"
-        }
-    )
+    pct: float
+    classification: ConformerClass
 
 
 def _get_mmtbx_neg180_to_180_value(angle_deg: float) -> float:
@@ -449,7 +445,6 @@ def _load_contour_grid_text(resname_grid_data: Path | Any) -> dict[str, Any]:
         if ln.lower().startswith("# number of dimensions"):
             continue
         elif ln.strip().startswith("#   x"):
-            # Format: "#   x1: 0.0  360.0  36 true"
             parts = ln.split(":")[1].split()
             low, high, nbins, wrap = (
                 float(parts[0]),
@@ -468,7 +463,6 @@ def _load_contour_grid_text(resname_grid_data: Path | Any) -> dict[str, Any]:
     for low, high, nbins, wrap in axes_meta:
         step = (high - low) / nbins
         centers = np.linspace(low + step / 2, high - step / 2, nbins)
-        # centers = np.linspace(low, high, nbins)
         axes_coords.append(centers)
         wraps.append(wrap)
         steps.append(step)
@@ -820,7 +814,6 @@ def _check_rotamer(
         coords_list.append(observed[i] if i < len(observed) else 0.0)
 
     pct, wrapped_angles = _interp_wrapped(resname_tag, grid_obj, coords_list, "chi")
-    # observed = {f"chi{i + 1}": wrapped_angles[i] for i in range(len(wrapped_angles))}
 
     if np.isnan(pct):
         classification = (
