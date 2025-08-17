@@ -57,7 +57,7 @@ from peppr.dockq import (
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
 from peppr.match import find_matching_centroids, find_optimal_match
-from peppr.rotamer_rama import (
+from peppr.rotamer import (
     get_fraction_of_rama_outliers,
     get_fraction_of_rotamer_outliers,
 )

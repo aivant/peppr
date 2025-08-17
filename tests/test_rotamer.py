@@ -3,13 +3,13 @@ import biotite.structure.io as strucio
 import numpy as np
 import pytest
 from biotite import structure as struc
-from peppr.rotamer_rama import (
+from peppr.rotamer import (
     RamaScore,
-    check_rama,
-    check_rotamer,
-    get_residue_chis,
-    get_residue_phi_psi_omega,
-    interp_wrapped,
+    _check_rama,
+    _check_rotamer,
+    _get_residue_chis,
+    _get_residue_phi_psi_omega,
+    _interp_wrapped,
 )
 
 
@@ -57,14 +57,14 @@ def test_interp_wrapped_basic(fake_2d_grid):
     grid = grid_obj["grid"]
 
     # Case 1: exact grid point (90°, 180°)
-    val_exact, _ = interp_wrapped("gln", grid_obj, [90.0, 180.0], "chi")
+    val_exact, _ = _interp_wrapped("gln", grid_obj, [90.0, 180.0], "chi")
     expected_exact = grid[1, 2]  # row 1, col 2
     assert np.isclose(val_exact, expected_exact), (
         f"Expected {expected_exact}, got {val_exact}"
     )
 
     # Case 2: wrapping test: 450° for χ1 wraps to 90°, should give same as (90°, 180°)
-    val_wrapped, _ = interp_wrapped("glu", grid_obj, [450.0, 180.0], "chi")
+    val_wrapped, _ = _interp_wrapped("glu", grid_obj, [450.0, 180.0], "chi")
     assert np.isclose(val_wrapped, expected_exact), (
         f"Expected {expected_exact} for wrapped input, got {val_wrapped}"
     )
@@ -72,7 +72,7 @@ def test_interp_wrapped_basic(fake_2d_grid):
     # Case 3: midpoint interpolation: (45°, 45°)
     # Between (0,0) = 0.0, (0,90) = 1.0, (90,0) = 1.0, (90,90) = 2.0
     # Bilinear interpolation should give 1.0
-    val_mid, _ = interp_wrapped("leu", grid_obj, [45.0, 45.0], "chi")
+    val_mid, _ = _interp_wrapped("leu", grid_obj, [45.0, 45.0], "chi")
     assert np.isclose(val_mid, 1.0), f"Expected 1.0, got {val_mid}"
 
 
