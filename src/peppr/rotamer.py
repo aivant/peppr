@@ -113,7 +113,7 @@ class DihedralScore:
     )
 
 
-def _get_mmtbx_neg180_to_180_value(angle_deg: float | np.ndarray) -> float | np.ndarray:
+def _get_mmtbx_neg180_to_180_value(angle_deg: float) -> float:
     """
     Convert phi and psi angles to the range [-180, 180).
     Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
@@ -140,7 +140,7 @@ def _get_mmtbx_neg180_to_180_value(angle_deg: float | np.ndarray) -> float | np.
     return angle_deg
 
 
-def _wrap_phi_psi(phi: float, psi: float) -> list[float]:
+def _wrap_phi_psi(phi: float, psi: float) -> tuple[float, float ]:
     """
     Wrap phi and psi angles to the range [-180, 180).
     Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
@@ -157,7 +157,7 @@ def _wrap_phi_psi(phi: float, psi: float) -> list[float]:
     tuple
         A tuple containing the converted phi and psi angles.
     """
-    return [_get_mmtbx_neg180_to_180_value(phi), _get_mmtbx_neg180_to_180_value(psi)]
+    return _get_mmtbx_neg180_to_180_value(phi), _get_mmtbx_neg180_to_180_value(psi)
 
 
 def _wrap_symmetrical(residue_tag: str, wrapped_chis: list) -> list:
@@ -187,7 +187,7 @@ def _wrap_symmetrical(residue_tag: str, wrapped_chis: list) -> list:
     return wrapped_chis
 
 
-def _wrap_chis(residue_tag: str, chis: list, symmetry=True) -> list:
+def _wrap_chis(residue_tag: str, chis: list, symmetry: bool =True) -> list[float]:
     """
     Wrap chi angles to the range [0, 360) or [-180, 180) depending on the residue type.
     Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/rotamer/rotamer_eval.py#L368
@@ -261,6 +261,7 @@ def _download_and_extract(url: str, dest_path: Path | None = None) -> Path:
             with tarfile.open(dest_path, "r:gz") as tar_ref:
                 tar_ref.extractall(dest_path.parent)
             return dest_path.parent
+    return dest_path.parent
 
 
 def _get_residue_chis(
@@ -625,7 +626,7 @@ def _load_all_contour_grid_from_pickle(
     return data
 
 
-def _truncate_angles_within_a_step_of_grid_span(coord, low, high, step):
+def _truncate_angles_within_a_step_of_grid_span(coord: float, low: float, high: float, step: float) -> float:
     # Handle edge cases
     if coord < low:
         if abs(coord - low) < step:
@@ -636,7 +637,7 @@ def _truncate_angles_within_a_step_of_grid_span(coord, low, high, step):
     return coord
 
 
-def _identify_gaps_in_atom_array(atom_array: struc.AtomArray) -> str:
+def _identify_gaps_in_atom_array(atom_array: struc.AtomArray) -> list[tuple[str, int, int]]:
     """
     Identify gaps in the atom array based on missing atoms or residues.
 
@@ -706,11 +707,11 @@ def _interp_wrapped(
 
     if (coords_type == "phi-psi") and all(grid_obj["wrap"]):
         # Wrap phi and psi angles to [-180, 180)
-        coords = _wrap_phi_psi(coords_deg[0], coords_deg[1])
+        coords = list(_wrap_phi_psi(coords_deg[0], coords_deg[1]))
 
     elif (coords_type == "chi") and all(grid_obj["wrap"]):
         # Wrap chi angles to [0, 360) or [0, 180) depending on residue type
-        coords = _wrap_chis(resname_tag, coords_deg, symmetry=True)
+        coords = list(_wrap_chis(resname_tag, coords_deg, symmetry=True))
 
     coords = [
         _truncate_angles_within_a_step_of_grid_span(
@@ -767,7 +768,7 @@ def _check_rotamer(
         ), observed
 
     resname_tag = (
-        getattr(RotamerGridResidueMap, resname, None).value
+        getattr(RotamerGridResidueMap, resname).value
         if resname in RotamerGridResidueMap.__members__
         else None
     )
@@ -808,7 +809,7 @@ def _check_rotamer(
     return DihedralScore(pct=pct, classification=classification), observed
 
 
-def _classify_rotamers(atom_array: struc.AtomArray) -> "RotamerScore":
+def _classify_rotamers(atom_array: struc.AtomArray) -> list["ResidueRotamerScore"]:
     """
     Create ResidueRotamerScore from a protein structure.
 
@@ -839,7 +840,7 @@ def _classify_rotamers(atom_array: struc.AtomArray) -> "RotamerScore":
             "RotamerScore: Cannot be computed; atom_array must contain at least one residue"
         )
         return []
-    rotamer_scores = []
+    rotamer_scores: list[ResidueRotamerScore] = []
     for chain_id in struc.get_chains(atom_array):
         # Filter atoms for the current chain
         chain_arr = atom_array[atom_array.chain_id == chain_id]
@@ -863,7 +864,7 @@ def _classify_rotamers(atom_array: struc.AtomArray) -> "RotamerScore":
     return rotamer_scores
 
 
-def _get_residue_phi_psi_omega(atom_array: struc.AtomArray) -> dict:
+def _get_residue_phi_psi_omega(atom_array: struc.AtomArray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Get the phi, psi, and omega dihedral angles for a given residue.
 
@@ -920,7 +921,7 @@ def _is_cislike_peptide(omega: float) -> bool:
     return False
 
 
-def _assign_rama_types(atom_array: struc.AtomArray) -> dict:
+def _assign_rama_types(atom_array: struc.AtomArray) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
     """
     Assign Ramachandran types to residues based on their phi, psi, and omega angles.
 
@@ -950,7 +951,7 @@ def _assign_rama_types(atom_array: struc.AtomArray) -> dict:
 
     def rama_type(
         res_name: str, next_res_name: str, omega_val: float
-    ) -> RamaResidueType:
+    ) -> str:
         if res_name == "GLY":
             return RamaResidueType.GLY.value
         elif res_name == "PRO":
@@ -980,7 +981,7 @@ def _check_rama(
     phi: float,
     psi: float,
     resname_tag: str,
-) -> dict[str, Any]:
+) -> "DihedralScore":
     """
     Check the Ramachandran classification for a given residue based on its phi, psi, and omega angles.
 
@@ -1048,7 +1049,7 @@ def _check_rama(
 
 def _classify_phi_psi(
     atom_array: struc.AtomArray,
-) -> "RamaScore":
+) -> list["ResidueRamaScore"]:
     """
     Create RamaScore from a protein structure.
 
@@ -1293,7 +1294,6 @@ class ResidueRamaScore:
         resname_tag: str,
     ) -> "ResidueRamaScore":
         result = _check_rama(phi, psi, resname_tag)
-        # result["resname_tag"] = resname_tag
         return cls(
             res_id=res_id,
             res_name=res_name,
