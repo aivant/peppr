@@ -34,10 +34,11 @@ _RAMA_ALLOWED_THRESHOLD = 0.001
 _RAMA_GENERAL_ALLOWED_THRESHOLD = 0.0005
 _RAMA_CISPRO_ALLOWED_THRESHOLD = 0.0020
 
+
 class RamaResidueType(Enum):
     """
     Enum for residue types used in the Ramachandran library.
-    This enum defines the types of residues that can be used in the Ramachandran library.
+    This enum defines the types of residues that can be used with the Ramachandran phi/psi grid data.
     """
 
     GLY = "gly"
@@ -50,7 +51,7 @@ class RamaResidueType(Enum):
 
 class RotamerGridResidueMap(Enum):
     """
-    Enum for residue names used in the rotamer library.
+    Enum for residue names used in the rotamer (chi angles) grid data.
     This enum maps residue names to their corresponding tags used in the rotamer library.
     """
 
@@ -80,6 +81,10 @@ class ConformerClass(IntEnum):
     """
     Enum for conformer classification types.
     This enum defines the possible classifications for different conformations.
+
+    References
+    ----------
+    .. [1] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
     """
 
     FAVORED = 1
@@ -120,15 +125,13 @@ def _get_mmtbx_neg180_to_180_value(angle_deg: float) -> float:
 
     Parameters
     ----------
-    phi : float
-        The phi angle in degrees.
-    psi : float
-        The psi angle in degrees.
+    angle_deg : float
+        The angle in degrees.
 
     Returns
     -------
-    tuple
-        A tuple containing the converted phi and psi angles.
+    float
+        The converted angle in the range [-180, 180).
     """
     if angle_deg > 180:
         angle_deg -= 360
@@ -140,7 +143,7 @@ def _get_mmtbx_neg180_to_180_value(angle_deg: float) -> float:
     return angle_deg
 
 
-def _wrap_phi_psi(phi: float, psi: float) -> tuple[float, float ]:
+def _wrap_phi_psi(phi: float, psi: float) -> tuple[float, float]:
     """
     Wrap phi and psi angles to the range [-180, 180).
     Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
@@ -160,7 +163,7 @@ def _wrap_phi_psi(phi: float, psi: float) -> tuple[float, float ]:
     return _get_mmtbx_neg180_to_180_value(phi), _get_mmtbx_neg180_to_180_value(psi)
 
 
-def _wrap_symmetrical(residue_tag: str, wrapped_chis: list) -> list:
+def _wrap_symmetrical(residue_tag: str, wrapped_chis: list[float]) -> list[float]:
     """
     Apply symmetrical wrapping to chi angles for specific amino acids.
     Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/rotamer/rotamer_eval.py#L368
@@ -169,12 +172,12 @@ def _wrap_symmetrical(residue_tag: str, wrapped_chis: list) -> list:
     ----------
     residue_tag : str
         The residue tag (e.g., "asp", "glu", "phetyr").
-    wrapped_chis : list
+    wrapped_chis : list[float]
         The list of wrapped chi angles.
 
     Returns
     -------
-    list
+    list[float]
         The list of symmetrically wrapped chi angles.
     """
     residue_tag = residue_tag.lower()
@@ -187,7 +190,9 @@ def _wrap_symmetrical(residue_tag: str, wrapped_chis: list) -> list:
     return wrapped_chis
 
 
-def _wrap_chis(residue_tag: str, chis: list, symmetry: bool =True) -> list[float]:
+def _wrap_chis(
+    residue_tag: str, chis: list[float], symmetry: bool = True
+) -> list[float]:
     """
     Wrap chi angles to the range [0, 360) or [-180, 180) depending on the residue type.
     Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/rotamer/rotamer_eval.py#L368
@@ -196,14 +201,14 @@ def _wrap_chis(residue_tag: str, chis: list, symmetry: bool =True) -> list[float
     ----------
     residue_tag : str
         The residue tag (e.g., "asp", "glu", "phetyr").
-    chis : list
+    chis : list[float]
         The list of chi angles.
     symmetry : bool
         Whether to apply symmetrical wrapping.
 
     Returns
     -------
-    list
+    list[float]
         The list of wrapped chi angles.
     """
     residue_tag = residue_tag.lower()
@@ -266,7 +271,7 @@ def _download_and_extract(url: str, dest_path: Path | None = None) -> Path:
 
 def _get_residue_chis(
     atom_array: struc.AtomArray, res_id_mask: np.ndarray
-) -> dict[str, float]:
+) -> list[float]:
     """
     Compute the chi angles for a given residue.
 
@@ -279,8 +284,8 @@ def _get_residue_chis(
 
     Returns
     -------
-    dict
-        A dictionary with chi angles, e.g. `{'chi1': angle_deg, 'chi2': angle_deg, ...}`.
+    tuple[float]
+        A tuple of chi angles (chi1, chi2, chi3, chi4). Missing chis will be omitted.
 
     Notes
     -----
@@ -353,7 +358,7 @@ def _get_residue_chis(
     }
     # detect residue type name
     resname = res_atoms.res_name[0].upper()
-    chis: dict[str, float] = {}
+    chis: list[float] = []
     if resname not in CHI_DEFS:
         return chis
 
@@ -368,7 +373,7 @@ def _get_residue_chis(
             continue
         else:
             ang = math.degrees(struc.dihedral(*p))
-            chis[f"chi{i}"] = ang
+            chis.append(ang)
 
     return chis
 
@@ -626,7 +631,30 @@ def _load_all_contour_grid_from_pickle(
     return data
 
 
-def _truncate_angles_within_a_step_of_grid_span(coord: float, low: float, high: float, step: float) -> float:
+def _truncate_angles_within_a_step_of_grid_span(
+    coord: float, low: float, high: float, step: float
+) -> float:
+    """
+    Truncate an angle to be within a step of the grid span.
+    This function ensures that the coordinate is within the specified low and high bounds,
+    and if it is outside, it will return the closest bound if it is within one step of it.
+
+    Parameters
+    ----------
+    coord : float
+        The coordinate to truncate.
+    low : float
+        The lower bound of the grid span.
+    high : float
+        The upper bound of the grid span.
+    step : float
+        The step size of the grid.
+
+    Returns
+    -------
+    float
+        The truncated coordinate, which is either within the bounds or the closest bound if within one step.
+    """
     # Handle edge cases
     if coord < low:
         if abs(coord - low) < step:
@@ -637,7 +665,9 @@ def _truncate_angles_within_a_step_of_grid_span(coord: float, low: float, high: 
     return coord
 
 
-def _identify_gaps_in_atom_array(atom_array: struc.AtomArray) -> list[tuple[str, int, int]]:
+def _identify_gaps_in_atom_array(
+    atom_array: struc.AtomArray,
+) -> list[tuple[str, int, int]]:
     """
     Identify gaps in the atom array based on missing atoms or residues.
 
@@ -648,8 +678,11 @@ def _identify_gaps_in_atom_array(atom_array: struc.AtomArray) -> list[tuple[str,
 
     Returns
     -------
-    str
-        A description of the identified gaps.
+    list[tuple[str, int, int]]
+        A list of tuples where each tuple contains:
+        - chain ID (str)
+        - residue ID before the gap (int)
+        - residue ID after the gap (int)
     """
 
     # Sort atoms by chain + residue
@@ -733,7 +766,7 @@ def _interp_wrapped(
 
 def _check_rotamer(
     atom_array: struc.AtomArray, res_id: int, chain_id: str
-) -> tuple[DihedralScore, dict[str, float]] | None:
+) -> tuple[DihedralScore, list[float]]:
     """
     Check the rotamer classification for a given residue in the atom array.
 
@@ -748,7 +781,7 @@ def _check_rotamer(
 
     Returns
     -------
-    tuple[DihedralScore, dict[str, float]]
+    tuple[DihedralScore, list[float]]
         A tuple containing:
         - DihedralScore: The rotamer score and classification.
         - dict[str, float]: The observed chi angles for the residue.
@@ -789,10 +822,10 @@ def _check_rotamer(
     # Build coords in same order as grid dims
     coords_list = []
     for i in range(len(grid_obj["axes"])):
-        coords_list.append(observed.get(f"chi{i + 1}", 0.0))
+        coords_list.append(observed[i] if i < len(observed) else 0.0)
 
     pct, wrapped_angles = _interp_wrapped(resname_tag, grid_obj, coords_list, "chi")
-    observed = {f"chi{i + 1}": wrapped_angles[i] for i in range(len(wrapped_angles))}
+    # observed = {f"chi{i + 1}": wrapped_angles[i] for i in range(len(wrapped_angles))}
 
     if np.isnan(pct):
         classification = (
@@ -806,7 +839,83 @@ def _check_rotamer(
     else:
         classification = ConformerClass.OUTLIER
 
-    return DihedralScore(pct=pct, classification=classification), observed
+    return DihedralScore(pct=pct, classification=classification), wrapped_angles
+
+
+@dataclass
+class ResidueRotamerScore:
+    """
+    Rotamer score for a residue in a protein structure.
+
+    This class represents the rotamer score for a single residue, including its name,
+    ID, observed chi angles, rotamer score percentage, and classification.
+
+    Attributes
+    ----------
+    resname : str
+        The name of the residue (e.g. "ARG", "LEU").
+    resid : int
+        The ID of the residue in the structure.
+    chain_id : str
+        The chain ID of the residue.
+    angles : dict[str, float]
+        A dictionary containing the observed chi angles for the residue, e.g. {'chi1': 60.0, 'chi2': -45.0}.
+    pct : float
+        The rotamer score percentage for the residue, e.g. 0.01 for 1% favored.
+    classification : ConformerClass
+        The classification of the residue based on its rotamer score percentage.
+        It can be one of the following:
+        - "FAVORED": The residue is in a favored rotamer conformation.
+        - "ALLOWED": The residue is in an allowed rotamer conformation.
+        - "OUTLIER": The residue is in an outlier rotamer conformation.
+        - "UNKNOWN": The residue's rotamer score could not be determined.
+
+    References
+    ----------
+    .. [1] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
+    """
+
+    res_name: str
+    res_id: int
+    chain_id: str
+    angles: dict[str, float]
+    pct: float
+    classification: ConformerClass
+
+    @classmethod
+    def from_residue(
+        cls, atom_array: struc.AtomArray, res_id: int, res_name: str, chain_id: str
+    ) -> "ResidueRotamerScore":
+        """
+        Create ResidueRotamerScore from a residue object.
+
+        Parameters
+        ----------
+        atom_array : struc.AtomArray
+            The structure.
+        res_id : int
+            The residue ID to check.
+        res_name : str
+            The residue name to check (e.g. "ARG", "LEU").
+        chain_id : str
+            The chain ID to check.
+
+        Returns
+        -------
+        ResidueRotamerScore
+            An instance of ResidueRotamerScore containing the rotamer score for the residue.
+        """
+        result = _check_rotamer(atom_array, res_id, chain_id)
+        score, angles = result
+        chis = {f"chi{i + 1}": ang for i, ang in enumerate(angles)}
+
+        return cls(
+            res_name=res_name,
+            res_id=res_id,
+            chain_id=chain_id,
+            angles=chis,
+            **asdict(score),
+        )
 
 
 def _classify_rotamers(atom_array: struc.AtomArray) -> list["ResidueRotamerScore"]:
@@ -864,7 +973,66 @@ def _classify_rotamers(atom_array: struc.AtomArray) -> list["ResidueRotamerScore
     return rotamer_scores
 
 
-def _get_residue_phi_psi_omega(atom_array: struc.AtomArray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+@dataclass
+class RotamerScore:
+    """
+    Rotamer score for a given protein structure.
+    This class represents the rotamer scores for all residues in a protein structure,
+    including their names, IDs, observed chi angles, rotamer score percentages, and classifications.
+
+    It is used to assess the quality of the protein structure based on the rotamer conformations
+    and to identify potential outliers in the rotamer angles.
+
+    Attributes
+    ----------
+    rotamer_scores : list[ResidueRotamerScore]
+        A list of ResidueRotamerScore objects, each representing the rotamer score for a residue in the structure.
+        Each ResidueRotamerScore contains the residue name, residue ID, chain ID,
+        observed chi angles, rotamer score percentage, classification, and any error message.
+        The classification can be one of the following:
+        - "FAVORED": The residue is in a favored rotamer conformation.
+        - "ALLOWED": The residue is in an allowed rotamer conformation.
+        - "OUTLIER": The residue is in an outlier rotamer conformation.
+        - "UNKNOWN": The residue's rotamer score could not be determined.
+
+    References
+    ----------
+    .. [1] http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
+    .. [2] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
+    """
+
+    rotamer_scores: list[ResidueRotamerScore] = field(
+        default_factory=list,
+        metadata={
+            "description": "List of rotamer scores for each residue in the structure."
+        },
+    )
+
+    @classmethod
+    def from_atoms(cls, atom_array: struc.AtomArray) -> "RotamerScore":
+        """
+        Create RotamerScore from a protein structure or a stack of structures.
+
+        Parameters
+        ----------
+        atom_array : struc.AtomArray | struc.AtomArrayStack
+            The AtomArray or AtomArrayStack containing the structure(s).
+
+        Returns
+        -------
+        RotamerScore
+            An instance of RotamerScore containing the rotamer scores for the structure(s).
+        """
+        if isinstance(atom_array, struc.AtomArray):
+            rotamers_scores = _classify_rotamers(atom_array)
+            return cls(rotamer_scores=rotamers_scores)
+        else:
+            raise TypeError("atom_array must be an AtomArray")
+
+
+def _get_residue_phi_psi_omega(
+    atom_array: struc.AtomArray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Get the phi, psi, and omega dihedral angles for a given residue.
 
@@ -921,7 +1089,9 @@ def _is_cislike_peptide(omega: float) -> bool:
     return False
 
 
-def _assign_rama_types(atom_array: struc.AtomArray) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
+def _assign_rama_types(
+    atom_array: struc.AtomArray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
     """
     Assign Ramachandran types to residues based on their phi, psi, and omega angles.
 
@@ -949,9 +1119,7 @@ def _assign_rama_types(atom_array: struc.AtomArray) -> tuple[np.ndarray, np.ndar
         1:-1
     ]  # Shifted by -1, remove first and last
 
-    def rama_type(
-        res_name: str, next_res_name: str, omega_val: float
-    ) -> str:
+    def rama_type(res_name: str, next_res_name: str, omega_val: float) -> str:
         if res_name == "GLY":
             return RamaResidueType.GLY.value
         elif res_name == "PRO":
@@ -1047,6 +1215,44 @@ def _check_rama(
     return DihedralScore(pct=pct, classification=classification)
 
 
+@dataclass
+class ResidueRamaScore:
+    """
+    Ramachandran score for a residue in a protein structure.
+    This class represents the ramachandran score for a single residue, including its name,
+    ID, observed phi, psi, omega angles, Ramachandran score percentage, and classification.
+    """
+
+    res_name: str
+    res_id: int
+    chain_id: str
+    resname_tag: str
+    angles: dict[str, float]
+    pct: float
+    classification: ConformerClass
+
+    @classmethod
+    def from_phi_psi_omega(
+        cls,
+        phi: float,
+        psi: float,
+        omega: float,
+        res_id: int,
+        res_name: str,
+        chain_id: str,
+        resname_tag: str,
+    ) -> "ResidueRamaScore":
+        result = _check_rama(phi, psi, resname_tag)
+        return cls(
+            res_id=res_id,
+            res_name=res_name,
+            resname_tag=resname_tag,
+            chain_id=chain_id,
+            **asdict(result),
+            angles={"phi": phi, "psi": psi, "omega": omega},
+        )
+
+
 def _classify_phi_psi(
     atom_array: struc.AtomArray,
 ) -> list["ResidueRamaScore"]:
@@ -1120,188 +1326,6 @@ def _classify_phi_psi(
             )
 
     return rama_scores
-
-
-@dataclass
-class ResidueRotamerScore:
-    """
-    Rotamer score for a residue in a protein structure.
-
-    This class represents the rotamer score for a single residue, including its name,
-    ID, observed chi angles, rotamer score percentage, and classification.
-
-    Attributes
-    ----------
-    resname : str
-        The name of the residue (e.g. "ARG", "LEU").
-    resid : int
-        The ID of the residue in the structure.
-    chain_id : str
-        The chain ID of the residue.
-    angles : dict[str, float]
-        A dictionary containing the observed chi angles for the residue, e.g. {'chi1': 60.0, 'chi2': -45.0}.
-    pct : float
-        The rotamer score percentage for the residue, e.g. 0.01 for 1% favored.
-    classification : ConformerClass
-        The classification of the residue based on its rotamer score percentage.
-        It can be one of the following:
-        - "FAVORED": The residue is in a favored rotamer conformation.
-        - "ALLOWED": The residue is in an allowed rotamer conformation.
-        - "OUTLIER": The residue is in an outlier rotamer conformation.
-        - "UNKNOWN": The residue's rotamer score could not be determined.
-
-    References
-    ----------
-    .. [1] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
-    """
-
-    res_name: str
-    res_id: int
-    chain_id: str
-    angles: dict[str, float]
-    pct: float
-    classification: ConformerClass
-
-    @classmethod
-    def from_residue(
-        cls, atom_array: struc.AtomArray, res_id: int, res_name: str, chain_id: str
-    ) -> "ResidueRotamerScore":
-        """
-        Create ResidueRotamerScore from a residue object.
-
-        Parameters
-        ----------
-        atom_array : struc.AtomArray
-            The structure.
-        res_id : int
-            The residue ID to check.
-        res_name : str
-            The residue name to check (e.g. "ARG", "LEU").
-        chain_id : str
-            The chain ID to check.
-
-        Returns
-        -------
-        ResidueRotamerScore
-            An instance of ResidueRotamerScore containing the rotamer score for the residue.
-        """
-        result = _check_rotamer(atom_array, res_id, chain_id)
-        if result is None:
-            warnings.warn(
-                f"Rotamer classification not available for residue {res_name} with ID {res_id} in chain {chain_id}."
-            )
-            return cls(
-                res_name=res_name,
-                res_id=res_id,
-                chain_id=chain_id,
-                angles={},
-                pct=np.nan,
-                classification=ConformerClass.UNKNOWN,
-            )
-        score, angles = result
-
-        return cls(
-            res_name=res_name,
-            res_id=res_id,
-            chain_id=chain_id,
-            angles=angles,
-            **asdict(score),
-        )
-
-
-@dataclass
-class RotamerScore:
-    """
-    Rotamer score for a given protein structure.
-    This class represents the rotamer scores for all residues in a protein structure,
-    including their names, IDs, observed chi angles, rotamer score percentages, and classifications.
-
-    It is used to assess the quality of the protein structure based on the rotamer conformations
-    and to identify potential outliers in the rotamer angles.
-
-    Attributes
-    ----------
-    rotamer_scores : list[ResidueRotamerScore]
-        A list of ResidueRotamerScore objects, each representing the rotamer score for a residue in the structure.
-        Each ResidueRotamerScore contains the residue name, residue ID, chain ID,
-        observed chi angles, rotamer score percentage, classification, and any error message.
-        The classification can be one of the following:
-        - "FAVORED": The residue is in a favored rotamer conformation.
-        - "ALLOWED": The residue is in an allowed rotamer conformation.
-        - "OUTLIER": The residue is in an outlier rotamer conformation.
-        - "UNKNOWN": The residue's rotamer score could not be determined.
-
-    References
-    ----------
-    .. [1] http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
-    .. [2] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
-    """
-
-    rotamer_scores: list[ResidueRotamerScore] = field(
-        default_factory=list,
-        metadata={
-            "description": "List of rotamer scores for each residue in the structure."
-        },
-    )
-
-    @classmethod
-    def from_atoms(cls, atom_array: struc.AtomArray) -> "RotamerScore":
-        """
-        Create RotamerScore from a protein structure or a stack of structures.
-
-        Parameters
-        ----------
-        atom_array : struc.AtomArray | struc.AtomArrayStack
-            The AtomArray or AtomArrayStack containing the structure(s).
-
-        Returns
-        -------
-        RotamerScore
-            An instance of RotamerScore containing the rotamer scores for the structure(s).
-        """
-        if isinstance(atom_array, struc.AtomArray):
-            rotamers_scores = _classify_rotamers(atom_array)
-            return cls(rotamer_scores=rotamers_scores)
-        else:
-            raise TypeError("atom_array must be an AtomArray")
-
-
-@dataclass
-class ResidueRamaScore:
-    """
-    Ramachandran score for a residue in a protein structure.
-    This class represents the ramachandran score for a single residue, including its name,
-    ID, observed phi, psi, omega angles, Ramachandran score percentage, and classification.
-    """
-
-    res_name: str
-    res_id: int
-    chain_id: str
-    resname_tag: str
-    angles: dict[str, float]
-    pct: float
-    classification: ConformerClass
-
-    @classmethod
-    def from_phi_psi_omega(
-        cls,
-        phi: float,
-        psi: float,
-        omega: float,
-        res_id: int,
-        res_name: str,
-        chain_id: str,
-        resname_tag: str,
-    ) -> "ResidueRamaScore":
-        result = _check_rama(phi, psi, resname_tag)
-        return cls(
-            res_id=res_id,
-            res_name=res_name,
-            resname_tag=resname_tag,
-            chain_id=chain_id,
-            **asdict(result),
-            angles={"phi": phi, "psi": psi, "omega": omega},
-        )
 
 
 @dataclass
@@ -1425,27 +1449,3 @@ def get_fraction_of_rama_outliers(
                 outlier_rama += 1
             total_rama += 1
     return outlier_rama / total_rama if total_rama > 0 else 0.0
-
-
-if __name__ == "__main__":
-    # Example usage of the module
-    from biotite.structure import io as strucio
-
-    # Load a structure (replace with your own structure loading code)
-    atom_array = strucio.load_structure("/Users/yusuf/sample_pdbs/5nv2_B.cif")
-
-    # Calculate rotamer scores
-    # rotamer_scores = RotamerScore.from_atoms(atom_array)
-    # print(rotamer_scores)
-
-    # Calculate ramachandran scores
-    rama_scores = RamaScore.from_atoms(atom_array)
-    print(rama_scores)
-
-    # Get fraction of rotamer outliers
-    fraction_rot_outliers = get_fraction_of_rotamer_outliers(atom_array)
-    print(f"Fraction of rotamer outliers: {fraction_rot_outliers:.2f}")
-
-    # Get fraction of ramachandran outliers
-    fraction_rama_outliers = get_fraction_of_rama_outliers(atom_array)
-    print(f"Fraction of ramachandran outliers: {fraction_rama_outliers:.2f}")

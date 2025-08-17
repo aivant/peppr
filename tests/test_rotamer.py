@@ -204,9 +204,8 @@ def test_get_residue_chis(input_pose, residue_id, chi1, chi2):
     chis = _get_residue_chis(
         input_pose, (input_pose.res_id == residue_id) & (input_pose.chain_id == "A")
     )
-
-    assert np.isclose(chis["chi1"], chi1, atol=1e-1)
-    assert np.isclose(chis["chi2"], chi2, atol=1e-1)
+    assert np.isclose(chis[0], chi1, atol=1e-1)
+    assert np.isclose(chis[1], chi2, atol=1e-1)
 
 
 @pytest.mark.parametrize(
@@ -349,8 +348,8 @@ def test_check_rotamer(
     """
     result = _check_rotamer(atom_array=input_pose, res_id=residue_id, chain_id=chain_id)
     score, angles = result
-    assert np.isclose(angles["chi1"], chi_angles[0], atol=1e-2)
-    assert np.isclose(angles["chi2"], chi_angles[1], atol=1e-2)
+    assert np.isclose(angles[0], chi_angles[0], atol=1e-2)
+    assert np.isclose(angles[1], chi_angles[1], atol=1e-2)
     assert np.isclose(score.pct, pct, atol=1e-2)
     assert score.classification == classification
 
