@@ -24,70 +24,51 @@ from enum import Enum, IntEnum
 from scipy.interpolate import RegularGridInterpolator
 import tarfile
 import zipfile
-import namedtuple
 
-grid_residue_map = {
-    "ALA": None,
-    "GLY": None,  # ALA and GLY have no chi angles
-    "ARG": "arg",
-    "ASN": "asn",
-    "ASP": "asp",
-    "CYS": "cys",
-    "GLN": "gln",
-    "GLU": "glu",
-    "HIS": "his",
-    "ILE": "ile",
-    "LEU": "leu",
-    "LYS": "lys",
-    "MET": "met",
-    "PHE": "phetyr",
-    "PRO": "pro",
-    "SER": "ser",
-    "THR": "thr",
-    "TRP": "trp",
-    "TYR": "phetyr",
-    "VAL": "val",
-}
-
-grid_axex_span = {
-    "ARG": "arg",
-    "ASN": "asn",
-    "ASP": "asp",
-    "CYS": "cys",
-    "GLN": "gln",
-    "GLU": "glu",
-    "HIS": "his",
-    "ILE": "ile",
-    "LEU": "leu",
-    "LYS": "lys",
-    "MET": "met",
-    "PHE": "phetyr",
-    "PRO": "pro3d",
-    "SER": "ser",
-    "THR": "thr",
-    "TRP": "trp",
-    "TYR": "phetyr",
-    "VAL": "val",
-}
 _ROTAMER_BASE_DIR = Path.home() / ".local/share/top8000_lib"
 _ROTAMER_DIR = _ROTAMER_BASE_DIR / "reference_data-master" / "Top8000"
-
-
-ROTA_OUTLIER_THRESHOLD = 0.003
-ROTA_ALLOWED_THRESHOLD = 0.02
-RAMA_FAVORED_THRESHOLD = 0.02
-RAMA_ALLOWED_THRESHOLD = 0.001
-RAMA_GENERAL_ALLOWED_THRESHOLD = 0.0005
-RAMA_CISPRO_ALLOWED_THRESHOLD = 0.0020
-
+_ROTA_OUTLIER_THRESHOLD = 0.003
+_ROTA_ALLOWED_THRESHOLD = 0.02
+_RAMA_FAVORED_THRESHOLD = 0.02
+_RAMA_ALLOWED_THRESHOLD = 0.001
+_RAMA_GENERAL_ALLOWED_THRESHOLD = 0.0005
+_RAMA_CISPRO_ALLOWED_THRESHOLD = 0.0020
 
 class RamaResidueType(Enum):
+    """Enum for residue types used in the Ramachandran library.
+    This enum defines the types of residues that can be used in the Ramachandran library.
+    """
     GLY = "gly"
     CISPRO = "cispro"
     TRANSPRO = "transpro"
     PREPRO = "prepro"
     ILEVAL = "ileval"
     GENERAL = "general"
+
+class GridResidueMap(Enum):
+    """Enum for residue names used in the rotamer library.
+    This enum maps residue names to their corresponding tags used in the rotamer library.
+    """
+    #ALA = None
+    #GLY = None  # ALA and GLY have no chi angles
+    ARG = "arg"
+    ASN = "asn"
+    ASP = "asp"
+    CYS = "cys"
+    GLN = "gln"
+    GLU = "glu"
+    HIS = "his"
+    ILE = "ile"
+    LEU = "leu"
+    LYS = "lys"
+    MET = "met"
+    PHE = "phetyr"
+    PRO = "pro"
+    SER = "ser"
+    THR = "thr"
+    TRP = "trp"
+    TYR = "phetyr"
+    VAL = "val"
 
 
 class ConformerClass(IntEnum):
@@ -99,7 +80,6 @@ class ConformerClass(IntEnum):
     ALLOWED = 2
     OUTLIER = 3
     UNKNOWN = 4
-
 
 @dataclass
 class DihedralScore:
@@ -740,7 +720,7 @@ def _interp_wrapped(
 
 def _check_rotamer(
     atom_array: struc.AtomArray, res_id: int, chain_id: str
-) -> dict[str, Any]:
+) -> tuple[DihedralScore, dict[str, float]] | None:
     """
     Check the rotamer classification for a given residue in the atom array.
 
@@ -769,12 +749,13 @@ def _check_rotamer(
     resname = atom_array.res_name[mask][0].upper()
     observed = _get_residue_chis(atom_array, mask)
     if not observed:
-        return DihedralScore(
-            pct=0.0,
-            classification=ConformerClass.UNKNOWN
-        ), observed
+        return
 
-    resname_tag=grid_residue_map.get(resname)
+    resname_tag = getattr(GridResidueMap, resname, None).value if resname in GridResidueMap.__members__ else None
+    if resname_tag is None:
+        warnings.warn(f"Rotamer classification not available for residue {resname}.")
+        return
+
     grid_obj = _load_contour_grid_for_residue(
         grid_dirname="Top8000_rotamer_pct_contour_grids",
         resname_tag=resname_tag,
@@ -793,9 +774,9 @@ def _check_rotamer(
     if np.isnan(pct):
         classification = ConformerClass.FAVORED # In mmtbx.validation.rotalyze, they counted this as FAVORED
 
-    elif pct >= ROTA_ALLOWED_THRESHOLD:
+    elif pct >= _ROTA_ALLOWED_THRESHOLD:
         classification = ConformerClass.FAVORED
-    elif pct >= ROTA_OUTLIER_THRESHOLD:
+    elif pct >= _ROTA_OUTLIER_THRESHOLD:
         classification = ConformerClass.ALLOWED
     else:
         classification = ConformerClass.OUTLIER
@@ -850,11 +831,8 @@ def _classify_rotamers(
         rotamer_scores = []
         for res_id, res_name in zip(res_ids, res_names):
             chain_id = chain_arr.chain_id[chain_arr.res_id == res_id][0]
-            if (
-                res_name not in grid_residue_map
-                or res_name == "GLY"
-                or res_name == "ALA"
-            ):
+
+            if res_name not in GridResidueMap.__members__:
                 continue
             rotamer_scores.extend(
                 ResidueRotamerScore.from_residue(
@@ -1004,11 +982,11 @@ def _check_rama(
     of "FAVORED", "ALLOWED", or "OUTLIER" based on the percentage of favored conformations.
     If the residue is CIS or PRO, it uses special handling for those residues.
     The thresholds for classification are defined as follows:
-    - FAVORED: pct >= RAMA_FAVORED_THRESHOLD
-    - ALLOWED: pct >= RAMA_ALLOWED_THRESHOLD (or RAMA_GENERAL_ALLOWED_THRESHOLD for "general" residues,
-    or RAMA_CISPRO_ALLOWED_THRESHOLD for "cispro" residues)
-    - OUTLIER: pct < RAMA_ALLOWED_THRESHOLD (or RAMA_GENERAL_ALLOWED_THRESHOLD for "general" residues,
-    or RAMA_CISPRO_ALLOWED_THRESHOLD for "cispro" residues)
+    - FAVORED: pct >= `_RAMA_FAVORED_THRESHOLD`
+    - ALLOWED: pct >= `_RAMA_ALLOWED_THRESHOLD` (or `_RAMA_GENERAL_ALLOWED_THRESHOLD` for "general" residues,
+    or `_RAMA_CISPRO_ALLOWED_THRESHOLD` for "cispro" residues)
+    - OUTLIER: pct < `_RAMA_ALLOWED_THRESHOLD` (or `_RAMA_GENERAL_ALLOWED_THRESHOLD` for "general" residues,
+    or `_RAMA_CISPRO_ALLOWED_THRESHOLD` for "cispro" residues)
 
     References
     ----------
@@ -1025,21 +1003,21 @@ def _check_rama(
     coords_list = [phi, psi]
     pct, _ = _interp_wrapped(resname_tag, grid_obj, coords_list, "phi-psi")
     if resname_tag == "general":
-        if pct >= RAMA_GENERAL_ALLOWED_THRESHOLD:
+        if pct >= _RAMA_GENERAL_ALLOWED_THRESHOLD:
             classification = ConformerClass.ALLOWED
         else:
             classification = ConformerClass.OUTLIER
     elif resname_tag == "cispro":
-        if pct >= RAMA_CISPRO_ALLOWED_THRESHOLD:
+        if pct >= _RAMA_CISPRO_ALLOWED_THRESHOLD:
             classification = ConformerClass.ALLOWED
         else:
             classification = ConformerClass.OUTLIER
     else:
-        if pct >= RAMA_ALLOWED_THRESHOLD:
+        if pct >= _RAMA_ALLOWED_THRESHOLD:
             classification = ConformerClass.ALLOWED
         else:
             classification = ConformerClass.OUTLIER
-    if pct >= RAMA_FAVORED_THRESHOLD:
+    if pct >= _RAMA_FAVORED_THRESHOLD:
         classification = ConformerClass.FAVORED
 
     return DihedralScore(pct=pct, classification=classification)
@@ -1102,7 +1080,7 @@ def _classify_phi_psi(
             if res_id in gaps_flattened:
                 # Skip residues with gaps in the backbone chain
                 continue
-            if res_name not in grid_residue_map:
+            if res_name not in GridResidueMap.__members__:
                 # Skip residues that are not in the grid map
                 continue
 
@@ -1222,7 +1200,7 @@ class RotamerScore:
 
     @classmethod
     def from_atoms(
-        cls, atom_array: struc.AtomArray | struc.AtomArrayStack
+        cls, atom_array: struc.AtomArray
     ) -> "RotamerScore":
         """
         Create RotamerScore from a protein structure or a stack of structures.
@@ -1292,11 +1270,11 @@ class RamaScore:
     This class represents calculates the likelihood of each residue's phi/psi angles to occur in crystallized structures
     based on the Top8000 Ramachandran contour grids. It includes their names, IDs, observed phi, psi, omega angles,
     Ramachandran score percentages, and classifications. The thresholsds for classification are defined as follows:
-    - FAVORED: pct >= RAMA_FAVORED_THRESHOLD
-    - ALLOWED: pct >= RAMA_ALLOWED_THRESHOLD (or RAMA_GENERAL_ALLOWED_THRESHOLD for "general" residues,
-    or RAMA_CISPRO_ALLOWED_THRESHOLD for "cispro" residues)
-    - OUTLIER: pct < RAMA_ALLOWED_THRESHOLD (or RAMA_GENERAL_ALLOWED_THRESHOLD for "general" residues,
-    or RAMA_CISPRO_ALLOWED_THRESHOLD for "cispro" residues)
+    - FAVORED: pct >= `_RAMA_FAVORED_THRESHOLD`
+    - ALLOWED: pct >= `_RAMA_ALLOWED_THRESHOLD` (or `_RAMA_GENERAL_ALLOWED_THRESHOLD` for "general" residues,
+    or `_RAMA_CISPRO_ALLOWED_THRESHOLD` for "cispro" residues)
+    - OUTLIER: pct < `_RAMA_ALLOWED_THRESHOLD` (or `_RAMA_GENERAL_ALLOWED_THRESHOLD` for "general" residues,
+    or `_RAMA_CISPRO_ALLOWED_THRESHOLD` for "cispro" residues)
 
     It is used to assess the quality of the protein structure based on the ramachandran angles
     and to identify potential outliers in the phi/psi angles..
