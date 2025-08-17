@@ -4,18 +4,18 @@ import numpy as np
 import pytest
 from biotite import structure as struc
 from peppr.rotamer import (
-    RotamerGridResidueMap,
-    RamaScore,
-    RotamerScore,
     ConformerClass,
     RamaResidueType,
+    RamaScore,
+    RotamerGridResidueMap,
+    RotamerScore,
     _check_rama,
     _check_rotamer,
     _get_residue_chis,
     _get_residue_phi_psi_omega,
     _interp_wrapped,
-
 )
+
 
 @pytest.fixture
 def input_pose() -> struc.AtomArray:
@@ -24,6 +24,7 @@ def input_pose() -> struc.AtomArray:
     """
     pose = strucio.load_structure(Path(__file__).parent / "data" / "pdb" / "1a3n.cif")
     return pose
+
 
 @pytest.fixture
 def fake_2d_chi_angle_grid() -> struc.AtomArray:
@@ -51,6 +52,7 @@ def fake_2d_chi_angle_grid() -> struc.AtomArray:
         "wrap": wrap,
         "steps": [90, 90],
     }
+
 
 @pytest.fixture
 def fake_2d_phi_psi_angle_grid() -> struc.AtomArray:
@@ -150,16 +152,24 @@ def test_interp_wrapped_basic(fake_2d_chi_angle_grid, fake_2d_phi_psi_angle_grid
 
     # Case 5: Midpoint interpolation for phi/psi: (-135°, -135°)
     # Between (-179,-179)=0.0, (-179,-90)=1.0, (-90,-179)=1.0, (-90,-90)=2.0
-    val_mid_phi_psi, _ = _interp_wrapped("leu", phi_psi_grid_obj, [-135.0, -135.0], "phi-psi")
-    assert np.isclose(val_mid_phi_psi, 1.0, 0.02), f"Expected 1.0, got {val_mid_phi_psi}"
+    val_mid_phi_psi, _ = _interp_wrapped(
+        "leu", phi_psi_grid_obj, [-135.0, -135.0], "phi-psi"
+    )
+    assert np.isclose(val_mid_phi_psi, 1.0, 0.02), (
+        f"Expected 1.0, got {val_mid_phi_psi}"
+    )
 
     # Case 6: Case where after wrapping, angles falls outside the grid span but within the wrap range
     # For phi/psi, (-190°, 200°) should wrap to (170°, -160°); since 170° is outside the grid span,
     # but within the wrap range, it truncates to the nearest grid point, which is 90°. Therefore, we expect
     # the interpolation to be done at (90°, -160°) which is between (90°, -179°)=3.0 and (90°, -90°)=4.0
     # Bilinear interpolation should give 3.2
-    val_outside_span, _ = _interp_wrapped("leu", phi_psi_grid_obj, [-190, 200], "phi-psi")
-    expected_outside_span = 3.5  # Bilinear interpolation gives values between 3.0 and 4.0
+    val_outside_span, _ = _interp_wrapped(
+        "leu", phi_psi_grid_obj, [-190, 200], "phi-psi"
+    )
+    expected_outside_span = (
+        3.5  # Bilinear interpolation gives values between 3.0 and 4.0
+    )
     assert np.isclose(val_outside_span, expected_outside_span, 0.5), (
         f"Expected {expected_outside_span}, got {val_outside_span}"
     )
@@ -230,6 +240,7 @@ def test_get_residue_phi_psi_omega(input_pose, residue_id, phi, psi, omega):
     assert np.isclose(angles[0][0], phi, atol=1e-1)
     assert np.isclose(angles[1][0], psi, atol=1e-1)
 
+
 @pytest.mark.parametrize(
     [
         "phi",
@@ -245,12 +256,7 @@ def test_get_residue_phi_psi_omega(input_pose, residue_id, phi, psi, omega):
         (-75.2, 62.9, RamaResidueType.GENERAL.value, 0.0126, ConformerClass.ALLOWED),
     ],
 )
-def test_check_rama(
-    phi,
-    psi,
-    resname_tag,
-    pct,
-    classification):
+def test_check_rama(phi, psi, resname_tag, pct, classification):
     """
     Test the check_rama function with known values.
     The values we compare against are obtained by running mmtbx validation
@@ -288,7 +294,10 @@ def test_rama_score_from_atoms(input_pose):
     assert len(rama_score.rama_scores) > 0
     assert rama_score.rama_scores[0].classification.value in [1, 2, 3, 4]
     assert 0.0 <= rama_score.rama_scores[0].pct <= 1
-    assert rama_score.rama_scores[0].resname_tag in [i.value for i in RamaResidueType.__members__.values()]
+    assert rama_score.rama_scores[0].resname_tag in [
+        i.value for i in RamaResidueType.__members__.values()
+    ]
+
 
 @pytest.mark.parametrize(
     [
@@ -299,7 +308,13 @@ def test_rama_score_from_atoms(input_pose):
         "classification",
     ],
     [
-        ([67.36847217387181, 95.16059204939675], 146, "D", 0.3301, ConformerClass.FAVORED),
+        (
+            [67.36847217387181, 95.16059204939675],
+            146,
+            "D",
+            0.3301,
+            ConformerClass.FAVORED,
+        ),
         # This is a slight difference in the value from mmtbx with wrapping (282.8778752930479)
         # Since the chi2 grid only goes up to 180, we wrap it to 180.
         ([294.31480801517387, 102.87788887], 42, "A", 0.878, ConformerClass.FAVORED),
@@ -332,9 +347,7 @@ def test_check_rotamer(
     ...          result.resname.strip().upper(), result.chain_id.strip(), result.score, result.evaluation.upper()
     ...           result.model_no))
     """
-    result = _check_rotamer(
-        atom_array=input_pose, res_id=residue_id, chain_id=chain_id
-    )
+    result = _check_rotamer(atom_array=input_pose, res_id=residue_id, chain_id=chain_id)
     score, angles = result
     assert np.isclose(angles["chi1"], chi_angles[0], atol=1e-2)
     assert np.isclose(angles["chi2"], chi_angles[1], atol=1e-2)

@@ -11,19 +11,19 @@ __all__ = [
 ]
 
 import functools
-import warnings
 import math
 import pickle
+import tarfile
+import warnings
+import zipfile
+from dataclasses import asdict, dataclass, field
+from enum import Enum, IntEnum
 from pathlib import Path
 from typing import Any
 import numpy as np
 import requests
 from biotite import structure as struc
-from dataclasses import dataclass, field, asdict
-from enum import Enum, IntEnum
 from scipy.interpolate import RegularGridInterpolator
-import tarfile
-import zipfile
 
 _ROTAMER_BASE_DIR = Path.home() / ".local/share/top8000_lib"
 _ROTAMER_DIR = _ROTAMER_BASE_DIR / "reference_data-master" / "Top8000"
@@ -35,9 +35,11 @@ _RAMA_GENERAL_ALLOWED_THRESHOLD = 0.0005
 _RAMA_CISPRO_ALLOWED_THRESHOLD = 0.0020
 
 class RamaResidueType(Enum):
-    """Enum for residue types used in the Ramachandran library.
+    """
+    Enum for residue types used in the Ramachandran library.
     This enum defines the types of residues that can be used in the Ramachandran library.
     """
+
     GLY = "gly"
     CISPRO = "cispro"
     TRANSPRO = "transpro"
@@ -45,10 +47,13 @@ class RamaResidueType(Enum):
     ILEVAL = "ileval"
     GENERAL = "general"
 
+
 class RotamerGridResidueMap(Enum):
-    """Enum for residue names used in the rotamer library.
+    """
+    Enum for residue names used in the rotamer library.
     This enum maps residue names to their corresponding tags used in the rotamer library.
     """
+
     ALA = None
     GLY = None  # ALA and GLY have no chi angles
     ARG = "arg"
@@ -76,14 +81,17 @@ class ConformerClass(IntEnum):
     Enum for conformer classification types.
     This enum defines the possible classifications for different conformations.
     """
+
     FAVORED = 1
     ALLOWED = 2
     OUTLIER = 3
     UNKNOWN = 4
 
+
 @dataclass
 class DihedralScore:
-    """A dataclass to hold the results of rotamer and rama score checks.
+    """
+    A dataclass to hold the results of rotamer and rama score checks.
 
     Attributes
     ----------
@@ -95,17 +103,17 @@ class DihedralScore:
     References
     ----------
     .. [1] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
-
     """
-    pct: float = field(
-        metadata={"description": "Percentile score"})
+
+    pct: float = field(metadata={"description": "Percentile score"})
     classification: ConformerClass = field(
-        metadata={"description": "Classification of the score (e.g., FAVORED, ALLOWED, OUTLIER)"})
+        metadata={
+            "description": "Classification of the score (e.g., FAVORED, ALLOWED, OUTLIER)"
+        }
+    )
 
 
-def _get_mmtbx_neg180_to_180_value(
-    angle_deg: float | np.ndarray
-) -> float | np.ndarray:
+def _get_mmtbx_neg180_to_180_value(angle_deg: float | np.ndarray) -> float | np.ndarray:
     """
     Convert phi and psi angles to the range [-180, 180).
     Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
@@ -126,7 +134,9 @@ def _get_mmtbx_neg180_to_180_value(
         angle_deg -= 360
     elif angle_deg <= -180:
         angle_deg += 360
-    assert -180 <= angle_deg <= 180, f"Angle must be in the range [-180, 180), but we got {angle_deg}"
+    assert -180 <= angle_deg <= 180, (
+        f"Angle must be in the range [-180, 180), but we got {angle_deg}"
+    )
     return angle_deg
 
 
@@ -147,8 +157,7 @@ def _wrap_phi_psi(phi: float, psi: float) -> list[float]:
     tuple
         A tuple containing the converted phi and psi angles.
     """
-    return [_get_mmtbx_neg180_to_180_value(phi),
-            _get_mmtbx_neg180_to_180_value(psi)]
+    return [_get_mmtbx_neg180_to_180_value(phi), _get_mmtbx_neg180_to_180_value(psi)]
 
 
 def _wrap_symmetrical(residue_tag: str, wrapped_chis: list) -> list:
@@ -169,7 +178,7 @@ def _wrap_symmetrical(residue_tag: str, wrapped_chis: list) -> list:
         The list of symmetrically wrapped chi angles.
     """
     residue_tag = residue_tag.lower()
-    if (residue_tag == "asp" or residue_tag == "glu" or residue_tag == "phetyr"):
+    if residue_tag == "asp" or residue_tag == "glu" or residue_tag == "phetyr":
         i = len(wrapped_chis) - 1
         if wrapped_chis[i] is not None:
             wrapped_chis[i] = wrapped_chis[i] % 180
@@ -206,7 +215,7 @@ def _wrap_chis(residue_tag: str, chis: list, symmetry=True) -> list:
                 wrapped_chis[i] += 360
         else:
             wrapped_chis.append(None)
-    if (symmetry==True):
+    if symmetry:
         wrapped_chis = _wrap_symmetrical(residue_tag, wrapped_chis)
     return wrapped_chis
 
@@ -322,9 +331,11 @@ def _get_residue_chis(
             ("CA", "CB", "CG", "CD1"),
         ],
         "ASN": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "OD1")],
-        "GLN": [("N", "CA", "CB", "CG"),
-                ("CA", "CB", "CG", "CD"),
-                ("CB", "CG", "CD", "OE1")],
+        "GLN": [
+            ("N", "CA", "CB", "CG"),
+            ("CA", "CB", "CG", "CD"),
+            ("CB", "CG", "CD", "OE1"),
+        ],
         "ASP": [("N", "CA", "CB", "CG"), ("CA", "CB", "CG", "OD1")],
         "GLU": [
             ("N", "CA", "CB", "CG"),
@@ -349,7 +360,9 @@ def _get_residue_chis(
         try:
             p = [coords[a] for a in atom_tuple]
         except KeyError as e:
-            warnings.warn(f"Skipping chi angle {i} for residue {resname}: {e} due to missing atoms")
+            warnings.warn(
+                f"Skipping chi angle {i} for residue {resname}: {e} due to missing atoms"
+            )
             # Skip if any atom is missing
             continue
         else:
@@ -374,9 +387,7 @@ def _download_top1000_lib() -> Path:
     URL = "https://github.com/rlabduke/reference_data/archive/refs/heads/master.zip"
     if _ROTAMER_DIR.exists():
         return _ROTAMER_DIR
-
-    url = "https://github.com/rlabduke/reference_data/archive/refs/heads/master.zip"
-    data_dir = _download_and_extract(url, _ROTAMER_BASE_DIR / "top1000.zip")
+    data_dir = _download_and_extract(URL, _ROTAMER_BASE_DIR / "top1000.zip")
     if data_dir is None:
         raise RuntimeError("Failed to download or extract Top8000 rotamer library")
     return _ROTAMER_DIR
@@ -451,7 +462,7 @@ def _load_contour_grid_text(resname_grid_data: Path | Any) -> dict[str, Any]:
     for low, high, nbins, wrap in axes_meta:
         step = (high - low) / nbins
         centers = np.linspace(low + step / 2, high - step / 2, nbins)
-        #centers = np.linspace(low, high, nbins)
+        # centers = np.linspace(low, high, nbins)
         axes_coords.append(centers)
         wraps.append(wrap)
         steps.append(step)
@@ -545,7 +556,9 @@ def _generate_contour_grids_data(
     """
     output_path = _ROTAMER_DIR / f"{grid_dirname}.pkl"
     if output_path.exists():
-        warnings.warn(f"Contour grids already generated at {output_path}. Skipping generation.")
+        warnings.warn(
+            f"Contour grids already generated at {output_path}. Skipping generation."
+        )
         return
     data_dict = {}
     data_dir = _download_top1000_lib()
@@ -622,6 +635,7 @@ def _truncate_angles_within_a_step_of_grid_span(coord, low, high, step):
             return high
     return coord
 
+
 def _identify_gaps_in_atom_array(atom_array: struc.AtomArray) -> str:
     """
     Identify gaps in the atom array based on missing atoms or residues.
@@ -639,6 +653,7 @@ def _identify_gaps_in_atom_array(atom_array: struc.AtomArray) -> str:
 
     # Sort atoms by chain + residue
     sort_indices = np.lexsort((atom_array.res_id, atom_array.chain_id))
+    atom_array = atom_array[sort_indices]
 
     # Extract residue IDs and chain IDs
     res_ids = atom_array.res_id
@@ -651,9 +666,10 @@ def _identify_gaps_in_atom_array(atom_array: struc.AtomArray) -> str:
         diffs = res_chain[1:] - res_chain[:-1]
         gaps = (diffs > 1).nonzero()[0]
         for g in gaps:
-            breakpoints.append((chain, res_chain[g], res_chain[g+1]))
+            breakpoints.append((chain, res_chain[g], res_chain[g + 1]))
 
     return breakpoints
+
 
 def _interp_wrapped(
     resname_tag: str,
@@ -697,14 +713,11 @@ def _interp_wrapped(
         coords = _wrap_chis(resname_tag, coords_deg, symmetry=True)
 
     coords = [
-            _truncate_angles_within_a_step_of_grid_span(
-                coord,
-                grid_obj['axes'][i][0],
-                grid_obj['axes'][i][-1],
-                grid_obj["steps"][i]
-            )
-            for i, coord in enumerate(coords)
-        ]
+        _truncate_angles_within_a_step_of_grid_span(
+            coord, grid_obj["axes"][i][0], grid_obj["axes"][i][-1], grid_obj["steps"][i]
+        )
+        for i, coord in enumerate(coords)
+    ]
 
     interp_func = RegularGridInterpolator(
         tuple(grid_obj["axes"]), grid_obj["grid"], bounds_error=False, fill_value=np.nan
@@ -750,17 +763,19 @@ def _check_rotamer(
 
     if not observed:
         return DihedralScore(
-            pct=np.nan,
-            classification=ConformerClass.UNKNOWN
+            pct=np.nan, classification=ConformerClass.UNKNOWN
         ), observed
 
-    resname_tag = getattr(RotamerGridResidueMap, resname, None).value if resname in RotamerGridResidueMap.__members__ else None
+    resname_tag = (
+        getattr(RotamerGridResidueMap, resname, None).value
+        if resname in RotamerGridResidueMap.__members__
+        else None
+    )
 
     if resname_tag is None:
         warnings.warn(f"Rotamer classification not available for residue {resname}.")
         return DihedralScore(
-            pct=np.nan,
-            classification=ConformerClass.UNKNOWN
+            pct=np.nan, classification=ConformerClass.UNKNOWN
         ), observed
 
     grid_obj = _load_contour_grid_for_residue(
@@ -779,7 +794,9 @@ def _check_rotamer(
     observed = {f"chi{i + 1}": wrapped_angles[i] for i in range(len(wrapped_angles))}
 
     if np.isnan(pct):
-        classification = ConformerClass.FAVORED # In mmtbx.validation.rotalyze, they counted this as FAVORED
+        classification = (
+            ConformerClass.FAVORED
+        )  # In mmtbx.validation.rotalyze, they counted this as FAVORED
 
     elif pct >= _ROTA_ALLOWED_THRESHOLD:
         classification = ConformerClass.FAVORED
@@ -788,15 +805,10 @@ def _check_rotamer(
     else:
         classification = ConformerClass.OUTLIER
 
-    return DihedralScore(
-        pct=pct,
-        classification=classification
-    ), observed
+    return DihedralScore(pct=pct, classification=classification), observed
 
 
-def _classify_rotamers(
-    atom_array: struc.AtomArray
-    ) -> "RotamerScore":
+def _classify_rotamers(atom_array: struc.AtomArray) -> "RotamerScore":
     """
     Create ResidueRotamerScore from a protein structure.
 
@@ -811,14 +823,12 @@ def _classify_rotamers(
         An instance of RotamerScore containing the rotamer scores for the structure.
     """
     if not isinstance(atom_array, struc.AtomArray):
-        warnings.warn(
-            f"RotamerScore: Cannot be computed; atom_array must be AtomArray"
-        )
+        warnings.warn("RotamerScore: Cannot be computed; atom_array must be AtomArray")
         return []
 
     if all(atom_array.hetero):
         warnings.warn(
-            f"RotamerScore: Cannot be computed; atom_array must contain some protein residues"
+            "RotamerScore: Cannot be computed; atom_array must contain some protein residues"
         )
         return []
     atom_array = atom_array[
@@ -826,7 +836,7 @@ def _classify_rotamers(
     ]
     if atom_array.array_length == 0:
         warnings.warn(
-            f"RotamerScore: Cannot be computed; atom_array must contain at least one residue"
+            "RotamerScore: Cannot be computed; atom_array must contain at least one residue"
         )
         return []
     rotamer_scores = []
@@ -938,11 +948,17 @@ def _assign_rama_types(atom_array: struc.AtomArray) -> dict:
         1:-1
     ]  # Shifted by -1, remove first and last
 
-    def rama_type(res_name: str, next_res_name: str, omega_val: float) -> RamaResidueType:
+    def rama_type(
+        res_name: str, next_res_name: str, omega_val: float
+    ) -> RamaResidueType:
         if res_name == "GLY":
             return RamaResidueType.GLY.value
         elif res_name == "PRO":
-            return RamaResidueType.CISPRO.value if _is_cislike_peptide(omega_val) else RamaResidueType.TRANSPRO.value
+            return (
+                RamaResidueType.CISPRO.value
+                if _is_cislike_peptide(omega_val)
+                else RamaResidueType.TRANSPRO.value
+            )
         elif next_res_name == "PRO":
             return RamaResidueType.PREPRO.value
         elif res_name in ["ILE", "VAL"]:
@@ -1048,33 +1064,32 @@ def _classify_phi_psi(
     """
     if all(atom_array.hetero):
         warnings.warn(
-            f"RotamerScore: Cannot be computed; atom_array must contain some protein residues"
+            "RotamerScore: Cannot be computed; atom_array must contain some protein residues"
         )
         return []
     if not isinstance(atom_array, struc.AtomArray):
-        warnings.warn(
-            f"RamaScore: Cannot be computed; atom_array must be an AtomArray"
-        )
+        warnings.warn("RamaScore: Cannot be computed; atom_array must be an AtomArray")
         return []
     atom_array = atom_array[
         struc.filter_canonical_amino_acids(atom_array) & ~atom_array.hetero
     ]
     if atom_array.array_length == 0:
         warnings.warn(
-            f"RamaScore: Cannot be computed; atom_array must contain at least one residue"
+            "RamaScore: Cannot be computed; atom_array must contain at least one residue"
         )
         return []
 
     rama_scores = []
     for chain_id in struc.get_chains(atom_array):
-
         chain_arr = atom_array[atom_array.chain_id == chain_id]
         phis, psis, omegas, rama_types = _assign_rama_types(chain_arr)
         res_ids, res_names = struc.get_residues(chain_arr)
         # Identify breakpoints in backbone chains; this is to be skipped as
         # their scores are not reliable
         gaps = _identify_gaps_in_atom_array(chain_arr)
-        gaps_flattened = [res for chain_res_triple in gaps for res in chain_res_triple[1:]]
+        gaps_flattened = [
+            res for chain_res_triple in gaps for res in chain_res_triple[1:]
+        ]
 
         for phi, psi, omega, res_id, res_name, rama_type in zip(
             phis,
@@ -1138,13 +1153,13 @@ class ResidueRotamerScore:
     ----------
     .. [1] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
     """
+
     res_name: str
     res_id: int
     chain_id: str
     angles: dict[str, float]
     pct: float
     classification: ConformerClass
-
 
     @classmethod
     def from_residue(
@@ -1180,11 +1195,17 @@ class ResidueRotamerScore:
                 chain_id=chain_id,
                 angles={},
                 pct=np.nan,
-                classification=ConformerClass.UNKNOWN
+                classification=ConformerClass.UNKNOWN,
             )
         score, angles = result
 
-        return cls(res_name=res_name, res_id=res_id, chain_id=chain_id, angles=angles, **asdict(score))
+        return cls(
+            res_name=res_name,
+            res_id=res_id,
+            chain_id=chain_id,
+            angles=angles,
+            **asdict(score),
+        )
 
 
 @dataclass
@@ -1214,15 +1235,16 @@ class RotamerScore:
     .. [1] http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
     .. [2] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
     """
+
     rotamer_scores: list[ResidueRotamerScore] = field(
         default_factory=list,
-        metadata={"description": "List of rotamer scores for each residue in the structure."},
+        metadata={
+            "description": "List of rotamer scores for each residue in the structure."
+        },
     )
 
     @classmethod
-    def from_atoms(
-        cls, atom_array: struc.AtomArray
-    ) -> "RotamerScore":
+    def from_atoms(cls, atom_array: struc.AtomArray) -> "RotamerScore":
         """
         Create RotamerScore from a protein structure or a stack of structures.
 
@@ -1237,12 +1259,11 @@ class RotamerScore:
             An instance of RotamerScore containing the rotamer scores for the structure(s).
         """
         if isinstance(atom_array, struc.AtomArray):
-            rotamers_scores =  _classify_rotamers(atom_array)
+            rotamers_scores = _classify_rotamers(atom_array)
             return cls(rotamer_scores=rotamers_scores)
         else:
-            raise TypeError(
-                "atom_array must be an AtomArray"
-            )
+            raise TypeError("atom_array must be an AtomArray")
+
 
 @dataclass
 class ResidueRamaScore:
@@ -1271,18 +1292,17 @@ class ResidueRamaScore:
         chain_id: str,
         resname_tag: str,
     ) -> "ResidueRamaScore":
-        result = _check_rama(
-            phi, psi,  resname_tag
-        )
-        #result["resname_tag"] = resname_tag
+        result = _check_rama(phi, psi, resname_tag)
+        # result["resname_tag"] = resname_tag
         return cls(
             res_id=res_id,
             res_name=res_name,
             resname_tag=resname_tag,
             chain_id=chain_id,
             **asdict(result),
-            angles={"phi": phi, "psi": psi, "omega": omega}
+            angles={"phi": phi, "psi": psi, "omega": omega},
         )
+
 
 @dataclass
 class RamaScore:
@@ -1312,13 +1332,13 @@ class RamaScore:
 
     rama_scores: list[ResidueRamaScore] = field(
         default_factory=list,
-        metadata={"description": "List of ramachandran scores for each residue in the structure."},
+        metadata={
+            "description": "List of ramachandran scores for each residue in the structure."
+        },
     )
 
     @classmethod
-    def from_atoms(
-        cls, atom_array: struc.AtomArray
-    ) -> "RamaScore":
+    def from_atoms(cls, atom_array: struc.AtomArray) -> "RamaScore":
         """
         Create RamaScore from a protein structure.
 
@@ -1336,9 +1356,7 @@ class RamaScore:
             rama_scores = _classify_phi_psi(atom_array)
             return cls(rama_scores=rama_scores)
         else:
-            raise TypeError(
-                "atom_array must be an AtomArray"
-            )
+            raise TypeError("atom_array must be an AtomArray")
 
 
 def get_fraction_of_rotamer_outliers(atom_array: struc.AtomArray) -> float:
@@ -1417,8 +1435,8 @@ if __name__ == "__main__":
     atom_array = strucio.load_structure("/Users/yusuf/sample_pdbs/5nv2_B.cif")
 
     # Calculate rotamer scores
-    #rotamer_scores = RotamerScore.from_atoms(atom_array)
-    #print(rotamer_scores)
+    # rotamer_scores = RotamerScore.from_atoms(atom_array)
+    # print(rotamer_scores)
 
     # Calculate ramachandran scores
     rama_scores = RamaScore.from_atoms(atom_array)
@@ -1431,4 +1449,3 @@ if __name__ == "__main__":
     # Get fraction of ramachandran outliers
     fraction_rama_outliers = get_fraction_of_rama_outliers(atom_array)
     print(f"Fraction of ramachandran outliers: {fraction_rama_outliers:.2f}")
-
