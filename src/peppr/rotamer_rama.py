@@ -282,10 +282,10 @@ def download_top1000_lib() -> Path:
         The path to the downloaded Top8000 rotamer library directory.
         If the directory already exists, it returns the existing path.
     """
+    URL = "https://github.com/rlabduke/reference_data/archive/refs/heads/master.zip"
     if _ROTAMER_DIR.exists():
         return _ROTAMER_DIR
-    url = "https://github.com/rlabduke/reference_data/archive/refs/heads/master.zip"
-    data_dir = download_and_extract(url, _ROTAMER_BASE_DIR / "top1000.zip")
+    data_dir = download_and_extract(URL, _ROTAMER_BASE_DIR / "top1000.zip")
     if data_dir is None:
         raise RuntimeError("Failed to download or extract Top8000 rotamer library")
     LOG.info(f"Top8000 rotamer library downloaded and extracted to {data_dir}")
