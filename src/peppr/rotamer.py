@@ -145,7 +145,6 @@ def _get_mmtbx_neg180_to_180_value(angle_deg: float) -> float:
 def _wrap_phi_psi(phi: float, psi: float) -> tuple[float, float]:
     """
     Wrap phi and psi angles to the range [-180, 180).
-    Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
 
     Parameters
     ----------
@@ -158,6 +157,10 @@ def _wrap_phi_psi(phi: float, psi: float) -> tuple[float, float]:
     -------
     tuple
         A tuple containing the converted phi and psi angles.
+    
+    Notes
+    -----
+    Taken from https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
     """
     return _get_mmtbx_neg180_to_180_value(phi), _get_mmtbx_neg180_to_180_value(psi)
 
