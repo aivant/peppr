@@ -937,23 +937,13 @@ class RotamerViolations(Metric):
 
 
 class RamachandranViolations(Metric):
-    """
-    Check for phi/psi violations in the structure by comparing against rotamers
-    of the same amino acid type in crystal structures based on the Top8000
-    dataset from the Richardson Lab. Ramachandran violation occurs when the probability of
-    phi/psi angles of a residue occuring in known crystal structures
-    is below a certain threshold as described in the references below.
-
-    Parameters
-    ----------
-    tolerance : float | None, optional
-        The tolerance for acceptable deviation from ideal phi/psi angles.
-        This is not used in this metric, it's added to keep the interface consistent.
+    r"""
+    Check for the fraction of improbable :math:`\phi`/:math:`\psi` angles,
+    based on known crystal structures in the *Top8000* dataset [1]_.
 
     References
     ----------
-    .. [1] http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
-    .. [2] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
+    .. [1] https://doi.org/10.1002/prot.25039
     """
 
     def __init__(self, tolerance: float | None = None) -> None:
