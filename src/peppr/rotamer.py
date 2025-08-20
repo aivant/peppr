@@ -117,7 +117,6 @@ class DihedralScore:
 def _get_mmtbx_neg180_to_180_value(angle_deg: float) -> float:
     """
     Convert phi and psi angles to the range [-180, 180).
-    Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
 
     Parameters
     ----------
@@ -128,6 +127,10 @@ def _get_mmtbx_neg180_to_180_value(angle_deg: float) -> float:
     -------
     float
         The converted angle in the range [-180, 180).
+    
+    Notes
+    -----
+    Taken from https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
     """
     if angle_deg > 180:
         angle_deg -= 360
