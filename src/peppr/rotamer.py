@@ -631,6 +631,7 @@ def _truncate_angles_within_a_step_of_grid_span(
 ) -> float:
     """
     Truncate an angle to be within a step of the grid span.
+    
     This function ensures that the coordinate is within the specified low and high bounds,
     and if it is outside, it will return the closest bound if it is within one step of it.
 
