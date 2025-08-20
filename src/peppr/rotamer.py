@@ -900,8 +900,7 @@ class ResidueRotamerScore:
         ResidueRotamerScore
             An instance of ResidueRotamerScore containing the rotamer score for the residue.
         """
-        result = _check_rotamer(atom_array, res_id, chain_id)
-        score, angles = result
+        score, angles = _check_rotamer(atom_array, res_id, chain_id)
         chis = {f"chi{i + 1}": ang for i, ang in enumerate(angles)}
 
         return cls(
