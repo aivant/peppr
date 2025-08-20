@@ -978,9 +978,9 @@ class RamachandranViolations(Metric):
         # http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
         return OrderedDict(
             [
-                ("good", 0.0005),
-                ("warning", 0.0050),
-                ("bad", 1.0000),
+                ("good", 0.0000),
+                ("warning", 0.0005),
+                ("bad", 0.0050),
             ]
         )
 
