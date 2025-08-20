@@ -914,9 +914,9 @@ class RotamerViolations(Metric):
         # http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
         return OrderedDict(
             [
-                ("good", 0.003),
-                ("warning", 0.015),
-                ("bad", 1.0000),
+                ("good", 0.000),
+                ("warning", 0.003),
+                ("bad", 0.015),
             ]
         )
 
