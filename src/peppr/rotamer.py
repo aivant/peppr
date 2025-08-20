@@ -695,7 +695,7 @@ def _identify_gaps_in_atom_array(
     """
     gap_ending_atom_idx = check_res_id_continuity(atom_array)
     # Add the preceeding atoms
-    gap_both_atom_idx = np.concat([gap_ending_atom_idx, gap_ending_atom_idx - 1])
+    gap_both_atom_idx = np.concatenate([gap_ending_atom_idx, gap_ending_atom_idx - 1])
     return atom_array.res_id[gap_both_atom_idx]
 
 
