@@ -892,8 +892,7 @@ class RotamerViolations(Metric):
     .. [1] https://doi.org/10.1002/prot.25039
     """
 
-    def __init__(self, tolerance: float | None = None) -> None:
-        self._tolerance = tolerance
+    def __init__(self) -> None:
         super().__init__()
 
     @property
@@ -946,8 +945,7 @@ class RamachandranViolations(Metric):
     .. [1] https://doi.org/10.1002/prot.25039
     """
 
-    def __init__(self, tolerance: float | None = None) -> None:
-        self._tolerance = tolerance
+    def __init__(self) -> None:
         super().__init__()
 
     @property
