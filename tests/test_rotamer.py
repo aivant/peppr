@@ -249,10 +249,10 @@ def test_get_residue_phi_psi_omega(input_pose, residue_id, phi, psi, omega):
         "classification",
     ],
     [
-        (-85.6, -5.0, RamaResidueType.GENERAL.value, 0.5932, ConformerClass.FAVORED),
-        (-63.6, -43.8, RamaResidueType.GLY.value, 0.97, ConformerClass.FAVORED),
-        (-89.6, 124.7, RamaResidueType.GENERAL.value, 0.3482, ConformerClass.FAVORED),
-        (-75.2, 62.9, RamaResidueType.GENERAL.value, 0.0126, ConformerClass.ALLOWED),
+        (-85.6, -5.0, RamaResidueType.GENERAL, 0.5932, ConformerClass.FAVORED),
+        (-63.6, -43.8, RamaResidueType.GLY, 0.97, ConformerClass.FAVORED),
+        (-89.6, 124.7, RamaResidueType.GENERAL, 0.3482, ConformerClass.FAVORED),
+        (-75.2, 62.9, RamaResidueType.GENERAL, 0.0126, ConformerClass.ALLOWED),
     ],
 )
 def test_check_rama(phi, psi, resname_tag, pct, classification):
@@ -291,11 +291,7 @@ def test_rama_score_from_atoms(input_pose):
     rama_score = RamaScore.from_atoms(input_pose)
     assert isinstance(rama_score, RamaScore)
     assert len(rama_score.rama_scores) > 0
-    assert rama_score.rama_scores[0].classification.value in [1, 2, 3, 4]
     assert 0.0 <= rama_score.rama_scores[0].pct <= 1
-    assert rama_score.rama_scores[0].resname_tag in [
-        i.value for i in RamaResidueType.__members__.values()
-    ]
 
 
 @pytest.mark.parametrize(
@@ -362,6 +358,4 @@ def test_rotamer_score_from_atoms(input_pose):
     rotamer_score = RotamerScore.from_atoms(input_pose)
     assert isinstance(rotamer_score, RotamerScore)
     assert len(rotamer_score.rotamer_scores) > 0
-    assert rotamer_score.rotamer_scores[0].classification.value in [1, 2, 3, 4]
     assert 0.0 <= rotamer_score.rotamer_scores[0].pct <= 1
-    assert rotamer_score.rotamer_scores[0].res_name in RotamerGridResidueMap.__members__

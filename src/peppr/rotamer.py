@@ -1,6 +1,7 @@
 """
-Backbone and sidechain checking using
-Richardson Lab Top8000 rotamer library from https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
+Based on https://github.com/cctbx/cctbx_project, governed on the following license:
+
+cctbx.license.txt.
 """
 
 __all__ = [
@@ -17,12 +18,13 @@ import tarfile
 import warnings
 import zipfile
 from dataclasses import asdict, dataclass, field
-from enum import Enum, IntEnum
+from enum import Enum, StrEnum, IntEnum
 from pathlib import Path
 from typing import Any
 import numpy as np
 import requests
 from biotite import structure as struc
+from biotite.structure import check_res_id_continuity
 from scipy.interpolate import RegularGridInterpolator
 
 _ROTAMER_BASE_DIR = Path.home() / ".local/share/top8000_lib"
@@ -35,7 +37,7 @@ _RAMA_GENERAL_ALLOWED_THRESHOLD = 0.0005
 _RAMA_CISPRO_ALLOWED_THRESHOLD = 0.0020
 
 
-class RamaResidueType(Enum):
+class RamaResidueType(StrEnum):
     """
     Enum for residue types used in the Ramachandran library.
     This enum defines the types of residues that can be used with the Ramachandran phi/psi grid data.
@@ -49,7 +51,7 @@ class RamaResidueType(Enum):
     GENERAL = "general"
 
 
-class RotamerGridResidueMap(Enum):
+class RotamerGridResidueMap(StrEnum):
     """
     Enum for residue names used in the rotamer (chi angles) grid data.
     This enum maps residue names to their corresponding tags used in the rotamer library.
@@ -80,7 +82,13 @@ class RotamerGridResidueMap(Enum):
 class ConformerClass(IntEnum):
     """
     Enum for conformer classification types.
+
     This enum defines the possible classifications for different conformations [1]_.
+    It can be one of the following:
+        - "FAVORED": The residue is in a favored rotamer conformation.
+        - "ALLOWED": The residue is in an allowed rotamer conformation.
+        - "OUTLIER": The residue is in an outlier rotamer conformation.
+        - "UNKNOWN": The residue's rotamer score could not be determined.
 
     References
     ----------
@@ -127,7 +135,7 @@ def _get_mmtbx_neg180_to_180_value(angle_deg: float) -> float:
     -------
     float
         The converted angle in the range [-180, 180).
-    
+
     Notes
     -----
     Taken from https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
@@ -157,7 +165,7 @@ def _wrap_phi_psi(phi: float, psi: float) -> tuple[float, float]:
     -------
     tuple
         A tuple containing the converted phi and psi angles.
-    
+
     Notes
     -----
     Taken from https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/geometry_restraints/ramachandran.h#L230C7-L244C1
@@ -165,15 +173,14 @@ def _wrap_phi_psi(phi: float, psi: float) -> tuple[float, float]:
     return _get_mmtbx_neg180_to_180_value(phi), _get_mmtbx_neg180_to_180_value(psi)
 
 
-def _wrap_symmetrical(residue_tag: str, wrapped_chis: list[float]) -> list[float]:
+def _wrap_symmetrical(residue_tag: RotamerGridResidueMap, wrapped_chis: list[float]) -> list[float]:
     """
     Apply symmetrical wrapping to chi angles for specific amino acids.
-    Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/rotamer/rotamer_eval.py#L368
 
     Parameters
     ----------
-    residue_tag : str
-        The residue tag (e.g., "asp", "glu", "phetyr").
+    residue_tag : RotamerGridResidueMap
+        The residue tag enum
     wrapped_chis : list[float]
         The list of wrapped chi angles.
 
@@ -181,6 +188,10 @@ def _wrap_symmetrical(residue_tag: str, wrapped_chis: list[float]) -> list[float
     -------
     list[float]
         The list of symmetrically wrapped chi angles.
+
+    Notes
+    -----
+    Taken from Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/rotamer/rotamer_eval.py#L368
     """
     residue_tag = residue_tag.lower()
     if residue_tag == "asp" or residue_tag == "glu" or residue_tag == "phetyr":
@@ -193,16 +204,15 @@ def _wrap_symmetrical(residue_tag: str, wrapped_chis: list[float]) -> list[float
 
 
 def _wrap_chis(
-    residue_tag: str, chis: list[float], symmetry: bool = True
+    residue_tag: RotamerGridResidueMap, chis: list[float], symmetry: bool = True
 ) -> list[float]:
     """
     Wrap chi angles to the range [0, 360) or [-180, 180) depending on the residue type.
-    Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/rotamer/rotamer_eval.py#L368
 
     Parameters
     ----------
-    residue_tag : str
-        The residue tag (e.g., "asp", "glu", "phetyr").
+    residue_tag : RotamerGridResidueMap
+        The residue tag enum
     chis : list[float]
         The list of chi angles.
     symmetry : bool
@@ -212,6 +222,10 @@ def _wrap_chis(
     -------
     list[float]
         The list of wrapped chi angles.
+
+    Notes
+    -----
+    Taken from Source: https://github.com/cctbx/cctbx_project/blob/ee756cb47e375e11b4c37b65c418747f42104446/mmtbx/rotamer/rotamer_eval.py#L368
     """
     residue_tag = residue_tag.lower()
     wrapped_chis = []
@@ -631,7 +645,7 @@ def _truncate_angles_within_a_step_of_grid_span(
 ) -> float:
     """
     Truncate an angle to be within a step of the grid span.
-    
+
     This function ensures that the coordinate is within the specified low and high bounds,
     and if it is outside, it will return the closest bound if it is within one step of it.
 
@@ -663,7 +677,7 @@ def _truncate_angles_within_a_step_of_grid_span(
 
 def _identify_gaps_in_atom_array(
     atom_array: struc.AtomArray,
-) -> list[tuple[str, int, int]]:
+) -> np.ndarray:
     """
     Identify gaps in the atom array based on missing atoms or residues.
 
@@ -674,31 +688,13 @@ def _identify_gaps_in_atom_array(
 
     Returns
     -------
-    list[tuple[str, int, int]]
-        A list of tuples where each tuple contains:
-        - chain ID (str)
-        - residue ID before the gap (int)
-        - residue ID after the gap (int)
+    np.ndarray
+        An array of residue IDs where gaps are identified.
     """
-
-    # Sort atoms by chain + residue
-    sort_indices = np.lexsort((atom_array.res_id, atom_array.chain_id))
-    atom_array = atom_array[sort_indices]
-
-    # Extract residue IDs and chain IDs
-    res_ids = atom_array.res_id
-    chain_ids = atom_array.chain_id
-
-    breakpoints = []
-    for chain in set(chain_ids):
-        res_chain = res_ids[chain_ids == chain]
-        # Look for jumps larger than 1 in residue numbering
-        diffs = res_chain[1:] - res_chain[:-1]
-        gaps = (diffs > 1).nonzero()[0]
-        for g in gaps:
-            breakpoints.append((chain, res_chain[g], res_chain[g + 1]))
-
-    return breakpoints
+    gap_ending_atom_idx = check_res_id_continuity(atom_array)
+    # Add the preceeding atoms
+    gap_both_atom_idx = np.concat([gap_ending_atom_idx, gap_ending_atom_idx - 1])
+    return atom_array.res_id[gap_both_atom_idx]
 
 
 def _interp_wrapped(
@@ -796,11 +792,7 @@ def _check_rotamer(
             pct=np.nan, classification=ConformerClass.UNKNOWN
         ), observed
 
-    resname_tag = (
-        getattr(RotamerGridResidueMap, resname).value
-        if resname in RotamerGridResidueMap.__members__
-        else None
-    )
+    resname_tag = RotamerGridResidueMap.__dict__.get(resname, None)
 
     if resname_tag is None:
         warnings.warn(f"Rotamer classification not available for residue {resname}.")
@@ -859,11 +851,6 @@ class ResidueRotamerScore:
         The rotamer score percentage for the residue, e.g. 0.01 for 1% favored.
     classification : ConformerClass
         The classification of the residue based on its rotamer score percentage.
-        It can be one of the following:
-        - "FAVORED": The residue is in a favored rotamer conformation.
-        - "ALLOWED": The residue is in an allowed rotamer conformation.
-        - "OUTLIER": The residue is in an outlier rotamer conformation.
-        - "UNKNOWN": The residue's rotamer score could not be determined.
 
     References
     ----------
@@ -927,8 +914,7 @@ def _classify_rotamers(atom_array: struc.AtomArray) -> list["ResidueRotamerScore
         An instance of RotamerScore containing the rotamer scores for the structure.
     """
     if not isinstance(atom_array, struc.AtomArray):
-        warnings.warn("RotamerScore: Cannot be computed; atom_array must be AtomArray")
-        return []
+        raise TypeError("RotamerScore: Cannot be computed; atom_array must be AtomArray")
 
     if all(atom_array.hetero):
         warnings.warn(
@@ -981,11 +967,6 @@ class RotamerScore:
         A list of ResidueRotamerScore objects, each representing the rotamer score for a residue in the structure.
         Each ResidueRotamerScore contains the residue name, residue ID, chain ID,
         observed chi angles, rotamer score percentage, classification, and any error message.
-        The classification can be one of the following:
-        - "FAVORED": The residue is in a favored rotamer conformation.
-        - "ALLOWED": The residue is in an allowed rotamer conformation.
-        - "OUTLIER": The residue is in an outlier rotamer conformation.
-        - "UNKNOWN": The residue's rotamer score could not be determined.
 
     References
     ----------
@@ -1048,9 +1029,10 @@ def _get_residue_phi_psi_omega(
     psi = psi[1:-1]
     omega = omega[1:-1]
 
-    phi = np.rad2deg(phi)
-    psi = np.rad2deg(psi)
-    omega = np.rad2deg(omega)
+    # Convert to degrees, keeping NaNs as NaNs
+    phi = np.where(np.isnan(phi), np.nan, np.rad2deg(phi))
+    psi = np.where(np.isnan(psi), np.nan, np.rad2deg(psi))
+    omega = np.where(np.isnan(omega), np.nan, np.rad2deg(omega))
     return phi, psi, omega
 
 
@@ -1113,19 +1095,19 @@ def _assign_rama_types(
 
     def rama_type(res_name: str, next_res_name: str, omega_val: float) -> str:
         if res_name == "GLY":
-            return RamaResidueType.GLY.value
+            return RamaResidueType.GLY
         elif res_name == "PRO":
             return (
-                RamaResidueType.CISPRO.value
+                RamaResidueType.CISPRO
                 if _is_cislike_peptide(omega_val)
-                else RamaResidueType.TRANSPRO.value
+                else RamaResidueType.TRANSPRO
             )
         elif next_res_name == "PRO":
-            return RamaResidueType.PREPRO.value
+            return RamaResidueType.PREPRO
         elif res_name in ["ILE", "VAL"]:
-            return RamaResidueType.ILEVAL.value
+            return RamaResidueType.ILEVAL
         else:
-            return RamaResidueType.GENERAL.value
+            return RamaResidueType.GENERAL
 
     rama_types = [
         rama_type(res_name, next_res_name, omega_val)
@@ -1140,7 +1122,7 @@ def _assign_rama_types(
 def _check_rama(
     phi: float,
     psi: float,
-    resname_tag: str,
+    resname_tag: RamaResidueType,
 ) -> "DihedralScore":
     """
     Check the Ramachandran classification for a given residue based on its phi, psi, and omega angles.
@@ -1151,8 +1133,8 @@ def _check_rama(
         The phi angle in degrees.
     psi : float
         The psi angle in degrees.
-    resname_tag : str
-        The residue name tag to use for classification (e.g. "general", "cispro", "gly").
+    resname_tag : RamaResidueType
+        The residue name tag enum
 
     Returns
     -------
@@ -1267,8 +1249,7 @@ def _classify_phi_psi(
         )
         return []
     if not isinstance(atom_array, struc.AtomArray):
-        warnings.warn("RamaScore: Cannot be computed; atom_array must be an AtomArray")
-        return []
+        raise TypeError("RamaScore: Cannot be computed; atom_array must be an AtomArray")
     atom_array = atom_array[
         struc.filter_canonical_amino_acids(atom_array) & ~atom_array.hetero
     ]
@@ -1286,9 +1267,6 @@ def _classify_phi_psi(
         # Identify breakpoints in backbone chains; this is to be skipped as
         # their scores are not reliable
         gaps = _identify_gaps_in_atom_array(chain_arr)
-        gaps_flattened = [
-            res for chain_res_triple in gaps for res in chain_res_triple[1:]
-        ]
 
         for phi, psi, omega, res_id, res_name, rama_type in zip(
             phis,
@@ -1298,7 +1276,7 @@ def _classify_phi_psi(
             res_names[1:-1],
             rama_types,
         ):
-            if res_id in gaps_flattened:
+            if res_id in gaps:
                 # Skip residues with gaps in the backbone chain
                 continue
             if res_name not in RotamerGridResidueMap.__members__:
@@ -1394,29 +1372,21 @@ def get_fraction_of_rotamer_outliers(atom_array: struc.AtomArray) -> float:
     total_rotamers = 0
     result = RotamerScore.from_atoms(atom_array)
     for rotamer_score in result.rotamer_scores:
-        if isinstance(rotamer_score, list):
-            # If it's a stack, we need to iterate through each score
-            for score in rotamer_score:
-                if score.classification == ConformerClass.OUTLIER:
-                    outlier_rotamers += 1
-                total_rotamers += 1
-        elif isinstance(rotamer_score, ResidueRotamerScore):
-            # If it's a single score, check its classification
-            if rotamer_score.classification == ConformerClass.OUTLIER:
-                outlier_rotamers += 1
-            total_rotamers += 1
+        if rotamer_score.classification == ConformerClass.OUTLIER:
+            outlier_rotamers += 1
+        total_rotamers += 1
     return outlier_rotamers / total_rotamers if total_rotamers > 0 else 0.0
 
 
 def get_fraction_of_rama_outliers(
-    atom_array: struc.AtomArray | struc.AtomArrayStack,
+    atom_array: struc.AtomArray,
 ) -> float:
     """
     Compute the fraction of ramachandran outliers for given structure.
 
     Parameters
     ----------
-    atom_array : struc.AtomArray | struc.AtomArrayStack
+    atom_array : struc.AtomArray
         The AtomArray or AtomArrayStack containing the structure(s).
 
     Returns
@@ -1430,14 +1400,7 @@ def get_fraction_of_rama_outliers(
     result = RamaScore.from_atoms(atom_array)
 
     for rama_score in result.rama_scores:
-        if isinstance(rama_score, list):
-            # If it's a stack, we need to iterate through each score
-            for score in rama_score:
-                if score.classification == ConformerClass.OUTLIER:
-                    outlier_rama += 1
-                total_rama += 1
-        elif isinstance(rama_score, ResidueRamaScore):
-            if rama_score.classification == ConformerClass.OUTLIER:
-                outlier_rama += 1
-            total_rama += 1
+        if rama_score.classification == ConformerClass.OUTLIER:
+            outlier_rama += 1
+        total_rama += 1
     return outlier_rama / total_rama if total_rama > 0 else 0.0
