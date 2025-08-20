@@ -945,9 +945,7 @@ def _classify_rotamers(atom_array: struc.AtomArray) -> list["ResidueRotamerScore
         )
         return []
     rotamer_scores: list[ResidueRotamerScore] = []
-    for chain_id in struc.get_chains(atom_array):
-        # Filter atoms for the current chain
-        chain_arr = atom_array[atom_array.chain_id == chain_id]
+    for chain_arr in struc.chain_iter(atom_array):
         chain_arr = chain_arr[~chain_arr.hetero]  # Remove hetero
         res_ids, res_names = struc.get_residues(chain_arr)
         rotamer_scores = []
