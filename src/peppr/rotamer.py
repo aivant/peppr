@@ -80,11 +80,11 @@ class RotamerGridResidueMap(Enum):
 class ConformerClass(IntEnum):
     """
     Enum for conformer classification types.
-    This enum defines the possible classifications for different conformations.
+    This enum defines the possible classifications for different conformations [1]_.
 
     References
     ----------
-    .. [1] https://pmc.ncbi.nlm.nih.gov/articles/PMC4983197/
+    .. [1] https://doi.org/10.1002/prot.25039
     """
 
     FAVORED = 1
