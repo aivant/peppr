@@ -708,7 +708,7 @@ def _interp_wrapped(
     coords_type: str,
 ) -> tuple[float, list[float]]:
     """
-    Interpolate value at given χ coords (deg), handling wrapping axes.
+    Interpolate probability at given χ coords (deg), handling wrapping axes.
 
     Parameters
     ----------
