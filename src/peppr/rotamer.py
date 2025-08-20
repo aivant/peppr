@@ -18,7 +18,7 @@ import tarfile
 import warnings
 import zipfile
 from dataclasses import asdict, dataclass, field
-from enum import Enum, StrEnum, IntEnum
+from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import Any
 import numpy as np
@@ -57,8 +57,8 @@ class RotamerGridResidueMap(StrEnum):
     This enum maps residue names to their corresponding tags used in the rotamer library.
     """
 
-    ALA = None
-    GLY = None  # ALA and GLY have no chi angles
+    ALA = "NA"
+    GLY = "NA"  # ALA and GLY have no chi angles
     ARG = "arg"
     ASN = "asn"
     ASP = "asp"
@@ -173,7 +173,9 @@ def _wrap_phi_psi(phi: float, psi: float) -> tuple[float, float]:
     return _get_mmtbx_neg180_to_180_value(phi), _get_mmtbx_neg180_to_180_value(psi)
 
 
-def _wrap_symmetrical(residue_tag: RotamerGridResidueMap, wrapped_chis: list[float]) -> list[float]:
+def _wrap_symmetrical(
+    residue_tag: RotamerGridResidueMap, wrapped_chis: list[float]
+) -> list[float]:
     """
     Apply symmetrical wrapping to chi angles for specific amino acids.
 
@@ -794,7 +796,7 @@ def _check_rotamer(
 
     resname_tag = RotamerGridResidueMap.__dict__.get(resname, None)
 
-    if resname_tag is None:
+    if resname_tag is None or resname_tag == "NA":
         warnings.warn(f"Rotamer classification not available for residue {resname}.")
         return DihedralScore(
             pct=np.nan, classification=ConformerClass.UNKNOWN
@@ -914,7 +916,9 @@ def _classify_rotamers(atom_array: struc.AtomArray) -> list["ResidueRotamerScore
         An instance of RotamerScore containing the rotamer scores for the structure.
     """
     if not isinstance(atom_array, struc.AtomArray):
-        raise TypeError("RotamerScore: Cannot be computed; atom_array must be AtomArray")
+        raise TypeError(
+            "RotamerScore: Cannot be computed; atom_array must be AtomArray"
+        )
 
     if all(atom_array.hetero):
         warnings.warn(
@@ -1249,7 +1253,9 @@ def _classify_phi_psi(
         )
         return []
     if not isinstance(atom_array, struc.AtomArray):
-        raise TypeError("RamaScore: Cannot be computed; atom_array must be an AtomArray")
+        raise TypeError(
+            "RamaScore: Cannot be computed; atom_array must be an AtomArray"
+        )
     atom_array = atom_array[
         struc.filter_canonical_amino_acids(atom_array) & ~atom_array.hetero
     ]

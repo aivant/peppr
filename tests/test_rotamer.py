@@ -7,7 +7,6 @@ from peppr.rotamer import (
     ConformerClass,
     RamaResidueType,
     RamaScore,
-    RotamerGridResidueMap,
     RotamerScore,
     _check_rama,
     _check_rotamer,
