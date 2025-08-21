@@ -253,7 +253,7 @@ def _download_and_extract(url: str, dest_path: Path | None = None) -> Path:
     ----------
     url : str
         The URL to download the file from.
-    dest_path : Path | None
+    dest_path : Path
         The destination path where the file should be saved. If None, uses the URL's name.
 
     Returns
@@ -263,7 +263,8 @@ def _download_and_extract(url: str, dest_path: Path | None = None) -> Path:
     """
     if dest_path is None:
         dest_path = Path(Path(url).name)
-    dest_path = Path(dest_path)
+    else:
+        dest_path = Path(dest_path)
     # Ensure parent directory exists
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     # Download the file
@@ -780,8 +781,6 @@ def _check_rotamer(
         - DihedralScore: The rotamer score and classification.
         - dict[str, float]: The observed chi angles for the residue.
     """
-    if not isinstance(atom_array, struc.AtomArray):
-        raise TypeError("atom_array must be an AtomArray")
     mask = (atom_array.chain_id == chain_id) & (atom_array.res_id == res_id)
     if not np.any(mask):
         raise ValueError("Residue not found")
@@ -866,9 +865,9 @@ class ResidueRotamerScore:
     pct: float
     classification: ConformerClass
 
-    @classmethod
+    @staticmethod
     def from_residue(
-        cls, atom_array: struc.AtomArray, res_id: int, res_name: str, chain_id: str
+        atom_array: struc.AtomArray, res_id: int, res_name: str, chain_id: str
     ) -> "ResidueRotamerScore":
         """
         Create ResidueRotamerScore from a residue object.
@@ -892,7 +891,7 @@ class ResidueRotamerScore:
         score, angles = _check_rotamer(atom_array, res_id, chain_id)
         chis = {f"chi{i + 1}": ang for i, ang in enumerate(angles)}
 
-        return cls(
+        return ResidueRotamerScore(
             res_name=res_name,
             res_id=res_id,
             chain_id=chain_id,
@@ -915,11 +914,6 @@ def _classify_rotamers(atom_array: struc.AtomArray) -> list["ResidueRotamerScore
     list[ResidueRotamerScore]
         An instance of RotamerScore containing the rotamer scores for the structure.
     """
-    if not isinstance(atom_array, struc.AtomArray):
-        raise TypeError(
-            "RotamerScore: Cannot be computed; atom_array must be AtomArray"
-        )
-
     if all(atom_array.hetero):
         warnings.warn(
             "RotamerScore: Cannot be computed; atom_array must contain some protein residues"
@@ -960,17 +954,19 @@ class RotamerScore:
     """
     Rotamer score for a given protein structure.
     This class represents the rotamer scores for all residues in a protein structure,
-    including their names, IDs, observed chi angles, rotamer score percentages, and classifications.
+    including their names, IDs, observed chi angles, rotamer score percentages, and
+    classifications.
 
-    It is used to assess the quality of the protein structure based on the rotamer conformations
-    and to identify potential outliers in the rotamer angles.
+    It is used to assess the quality of the protein structure based on the rotamer
+    conformations and to identify potential outliers in the rotamer angles.
 
     Attributes
     ----------
     rotamer_scores : list[ResidueRotamerScore]
-        A list of ResidueRotamerScore objects, each representing the rotamer score for a residue in the structure.
+        A list of ResidueRotamerScore objects, each representing the rotamer score for a
+        residue in the structure.
         Each ResidueRotamerScore contains the residue name, residue ID, chain ID,
-        observed chi angles, rotamer score percentage, classification, and any error message.
+        observed chi angles, rotamer score percentage and classification.
 
     References
     ----------
@@ -985,8 +981,8 @@ class RotamerScore:
         },
     )
 
-    @classmethod
-    def from_atoms(cls, atom_array: struc.AtomArray) -> "RotamerScore":
+    @staticmethod
+    def from_atoms(atom_array: struc.AtomArray) -> "RotamerScore":
         """
         Create RotamerScore from a protein structure or a stack of structures.
 
@@ -1000,11 +996,7 @@ class RotamerScore:
         RotamerScore
             An instance of RotamerScore containing the rotamer scores for the structure(s).
         """
-        if isinstance(atom_array, struc.AtomArray):
-            rotamers_scores = _classify_rotamers(atom_array)
-            return cls(rotamer_scores=rotamers_scores)
-        else:
-            raise TypeError("atom_array must be an AtomArray")
+        return RotamerScore(rotamer_scores=_classify_rotamers(atom_array))
 
 
 def _get_residue_phi_psi_omega(
@@ -1081,14 +1073,15 @@ def _assign_rama_types(
     Returns
     -------
     dict
-        A dictionary containing the phi, psi, omega angles and their corresponding Ramachandran types.
-    """
-    # Get phi, psi, omega angles
-    # Note: This function assumes the atom_array is already cleaned and contains only relevant residues.
-    # It should not contain water or other non-protein residues.
-    if not isinstance(atom_array, struc.AtomArray):
-        raise TypeError("atom_array must be an AtomArray")
+        A dictionary containing the phi, psi, omega angles and their corresponding
+        Ramachandran types.
 
+    Notes
+    -----
+    This function assumes `atom_array` is already cleaned and contains only relevant
+    residues.
+    It should not contain water or other non-protein residues.
+    """
     # TODO: Make this function more performant by avoiding multiple calls to struc.dihedral_backbone
     phis, psis, omegas = _get_residue_phi_psi_omega(atom_array)
 
@@ -1148,15 +1141,16 @@ def _check_rama(
     Notes
     -----
     This function uses the Top8000 Ramachandran contour grids to classify the residue.
-    It checks the phi, psi, and omega angles against the grids and assigns a classification
-    of "FAVORED", "ALLOWED", or "OUTLIER" based on the percentage of favored conformations.
+    It checks the phi, psi, and omega angles against the grids and assigns a
+    classification of "FAVORED", "ALLOWED", or "OUTLIER" based on the percentage of
+    favored conformations.
     If the residue is CIS or PRO, it uses special handling for those residues.
     The thresholds for classification are defined as follows:
     - FAVORED: pct >= `_RAMA_FAVORED_THRESHOLD`
-    - ALLOWED: pct >= `_RAMA_ALLOWED_THRESHOLD` (or `_RAMA_GENERAL_ALLOWED_THRESHOLD` for "general" residues,
-    or `_RAMA_CISPRO_ALLOWED_THRESHOLD` for "cispro" residues)
-    - OUTLIER: pct < `_RAMA_ALLOWED_THRESHOLD` (or `_RAMA_GENERAL_ALLOWED_THRESHOLD` for "general" residues,
-    or `_RAMA_CISPRO_ALLOWED_THRESHOLD` for "cispro" residues)
+    - ALLOWED: pct >= `_RAMA_ALLOWED_THRESHOLD` (or `_RAMA_GENERAL_ALLOWED_THRESHOLD`
+      for "general" residues, or `_RAMA_CISPRO_ALLOWED_THRESHOLD` for "cispro" residues)
+    - OUTLIER: pct < `_RAMA_ALLOWED_THRESHOLD` (or `_RAMA_GENERAL_ALLOWED_THRESHOLD` for
+      "general" residues, or `_RAMA_CISPRO_ALLOWED_THRESHOLD` for "cispro" residues)
 
     References
     ----------
@@ -1197,8 +1191,9 @@ def _check_rama(
 class ResidueRamaScore:
     """
     Ramachandran score for a residue in a protein structure.
-    This class represents the ramachandran score for a single residue, including its name,
-    ID, observed phi, psi, omega angles, Ramachandran score percentage, and classification.
+    This class represents the Ramachandran score for a single residue, including its
+    name, ID, observed phi, psi, omega angles, Ramachandran score percentage and
+    classification.
     """
 
     res_name: str
@@ -1209,9 +1204,8 @@ class ResidueRamaScore:
     pct: float
     classification: ConformerClass
 
-    @classmethod
+    @staticmethod
     def from_phi_psi_omega(
-        cls,
         phi: float,
         psi: float,
         omega: float,
@@ -1221,7 +1215,7 @@ class ResidueRamaScore:
         resname_tag: str,
     ) -> "ResidueRamaScore":
         result = _check_rama(phi, psi, resname_tag)
-        return cls(
+        return ResidueRamaScore(
             res_id=res_id,
             res_name=res_name,
             resname_tag=resname_tag,
@@ -1245,17 +1239,13 @@ def _classify_phi_psi(
     Returns
     -------
     list[RamaScore]
-        An instance of RamaScore containing the ramachandran scores for the structure.
+        An instance of RamaScore containing the Ramachandran scores for the structure.
     """
     if all(atom_array.hetero):
         warnings.warn(
             "RotamerScore: Cannot be computed; atom_array must contain some protein residues"
         )
         return []
-    if not isinstance(atom_array, struc.AtomArray):
-        raise TypeError(
-            "RamaScore: Cannot be computed; atom_array must be an AtomArray"
-        )
     atom_array = atom_array[
         struc.filter_canonical_amino_acids(atom_array) & ~atom_array.hetero
     ]
@@ -1317,13 +1307,13 @@ class RamaScore:
     - OUTLIER: pct < `_RAMA_ALLOWED_THRESHOLD` (or `_RAMA_GENERAL_ALLOWED_THRESHOLD` for "general" residues,
     or `_RAMA_CISPRO_ALLOWED_THRESHOLD` for "cispro" residues)
 
-    It is used to assess the quality of the protein structure based on the ramachandran angles
+    It is used to assess the quality of the protein structure based on the Ramachandran angles
     and to identify potential outliers in the phi/psi angles..
 
     Attributes
     ----------
     rama_scores : list[ResidueRamaScore]
-        A list of ResidueRamaScore objects, each representing the ramachandran score for a residue in the structure.
+        A list of ResidueRamaScore objects, each representing the Ramachandran score for a residue in the structure.
 
     References
     ----------
@@ -1333,12 +1323,12 @@ class RamaScore:
     rama_scores: list[ResidueRamaScore] = field(
         default_factory=list,
         metadata={
-            "description": "List of ramachandran scores for each residue in the structure."
+            "description": "List of Ramachandran scores for each residue in the structure."
         },
     )
 
-    @classmethod
-    def from_atoms(cls, atom_array: struc.AtomArray) -> "RamaScore":
+    @staticmethod
+    def from_atoms(atom_array: struc.AtomArray) -> "RamaScore":
         """
         Create RamaScore from a protein structure.
 
@@ -1350,13 +1340,10 @@ class RamaScore:
         Returns
         -------
         RamaScore
-            An instance of RamaScore containing the ramachandran scores for the structure.
+            An instance of RamaScore containing the Ramachandran scores for the
+            structure.
         """
-        if isinstance(atom_array, struc.AtomArray):
-            rama_scores = _classify_phi_psi(atom_array)
-            return cls(rama_scores=rama_scores)
-        else:
-            raise TypeError("atom_array must be an AtomArray")
+        return RamaScore(rama_scores=_classify_phi_psi(atom_array))
 
 
 def get_fraction_of_rotamer_outliers(atom_array: struc.AtomArray) -> float:
@@ -1388,7 +1375,7 @@ def get_fraction_of_rama_outliers(
     atom_array: struc.AtomArray,
 ) -> float:
     """
-    Compute the fraction of ramachandran outliers for given structure.
+    Compute the fraction of Ramachandran outliers for given structure.
 
     Parameters
     ----------
@@ -1398,8 +1385,8 @@ def get_fraction_of_rama_outliers(
     Returns
     -------
     float
-        The fraction of ramachandran outliers in the structure, calculated as the number of outlier
-        ramachandran angles divided by the total number of ramachandran angles.
+        The fraction of Ramachandran outliers in the structure, calculated as the number of outlier
+        Ramachandran angles divided by the total number of Ramachandran angles.
     """
     outlier_rama = 0
     total_rama = 0
