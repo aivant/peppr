@@ -20,6 +20,8 @@ __all__ = [
     "ChiralityViolations",
     "PocketDistance",
     "PocketVolumeOverlap",
+    "RotamerViolations",
+    "RamachandranViolations",
 ]
 
 import itertools
@@ -55,6 +57,10 @@ from peppr.dockq import (
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
 from peppr.match import find_matching_centroids, find_optimal_match
+from peppr.rotamer import (
+    get_fraction_of_rama_outliers,
+    get_fraction_of_rotamer_outliers,
+)
 from peppr.volume import volume_overlap
 
 
@@ -848,6 +854,7 @@ class BondAngleViolations(Metric):
         """
         if pose.array_length() == 0:
             return np.nan
+
         # Idealize the pose local geometry to make the reference
         try:
             reference = idealize_bonds(pose)
@@ -873,6 +880,113 @@ class BondAngleViolations(Metric):
     def disable_atom_matching(self) -> bool:
         # This metric does not use the reference anyway
         return True
+
+
+class RotamerViolations(Metric):
+    """
+    Check for the fraction of improbable amino acid rotamer angles,
+    based on known crystal structures in the *Top8000* dataset [1]_.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1002/prot.25039
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "Rotamer violations"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        # http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
+        return OrderedDict(
+            [
+                ("good", 0.000),
+                ("warning", 0.003),
+                ("bad", 0.015),
+            ]
+        )
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """
+        Calculate the percentage of residues with chi angles that are outside acceptable ranges.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            Not used in this metric as we compare against ideal bond angles.
+        pose : AtomArray
+            The structure to evaluate.
+
+        Returns
+        -------
+        float
+            Percentage of bonds outside acceptable ranges (0.0 to 1.0).
+        """
+        if pose.array_length() == 0:
+            return np.nan
+
+        return get_fraction_of_rotamer_outliers(pose)
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+
+class RamachandranViolations(Metric):
+    r"""
+    Check for the fraction of improbable :math:`\phi`/:math:`\psi` angles,
+    based on known crystal structures in the *Top8000* dataset [1]_.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1002/prot.25039
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "Ramachandran violations"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        # http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
+        return OrderedDict(
+            [
+                ("good", 0.0000),
+                ("warning", 0.0005),
+                ("bad", 0.0050),
+            ]
+        )
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """
+        Calculate the percentage of bonds that are outside acceptable ranges.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            Not used in this metric as we compare against ideal bond angles.
+        pose : AtomArray
+            The structure to evaluate.
+
+        Returns
+        -------
+        float
+            Percentage of bonds outside acceptable ranges (0.0 to 1.0).
+        """
+
+        if pose.array_length() == 0:
+            return np.nan
+
+        return get_fraction_of_rama_outliers(pose)
+
+    def smaller_is_better(self) -> bool:
+        return False
 
 
 class ClashCount(Metric):
