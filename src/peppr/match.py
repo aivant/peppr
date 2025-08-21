@@ -10,6 +10,7 @@ __all__ = [
 
 import itertools
 import warnings
+from collections import Counter
 from collections.abc import Callable
 from typing import Any, Iterator
 import biotite.interface.rdkit as rdkit_interface
@@ -1086,7 +1087,9 @@ def _assign_entity_ids_to_chains(
                 continue
             elif sequence is None:
                 # Match small molecules by residue name
-                if chain.res_name[0] == chains[j].res_name[0]:
+                if chain.res_name[0] == chains[j].res_name[0] and _equal_composition(
+                    [chain, chains[j]]
+                ):
                     entity_ids.append(entity_ids[j])
                     break
             else:
@@ -1260,6 +1263,29 @@ def _is_matched(
         ).all():
             return False
     return True
+
+
+def _equal_composition(molecules: list[struc.AtomArray]) -> bool:
+    """
+    Check if the element composition is the same in both molecules.
+
+    The atoms in each molecule may be in a different order.
+
+    Parameters
+    ----------
+    molecules : list[AtomArray]
+        The atoms to compare.
+
+    Returns
+    -------
+    equal : bool
+        True, if the element composition is the same in both molecules.
+    """
+    element_counters: list[Counter[str]] = [Counter() for _ in molecules]
+    for i, molecule in enumerate(molecules):
+        for element in molecule.element:
+            element_counters[i][element] += 1
+    return all(element_counters[0] == counter for counter in element_counters[1:])
 
 
 def _to_mol(molecule: struc.AtomArray) -> Mol:
