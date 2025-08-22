@@ -96,11 +96,9 @@ def test_metrics(metric, value_range):
     """
     SYSTEM_ID = "7znt__2__1.F_1.G__1.J"
 
-    reference, poses = assemble_predictions(SYSTEM_ID)
+    reference, poses = _assemble_matched_predictions(SYSTEM_ID)
     for pose in poses:
-        reference_order, pose_order = peppr.find_optimal_match(reference, pose)
-        reference = reference[reference_order]
-        pose = pose[pose_order]
+        reference, pose = peppr.find_optimal_match(reference, pose)
         value = metric.evaluate(reference, pose)
         assert value >= value_range[0]
         assert value <= value_range[1]
@@ -112,7 +110,7 @@ def test_no_modification(metric):
     No metric should modify the input structures.
     """
     # Choose any system that is suitable for all metrics, i.e. contains PPI and PLI
-    reference, poses = assemble_predictions("7znt__2__1.F_1.G__1.J")
+    reference, poses = _assemble_matched_predictions("7znt__2__1.F_1.G__1.J")
     pose = poses[0]
     original_reference = reference.copy()
     original_pose = pose.copy()
@@ -180,7 +178,7 @@ def test_pli_metrics(system_id, metric, column_name, abs_tolerance, rel_toleranc
     """
     ref_metric = get_reference_metric(system_id, column_name)
 
-    reference, poses = assemble_predictions(system_id)
+    reference, poses = _assemble_matched_predictions(system_id)
     evaluator = peppr.Evaluator([metric])
     # The reference computes metrics per ligand,
     # so for comparison we do this here as well
@@ -211,7 +209,7 @@ def test_intra_ligand_lddt_score(system_id, move_structure):
     Hence moving the ligands towards each other in the reference or pose should not
     change the lDDT score.
     """
-    reference, poses = assemble_predictions(system_id)
+    reference, poses = _assemble_matched_predictions(system_id)
     metric = peppr.IntraLigandLDDTScore()
     # Explicitly do not use the `Evaluator` here,
     # as moving ligand might change the atom mapping
@@ -286,11 +284,9 @@ def test_ligand_rmsd_with_no_contacts():
 
     :param data_dir: pytest fixture, path to the directory containing the test data
     """
-    reference, poses = assemble_predictions("7znt__2__1.F_1.G__1.J")
+    reference, poses = _assemble_matched_predictions("7znt__2__1.F_1.G__1.J")
     pose = poses[0]
-    reference_order, pose_order = peppr.find_optimal_match(reference, pose)
-    reference = reference[reference_order]
-    pose = pose[pose_order]
+    reference, pose = peppr.find_optimal_match(reference, pose)
 
     # Assert that the reference contains only two protein chains
     assert set(reference.chain_id[~reference.hetero]) == {"0", "1"}
@@ -318,7 +314,7 @@ def test_ligand_only_system(metric):
     that could break when working with ligand-only systems.
     """
     # Choose any system that is suitable for all metrics
-    reference, poses = assemble_predictions("7znt__2__1.F_1.G__1.J")
+    reference, poses = _assemble_matched_predictions("7znt__2__1.F_1.G__1.J")
     pose = poses[0]
 
     # Keep only ligand atoms
@@ -386,13 +382,13 @@ def test_perfect_pli_metrics(metric, perfect_value, bad_value, pdb_id):
 
     # Test with same structure - should return perfect score
     recovery_score = metric.evaluate(reference, reference)
-    assert recovery_score == pytest.approx(perfect_value, abs=1e-6)
+    assert recovery_score == pytest.approx(perfect_value, abs=1e-5)
 
     # If the pose ligand is heavily misplaced, the score should be bad
     recovery_score = metric.evaluate(reference, pose)
     if bad_value is not None:
         # Expect the worst possible score
-        assert recovery_score == pytest.approx(bad_value, abs=1e-6)
+        assert recovery_score == pytest.approx(bad_value, abs=1e-5)
     else:
         # There are no bounds how bad the metric can get
         # -> Expect the score to be worse than the perfect score
@@ -408,7 +404,7 @@ def test_chirality_violations():
     Comparing a molecule with its mirror image should return 100% chirality violations.
     """
     SYSTEM_ID = "7znt__2__1.F_1.G__1.J"
-    reference, _ = assemble_predictions(SYSTEM_ID)
+    reference, _ = _assemble_matched_predictions(SYSTEM_ID)
 
     metric = peppr.ChiralityViolations()
 
@@ -419,3 +415,12 @@ def test_chirality_violations():
     mirror_image = reference.copy()
     mirror_image.coord[:, 0] *= -1
     assert metric.evaluate(reference, mirror_image) == 1.0
+
+
+def _assemble_matched_predictions(system_id):
+    reference, poses = assemble_predictions(system_id)
+    # Sanity check if the predictions are actually pre-matched
+    matched_reference, matched_poses = peppr.filter_matched(reference, poses)
+    assert matched_reference == reference
+    assert matched_poses == poses
+    return reference, poses

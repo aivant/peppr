@@ -95,8 +95,10 @@ Atom Matching
     find_optimal_match
     find_all_matches
     find_matching_centroids
+    filter_matched
     GraphMatchWarning
     UnmappableEntityError
+    StructureMismatchError
 
 Miscellaneous
 -------------

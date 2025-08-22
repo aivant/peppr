@@ -56,7 +56,7 @@ from peppr.dockq import (
 )
 from peppr.graph import graph_to_connected_triples
 from peppr.idealize import idealize_bonds
-from peppr.match import find_matching_centroids, find_optimal_match
+from peppr.match import filter_matched, find_matching_centroids
 from peppr.rotamer import (
     get_fraction_of_rama_outliers,
     get_fraction_of_rotamer_outliers,
@@ -145,20 +145,14 @@ class Metric(ABC):
         """
         Defines whether the upstream atom matching is disabled for this metric.
 
-        By default the `reference` and `pose` are already matched by the calling
-        :class:`Evaluator`.
-        This behavior can be disabled by overriding this method.
+        DEPRECATED: This method has no effect anymore.
 
         Returns
         -------
         bool
-            If set to true, the upstream atom matching using
-            :func:`find_optimal_match()` is disabled.
-            Note that this causes the `reference` and `pose` passed to
-            :meth:`evaluate()` to be unmatched to each other.
-            Hence, if some kind of matching is still required, it must be done
-            inside the :meth:`evaluate()` method.
+            No effect.
         """
+        warnings.warn("The method has no effect anymore", DeprecationWarning)
         return False
 
 
@@ -199,10 +193,17 @@ class MonomerRMSD(Metric):
             pose_chain, _ = struc.superimpose(reference_chain, pose_chain)
             return struc.rmsd(reference_chain, pose_chain)
 
-        mask = ~reference.hetero
         if self._ca_only:
-            mask &= reference.atom_name == "CA"
-        return _run_for_each_monomer(reference[mask], pose[mask], superimpose_and_rmsd)
+            reference, pose = filter_matched(
+                reference,
+                pose,
+                prefilter=lambda atoms: ~atoms.hetero & (atoms.atom_name == "CA"),
+            )
+        else:
+            reference, pose = filter_matched(
+                reference, pose, prefilter=lambda atoms: ~atoms.hetero
+            )
+        return _run_for_each_monomer(reference, pose, superimpose_and_rmsd)
 
     def smaller_is_better(self) -> bool:
         return True
@@ -247,9 +248,11 @@ class MonomerTMScore(Metric):
                     raise
 
         # TM-score is only defined for peptide chains
-        mask = struc.filter_amino_acids(reference) & ~reference.hetero
-        reference = reference[mask]
-        pose = pose[mask]
+        reference, pose = filter_matched(
+            reference,
+            pose,
+            prefilter=lambda atoms: struc.filter_amino_acids(atoms) & ~atoms.hetero,
+        )
         return _run_for_each_monomer(reference, pose, superimpose_and_tm_score)
 
     def smaller_is_better(self) -> bool:
@@ -267,12 +270,9 @@ class MonomerLDDTScore(Metric):
         return "intra protein lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        protein_mask = ~reference.hetero
-        if not protein_mask.any():
-            # No protein present
-            return np.nan
-        reference = reference[protein_mask]
-        pose = pose[protein_mask]
+        reference, pose = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
         return _run_for_each_monomer(reference, pose, struc.lddt)
 
     def smaller_is_better(self) -> bool:
@@ -298,12 +298,12 @@ class IntraLigandLDDTScore(Metric):
             # Remove contacts between atoms of different molecules
             return chain_indices[:, 0] == chain_indices[:, 1]
 
-        ligand_mask = reference.hetero
-        if not ligand_mask.any():
+        reference, pose = filter_matched(
+            reference, pose, prefilter=lambda atoms: atoms.hetero
+        )
+        if reference.array_length() == 0:
             # No ligands present
             return np.nan
-        reference = reference[ligand_mask]
-        pose = pose[ligand_mask]
         return struc.lddt(
             reference,
             pose,
@@ -360,6 +360,7 @@ class LDDTPLIScore(Metric):
                 symmetric=True,
             )
 
+        reference, pose = filter_matched(reference, pose)
         return _average_over_ligands(reference, pose, lddt_pli)
 
     def smaller_is_better(self) -> bool:
@@ -377,12 +378,12 @@ class LDDTPPIScore(Metric):
         return "protein-protein lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        protein_mask = ~reference.hetero
-        if not protein_mask.any():
+        reference, pose = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
+        if reference.array_length() == 0:
             # This is not a PPI system
             return np.nan
-        reference = reference[protein_mask]
-        pose = pose[protein_mask]
         return struc.lddt(reference, pose, exclude_same_chain=True)
 
     def smaller_is_better(self) -> bool:
@@ -420,9 +421,14 @@ class GlobalLDDTScore(Metric):
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         if self._backbone_only:
-            mask = ~reference.hetero & np.isin(reference.atom_name, ["CA", "C3'"])
-            reference = reference[mask]
-            pose = pose[mask]
+            reference, pose = filter_matched(
+                reference,
+                pose,
+                prefilter=lambda atoms: ~atoms.hetero
+                & np.isin(atoms.atom_name, ["CA", "C3'"]),
+            )
+        else:
+            reference, pose = filter_matched(reference, pose)
         if reference.array_length() == 0:
             return np.nan
         return struc.lddt(reference, pose).item()
@@ -486,6 +492,7 @@ class DockQScore(Metric):
                 )
             ).score
 
+        reference, pose = filter_matched(reference, pose)
         return _run_for_each_chain_pair(reference, pose, run_dockq)
 
     def smaller_is_better(self) -> bool:
@@ -508,10 +515,6 @@ class LigandRMSD(Metric):
         return "LRMSD"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        mask = struc.filter_amino_acids(reference) & ~reference.hetero
-        reference = reference[mask]
-        pose = pose[mask]
-
         def lrmsd_on_interfaces_only(
             reference_chain1: struc.AtomArray,
             reference_chain2: struc.AtomArray,
@@ -533,6 +536,11 @@ class LigandRMSD(Metric):
                     )
                 )
 
+        reference, pose = filter_matched(
+            reference,
+            pose,
+            prefilter=lambda atoms: struc.filter_amino_acids(atoms) & ~atoms.hetero,
+        )
         return _run_for_each_chain_pair(reference, pose, lrmsd_on_interfaces_only)
 
     def smaller_is_better(self) -> bool:
@@ -553,9 +561,11 @@ class InterfaceRMSD(Metric):
         return "iRMSD"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        mask = struc.filter_amino_acids(reference) & ~reference.hetero
-        reference = reference[mask]
-        pose = pose[mask]
+        reference, pose = filter_matched(
+            reference,
+            pose,
+            prefilter=lambda atoms: struc.filter_amino_acids(atoms) & ~atoms.hetero,
+        )
         # iRMSD is independent of the selection of receptor and ligand chain
         return _run_for_each_chain_pair(reference, pose, irmsd)
 
@@ -578,9 +588,11 @@ class ContactFraction(Metric):
         return "fnat"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        mask = struc.filter_amino_acids(reference) & ~reference.hetero
-        reference = reference[mask]
-        pose = pose[mask]
+        reference, pose = filter_matched(
+            reference,
+            pose,
+            prefilter=lambda atoms: struc.filter_amino_acids(atoms) & ~atoms.hetero,
+        )
         # Fnat is independent of the selection of receptor and ligand chain
         # Caution: `fnat()` returns both fnat and fnonnat -> select first element
         return _run_for_each_chain_pair(reference, pose, lambda *args: fnat(*args)[0])
@@ -618,6 +630,7 @@ class PocketAlignedLigandRMSD(Metric):
                 )
             )
 
+        reference, pose = filter_matched(reference, pose)
         return _run_for_each_chain_pair(reference, pose, run_lrmd)
 
     def smaller_is_better(self) -> bool:
@@ -681,6 +694,7 @@ class BiSyRMSD(Metric):
         )
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        reference, pose = filter_matched(reference, pose)
         return bisy_rmsd(
             reference,
             pose,
@@ -800,10 +814,6 @@ class BondLengthViolations(Metric):
     def smaller_is_better(self) -> bool:
         return True
 
-    def disable_atom_matching(self) -> bool:
-        # This metric does not use the reference anyway
-        return True
-
 
 class BondAngleViolations(Metric):
     """
@@ -875,10 +885,6 @@ class BondAngleViolations(Metric):
         return 1 - (valid_angles / total_checked)
 
     def smaller_is_better(self) -> bool:
-        return True
-
-    def disable_atom_matching(self) -> bool:
-        # This metric does not use the reference anyway
         return True
 
 
@@ -1006,10 +1012,6 @@ class ClashCount(Metric):
     def smaller_is_better(self) -> bool:
         return True
 
-    def disable_atom_matching(self) -> bool:
-        # This metric does not use the reference anyway
-        return True
-
 
 class PLIFRecovery(Metric):
     r"""
@@ -1129,15 +1131,13 @@ class PLIFRecovery(Metric):
 
     def _get_plifs_per_residue(
         self,
-        protein_ligand_complex: struc.AtomArray,
+        receptor: struc.AtomArray,
+        ligand: struc.AtomArray,
     ) -> Dict[int, Counter["PLIFRecovery.InteractionType"]]:
         """
         Generates a Protein-Ligand Interaction Fingerprint dictionary where counts
         are aggregated per residue for each interaction type.
         """
-        receptor = protein_ligand_complex[~protein_ligand_complex.hetero]
-        ligand = protein_ligand_complex[protein_ligand_complex.hetero]
-
         if ligand.array_length() == 0 or receptor.array_length() == 0:
             return {}
 
@@ -1278,36 +1278,31 @@ class PLIFRecovery(Metric):
         if reference.array_length() == 0 or pose.array_length() == 0:
             return np.nan
 
-        reference, pose = _match_receptors_only(reference, pose)
+        # Only the receptor residues need to be matched...
+        ref_receptor, pose_receptor = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
+        # ... the ligands may be different in this metric
+        ref_ligand = reference[reference.hetero]
+        pose_ligand = pose[pose.hetero]
 
         # Only evaluate on PLI systems - check for both ligands and proteins
-        protein_mask = ~reference.hetero
-        # As no global atom matching is performed, the pose and reference may have
-        # different ligands
-        reference_ligand_mask = reference.hetero
-        pose_ligand_mask = pose.hetero
         if (
-            not reference_ligand_mask.any()
-            or not pose_ligand_mask.any()
-            or not protein_mask.any()
+            ref_receptor.array_length() == 0
+            or ref_ligand.array_length() == 0
+            or pose_ligand.array_length() == 0
         ):
             return np.nan
 
         try:
-            reference_plifs = self._get_plifs_per_residue(reference)
-            pose_plifs = self._get_plifs_per_residue(pose)
+            reference_plifs = self._get_plifs_per_residue(ref_receptor, ref_ligand)
+            pose_plifs = self._get_plifs_per_residue(pose_receptor, pose_ligand)
         except struc.BadStructureError:
             return np.nan
         return self._calculate_recovery_score(reference_plifs, pose_plifs)
 
     def smaller_is_better(self) -> bool:
         return False
-
-    def disable_atom_matching(self) -> bool:
-        # This metric should also be especially suitable for small molecule design,
-        # i.e. the small molecules may be different between the reference and pose as
-        # only the types of interactions to the receptor residues are checked
-        return True
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
@@ -1341,8 +1336,8 @@ class ChiralityViolations(Metric):
         float
             The fraction of chiral centers that have a different chirality in the reference as compared to the pose.
         """
-
-        if pose.array_length() == 0:
+        reference, pose = filter_matched(reference, pose)
+        if reference.array_length() == 0:
             return np.nan
 
         # Convert the reference and pose to RDKit molecules
@@ -1415,24 +1410,25 @@ class PocketDistance(Metric):
         return OrderedDict([("good", 0.0), ("bad", 4.0)])
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        for atoms in (reference, pose):
-            if atoms.array_length() == 0:
-                # No atoms present
-                return np.nan
-            if np.all(atoms.hetero) or np.all(~atoms.hetero):
-                # Either no polymer or ligand present
-                return np.nan
+        ref_receptor, pose_receptor = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
+        ref_ligand = reference[reference.hetero]
+        pose_ligand = pose[pose.hetero]
 
-        reference, pose = _match_receptors_only(reference, pose)
+        if (
+            ref_receptor.array_length() == 0
+            or ref_ligand.array_length() == 0
+            or pose_ligand.array_length() == 0
+        ):
+            return np.nan
 
         # Superimpose on polymer chains
-        _, transform = struc.superimpose(
-            reference[~reference.hetero], pose[~pose.hetero]
-        )
-        pose = transform.apply(pose)
+        _, transform = struc.superimpose(ref_receptor, pose_receptor)
+        pose_ligand = transform.apply(pose_ligand)
 
-        ref_ligands = list(struc.chain_iter(reference[reference.hetero]))
-        pose_ligands = list(struc.chain_iter(pose[pose.hetero]))
+        ref_ligands = list(struc.chain_iter(ref_ligand))
+        pose_ligands = list(struc.chain_iter(pose_ligand))
         if len(ref_ligands) != len(pose_ligands):
             raise IndexError(
                 f"Reference has {len(ref_ligands)} ligands, "
@@ -1440,14 +1436,18 @@ class PocketDistance(Metric):
             )
         ref_centroids = np.array([struc.centroid(lig) for lig in ref_ligands])
         pose_centroids = np.array([struc.centroid(lig) for lig in pose_ligands])
-        pose_ligand_order = find_matching_centroids(ref_centroids, pose_centroids)
+        ref_ligand_order, pose_ligand_order = find_matching_centroids(
+            ref_centroids, pose_centroids
+        )
 
         if self._use_pose_centroids:
+            ref_centroids = ref_centroids[ref_ligand_order]
             pose_centroids = pose_centroids[pose_ligand_order]
             return np.mean(
                 np.linalg.norm(pose_centroids - ref_centroids, axis=1)
             ).item()
         else:
+            ref_ligands = [ref_ligands[i] for i in ref_ligand_order]
             pose_ligands = [pose_ligands[i] for i in pose_ligand_order]
             min_distances = np.array(
                 [
@@ -1458,12 +1458,6 @@ class PocketDistance(Metric):
             return np.mean(min_distances).item()
 
     def smaller_is_better(self) -> bool:
-        return True
-
-    def disable_atom_matching(self) -> bool:
-        # This metric should also be especially suitable for small molecule design,
-        # i.e. the small molecules may be different between the reference and pose as
-        # only the types of interactions to the receptor residues are checked
         return True
 
 
@@ -1507,24 +1501,25 @@ class PocketVolumeOverlap(Metric):
         return OrderedDict([("low", 0.0), ("high", 0.5)])
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        for atoms in (reference, pose):
-            if atoms.array_length() == 0:
-                # No atoms present
-                return np.nan
-            if np.all(atoms.hetero) or np.all(~atoms.hetero):
-                # Either no polymer or ligand present
-                return np.nan
+        ref_receptor, pose_receptor = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
+        ref_ligand = reference[reference.hetero]
+        pose_ligand = pose[pose.hetero]
 
-        reference, pose = _match_receptors_only(reference, pose)
+        if (
+            ref_receptor.array_length() == 0
+            or ref_ligand.array_length() == 0
+            or pose_ligand.array_length() == 0
+        ):
+            return np.nan
 
         # Superimpose on polymer chains
-        _, transform = struc.superimpose(
-            reference[~reference.hetero], pose[~pose.hetero]
-        )
-        pose = transform.apply(pose)
+        _, transform = struc.superimpose(ref_receptor, pose_receptor)
+        pose_ligand = transform.apply(pose_ligand)
 
-        ref_ligands = list(struc.chain_iter(reference[reference.hetero]))
-        pose_ligands = list(struc.chain_iter(pose[pose.hetero]))
+        ref_ligands = list(struc.chain_iter(ref_ligand))
+        pose_ligands = list(struc.chain_iter(pose_ligand))
         if len(ref_ligands) != len(pose_ligands):
             raise IndexError(
                 f"Reference has {len(ref_ligands)} ligands, "
@@ -1532,7 +1527,11 @@ class PocketVolumeOverlap(Metric):
             )
         ref_centroids = np.array([struc.centroid(lig) for lig in ref_ligands])
         pose_centroids = np.array([struc.centroid(lig) for lig in pose_ligands])
-        pose_ligand_order = find_matching_centroids(ref_centroids, pose_centroids)
+        ref_ligand_order, pose_ligand_order = find_matching_centroids(
+            ref_centroids, pose_centroids
+        )
+        ref_ligands = [ref_ligands[i] for i in ref_ligand_order]
+        ref_centroids = [ref_centroids[i] for i in ref_ligand_order]
         pose_ligands = [pose_ligands[i] for i in pose_ligand_order]
         pose_centroids = [pose_centroids[i] for i in pose_ligand_order]
 
@@ -1556,12 +1555,6 @@ class PocketVolumeOverlap(Metric):
 
     def smaller_is_better(self) -> bool:
         return False
-
-    def disable_atom_matching(self) -> bool:
-        # This metric should also be especially suitable for small molecule design,
-        # i.e. the small molecules may be different between the reference and pose as
-        # only the types of interactions to the receptor residues are checked
-        return True
 
 
 def _run_for_each_monomer(
@@ -1768,36 +1761,3 @@ def _select_receptor_and_ligand(
         return (reference_chain1, reference_chain2, pose_chain1, pose_chain2)
     else:
         return (reference_chain2, reference_chain1, pose_chain2, pose_chain1)
-
-
-def _match_receptors_only(
-    reference: struc.AtomArray, pose: struc.AtomArray
-) -> tuple[struc.AtomArray, struc.AtomArray]:
-    """
-    Create matched receptor chains from the given reference and pose.
-    Small molecules are kept as they are, but are appended to the end of the respective
-    structure.
-
-    Parameters
-    ----------
-    reference, pose : struc.AtomArray
-        The structures to be matched.
-
-    Returns
-    -------
-    reference, pose : struc.AtomArray
-        The input structures, but with matched receptor chains.
-    """
-    reference_receptor = reference[~reference.hetero]
-    pose_receptor = pose[~pose.hetero]
-    reference_receptor_order, pose_receptor_order = find_optimal_match(
-        reference_receptor,
-        pose_receptor,
-    )
-    matched_reference_receptor = reference_receptor[reference_receptor_order]
-    matched_pose_receptor = pose_receptor[pose_receptor_order]
-    return (
-        # Re-append the small molecules to the matched receptor chains
-        matched_reference_receptor + reference[reference.hetero],
-        matched_pose_receptor + pose[pose.hetero],
-    )

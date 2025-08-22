@@ -59,6 +59,15 @@ def cli() -> None:
 
 @cli.command()
 @click.option(
+    "--allow-unmatched",
+    is_flag=True,
+    help=(
+        "Allow entire entities in the reference and pose to be unmatched. "
+        "This is useful if a pose is compared to a reference which may contain "
+        "different molecules."
+    ),
+)
+@click.option(
     "--min-identity",
     "-i",
     type=click.FloatRange(0, 1, min_open=True, max_open=True),
@@ -108,6 +117,7 @@ def create(
     min_identity: float | None,
     strict: bool,
     match_method: str,
+    allow_unmatched: bool,
 ) -> None:
     """
     Initialize a new peppr evaluation.
@@ -122,6 +132,7 @@ def create(
         Evaluator.MatchMethod(match_method),
         tolerate_exceptions=not strict,
         min_sequence_identity=min_identity,
+        allow_unmatched_entities=allow_unmatched,
     )
     _evaluator_to_file(evaluator, ev)
 
@@ -268,6 +279,15 @@ def summarize(
 
 @cli.command()
 @click.option(
+    "--allow-unmatched",
+    is_flag=True,
+    help=(
+        "Allow entire entities in the reference and pose to be unmatched. "
+        "This is useful if a pose is compared to a reference which may contain "
+        "different molecules."
+    ),
+)
+@click.option(
     "--min-identity",
     "-i",
     type=click.FloatRange(0, 1, min_open=True, max_open=True),
@@ -308,6 +328,7 @@ def run(
     metric: str,
     reference: Path,
     pose: Path,
+    allow_unmatched: bool,
     min_identity: float | None,
     match_method: str,
 ) -> None:
@@ -320,10 +341,6 @@ def run(
     metric = _METRICS[metric]
     reference = _load_system(reference)
     pose = _load_system(pose)
-    if metric.disable_atom_matching():
-        result = metric.evaluate(reference, pose)
-        print(f"{result:.3f}", file=sys.stdout)
-        return
 
     match Evaluator.MatchMethod(match_method):
         case Evaluator.MatchMethod.HEURISTIC | Evaluator.MatchMethod.EXHAUSTIVE:
@@ -331,24 +348,24 @@ def run(
                 Evaluator.MatchMethod(match_method) == Evaluator.MatchMethod.HEURISTIC
             )
             try:
-                reference_order, pose_order = find_optimal_match(
-                    reference, pose, min_identity, use_heuristic
+                matched_reference, matched_pose = find_optimal_match(
+                    reference,
+                    pose,
+                    min_identity,
+                    use_heuristic,
+                    allow_unmatched_entities=allow_unmatched,
                 )
             except UnmappableEntityError:
                 raise click.ClickException("Reference and pose have different entities")
-            reference = reference[reference_order]
-            pose = pose[pose_order]
-            result = metric.evaluate(reference, pose)
+            result = metric.evaluate(matched_reference, matched_pose)
             print(f"{result:.3f}", file=sys.stdout)
 
         case Evaluator.MatchMethod.INDIVIDUAL:
             try:
                 best_result = np.inf if metric.smaller_is_better() else -np.inf
-                for reference_order, pose_order in find_all_matches(
+                for matched_reference, matched_pose in find_all_matches(
                     reference, pose, min_identity
                 ):
-                    matched_reference = reference[reference_order]
-                    matched_pose = pose[pose_order]
                     result = metric.evaluate(matched_reference, matched_pose)
                     if metric.smaller_is_better():
                         if result < best_result:
