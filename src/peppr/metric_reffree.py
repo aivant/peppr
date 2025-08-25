@@ -14,7 +14,7 @@ from peppr.system_subset import IsolatedLigandSelector
 
 class RefFreeMetric(ABC):
     """
-    The base class for all reference-free evaluation metrics. Extends :class:`Metric`.
+    The base class for all reference-free evaluation metrics.
 
     The central :meth:`evaluate()` method takes a pose structure as input
     and returns a scalar score.
