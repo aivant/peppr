@@ -14,7 +14,22 @@ class SystemSubsetSelector(ABC):
 
     @abstractmethod
     def select(self, pose: struc.AtomArray) -> npt.NDArray[np.bool_]:
-        """Returns masks that can be used to select subsets of the system."""
+        """
+        Returns masks that can be used to select subsets of the system.
+
+        **ABSTRACT:** Must be overridden by subclasses.
+
+        Parameters
+        ----------
+        pose : AtomArray, shape=(n,)
+            The system to select from.
+
+        Returns
+        -------
+        NDArray[bool], shape=(n_subsets, n)
+            The masks that can be used to select subsets of the system.
+            The first dimension of the array is the subset index.
+        """
         ...
 
 
