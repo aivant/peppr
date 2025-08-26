@@ -16,12 +16,11 @@ def _test_mols() -> dict[Chem.Mol, int]:
         "C=P(=O)O",
         "O=Cl(=O)O",
         "OC1C(COP(=O)(OP(=O)(OP(=O)(O)O)O)O)OC(C1O)n1cnc2c1ncnc2N",
+        "CO(C)C",  # Oxygen charge +1
     ]
 
     one_viol = [
         "C[C@H](FC)C",
-        "CO(C)C",  # This probably shouldn't read as 0 violations, but it does currently.
-        # TODO: examine `sanitize` to determine whether needs a fix.
         "CF(C)C",
     ]
 
