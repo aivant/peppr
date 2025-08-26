@@ -33,10 +33,12 @@ def _test_mols_valence_violations() -> dict[Chem.Mol, int]:
     return good_mols | one_viol | two_viols
 
 
-
 @pytest.mark.parametrize(
     ["mol", "expected_viols"],
-    [(mol, num_exp_viols) for mol, num_exp_viols in _test_mols_valence_violations().items()],
+    [
+        (mol, num_exp_viols)
+        for mol, num_exp_viols in _test_mols_valence_violations().items()
+    ],
 )
 def test_count_valence_violations(mol, expected_viols):
     """
@@ -54,7 +56,10 @@ def test_count_valence_violations(mol, expected_viols):
 
 @pytest.mark.parametrize(
     ["mol", "expected_viols"],
-    [(mol, num_exp_viols) for mol, num_exp_viols in _test_mols_valence_violations().items()],
+    [
+        (mol, num_exp_viols)
+        for mol, num_exp_viols in _test_mols_valence_violations().items()
+    ],
 )
 def test_ligand_valence_violations(mol, expected_viols):
     """

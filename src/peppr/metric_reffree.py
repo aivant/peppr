@@ -7,7 +7,6 @@ from typing import OrderedDict
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 import numpy as np
-from rdkit import Chem
 from peppr.sanitize import sanitize
 from peppr.system_subset import IsolatedLigandSelector
 
@@ -117,5 +116,3 @@ def _count_valence_violations(ligand: struc.AtomArray) -> int:
         return sum(atom.HasValenceViolation() for atom in mol.GetAtoms())
 
     return 0
-
-    
