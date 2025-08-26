@@ -114,6 +114,8 @@ def _count_valence_violations(ligand: struc.AtomArray) -> int:
     try:
         sanitize(mol)
     except Exception:
-        pass
+        return sum(atom.HasValenceViolation() for atom in mol.GetAtoms())
 
-    return sum(atom.HasValenceViolation() for atom in mol.GetAtoms())
+    return 0
+
+    
