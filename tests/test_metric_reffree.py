@@ -7,7 +7,7 @@ from peppr.metric_reffree import (
 )
 
 
-def _test_mols() -> dict[Chem.Mol, int]:
+def _test_mols_valence_violations() -> dict[Chem.Mol, int]:
     good_smiles = [
         "C1=CC=CC=C1",
         "C1=CC=CC=C1[H]",
@@ -36,9 +36,14 @@ def _test_mols() -> dict[Chem.Mol, int]:
 
 @pytest.mark.parametrize(
     ["mol", "expected_viols"],
-    [(mol, num_exp_viols) for mol, num_exp_viols in _test_mols().items()],
+    [(mol, num_exp_viols) for mol, num_exp_viols in _test_mols_valence_violations().items()],
 )
 def test_count_valence_violations(mol, expected_viols):
+    """
+    Check if the correct number of valence violations are found by
+    :func:`_count_valence_violations` by checking the metric against
+    reference molecules with a known number of violations.
+    """
     smiles = Chem.MolToSmiles(mol)
     aarray = rdkit_interface.from_mol(mol, add_hydrogen=False)
     num_violations = _count_valence_violations(aarray)
@@ -49,9 +54,14 @@ def test_count_valence_violations(mol, expected_viols):
 
 @pytest.mark.parametrize(
     ["mol", "expected_viols"],
-    [(mol, num_exp_viols) for mol, num_exp_viols in _test_mols().items()],
+    [(mol, num_exp_viols) for mol, num_exp_viols in _test_mols_valence_violations().items()],
 )
 def test_ligand_valence_violations(mol, expected_viols):
+    """
+    Check if the correct number of valence violations are found by
+    :class:`LigandValenceViolations` by checking the metric against
+    reference molecules with a known number of violations.
+    """
     metric = LigandValenceViolations()
     smiles = Chem.MolToSmiles(mol)
     atom_stack = rdkit_interface.from_mol(mol, add_hydrogen=False)
