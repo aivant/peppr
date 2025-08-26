@@ -104,20 +104,16 @@ class LigandValenceViolations(RefFreeMetric):
         ligand_masks = ligand_selector.select(pose)
         ligand_atomarrays = [pose[mask] for mask in ligand_masks]
         num_violations_per_ligand = [
-            _count_valence_violations_atomarray(aarray) for aarray in ligand_atomarrays
+            _count_valence_violations(aarray) for aarray in ligand_atomarrays
         ]
         return np.sum(num_violations_per_ligand)
 
 
-def _count_valence_violations(ligand: Chem.Mol) -> int:
+def _count_valence_violations(ligand: struc.AtomArray) -> int:
+    mol = rdkit_interface.to_mol(ligand, explicit_hydrogen=False)
     try:
-        sanitize(ligand)
+        sanitize(mol)
     except Exception:
         pass
 
-    return sum(atom.HasValenceViolation() for atom in ligand.GetAtoms())
-
-
-def _count_valence_violations_atomarray(ligand: struc.AtomArray) -> int:
-    mol = rdkit_interface.to_mol(ligand, explicit_hydrogen=False)
-    return _count_valence_violations(mol)
+    return sum(atom.HasValenceViolation() for atom in mol.GetAtoms())

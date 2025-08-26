@@ -4,7 +4,6 @@ from rdkit import Chem
 from peppr.metric_reffree import (
     LigandValenceViolations,
     _count_valence_violations,
-    _count_valence_violations_atomarray,
 )
 
 
@@ -34,27 +33,15 @@ def _test_mols() -> dict[Chem.Mol, int]:
     return good_mols | one_viol | two_viols
 
 
+
 @pytest.mark.parametrize(
     ["mol", "expected_viols"],
     [(mol, num_exp_viols) for mol, num_exp_viols in _test_mols().items()],
 )
 def test_count_valence_violations(mol, expected_viols):
     smiles = Chem.MolToSmiles(mol)
-    num_violations = _count_valence_violations(mol)
-    new_smiles = Chem.MolToSmiles(mol)
-    assert num_violations == expected_viols, (
-        f"Expected {expected_viols} violations for {smiles} -> {new_smiles}, got {num_violations}"
-    )
-
-
-@pytest.mark.parametrize(
-    ["mol", "expected_viols"],
-    [(mol, num_exp_viols) for mol, num_exp_viols in _test_mols().items()],
-)
-def test_count_valence_violations_atomarray(mol, expected_viols):
-    smiles = Chem.MolToSmiles(mol)
     aarray = rdkit_interface.from_mol(mol, add_hydrogen=False)
-    num_violations = _count_valence_violations_atomarray(aarray)
+    num_violations = _count_valence_violations(aarray)
     assert num_violations == expected_viols, (
         f"Expected {expected_viols} violations for {smiles}, got {num_violations}"
     )
