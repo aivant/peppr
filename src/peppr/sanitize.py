@@ -71,19 +71,38 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
     pt = Chem.GetPeriodicTable()
     if problem.GetType() == "AtomValenceException":
         at = mol.GetAtomWithIdx(problem.GetAtomIdx())
-        elem = at.GetAtomicNum()
-        if elem == 6:
+        elem = at.GetSymbol()
+        default_valence = pt.GetDefaultValence(at.GetAtomicNum())
+        if elem == "C":
             # we do not like charged carbons, thus pass without modification
             return
-        elif elem in [7, 8]:
+        elif elem in ["N", "O"]:
             # only process positively charged N, O atoms
-            opt_charge = at.GetTotalValence() - pt.GetDefaultValence(elem)
+            # note: the gain of extra valence interpreted through sharing
+            # their lone el. pairs, thus a positive formal charge
+            opt_charge = at.GetTotalValence() - default_valence
             formal_charge = at.GetFormalCharge()
             if opt_charge > formal_charge:
                 if abs(opt_charge) > 1:
-                    raise AssertionError(f"absolute expected charge > 1: {opt_charge}")
+                    raise AssertionError(
+                        f"expected N/O atom net charge > 1: {opt_charge}"
+                    )
                 else:
-                    # fix explicit valence issue
+                    # fix explicit valence issue - setd to +1
+                    at.SetFormalCharge(opt_charge)
+        elif elem == "B":
+            # or negatively charged B atoms
+            opt_charge = (
+                default_valence - at.GetTotalValence()
+            )  # note: reversed as B gets extra valence by accepting el. pair
+            formal_charge = at.GetFormalCharge()
+            if opt_charge < formal_charge:
+                if abs(opt_charge) > 1:
+                    raise AssertionError(
+                        f"expected B atom net charge > 1: {opt_charge}"
+                    )
+                else:
+                    # fix explicit valence issue - setd to -1
                     at.SetFormalCharge(opt_charge)
         else:
             # for higher elements like S - may need to use pt.GetValenceList()
@@ -95,7 +114,7 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
             at = mol.GetAtomWithIdx(atidx)
             # set one of the nitrogens with two bonds in a ring system as "[nH]"
             if (
-                at.GetAtomicNum() == 7
+                at.GetSymbol() == "N"
                 and at.GetDegree() == 2
                 and at.GetTotalNumHs() == 0
             ):
