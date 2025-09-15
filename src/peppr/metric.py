@@ -1561,7 +1561,7 @@ class PocketVolumeOverlap(Metric):
 
 class LigandValenceViolations(Metric):
     r"""
-    Counts the total number atoms with valance violations over all ligands using 
+    Counts the total number atoms with valance violations over all ligands using
     RDKit's internal valence checks.
 
     This metric finds valence violations that cannot be fixed by kekulization or
