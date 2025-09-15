@@ -44,6 +44,7 @@ The metrics for pose evaluation.
     PocketVolumeOverlap
     RotamerViolations
     RamachandranViolations
+    LigandValenceViolations
 
 Selectors
 ---------
