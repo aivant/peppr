@@ -588,7 +588,7 @@ def _get_masks(system: struc.AtomArray) -> list[np.ndarray]:
 )
 def test_isolated_ligand_selector(system):
     """
-    Test IsolatedLigandSelector returns correct masks for various system types.
+    Test if `_select_isolated_ligands()` returns correct masks for various system types.
     """
     expected_masks = _get_masks(system)
     masks = _select_isolated_ligands(system)
@@ -598,7 +598,7 @@ def test_isolated_ligand_selector(system):
 
 def test_isolated_ligand_selector_empty_input():
     """
-    Test IsolatedLigandSelector handles an empty AtomArray.
+    Test if :func:`_select_isolated_ligands()` handles an empty structure correctly.
     """
     empty_array = struc.AtomArray(0)
     masks = _select_isolated_ligands(empty_array)
