@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from rdkit import Chem
 import peppr
-from peppr.metric import _count_valence_violations, _select_isolated_ligands
+from peppr.metric import _select_isolated_ligands
 from tests.common import (
     assemble_predictions,
     get_reference_metric,
@@ -455,27 +455,6 @@ def _test_mols_valence_violations() -> dict[Chem.Mol, int]:
     one_viol = {Chem.MolFromSmiles(smile, params=params): 1 for smile in one_viol}
     two_viols = {Chem.MolFromSmiles(smile, params=params): 2 for smile in two_viols}
     return good_mols | one_viol | two_viols
-
-
-@pytest.mark.parametrize(
-    ["mol", "expected_viols"],
-    [
-        (mol, num_exp_viols)
-        for mol, num_exp_viols in _test_mols_valence_violations().items()
-    ],
-)
-def test_count_valence_violations(mol, expected_viols):
-    """
-    Check if the correct number of valence violations are found by
-    :func:`_count_valence_violations` by checking the metric against
-    reference molecules with a known number of violations.
-    """
-    smiles = Chem.MolToSmiles(mol)
-    aarray = rdkit_interface.from_mol(mol, add_hydrogen=False)
-    num_violations = _count_valence_violations(aarray)
-    assert num_violations == expected_viols, (
-        f"Expected {expected_viols} violations for {smiles}, got {num_violations}"
-    )
 
 
 @pytest.mark.parametrize(
