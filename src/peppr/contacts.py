@@ -609,6 +609,7 @@ def _find_charged_atoms_in_resonance_structures(
     """
     pos_mask = np.zeros(mol.GetNumAtoms(), dtype=bool)
     neg_mask = np.zeros(mol.GetNumAtoms(), dtype=bool)
+
     resonance_supplier = Chem.ResonanceMolSupplier(mol)
     for resonance_mol in resonance_supplier:
         if resonance_mol is None:

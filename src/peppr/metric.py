@@ -22,6 +22,8 @@ __all__ = [
     "PocketVolumeOverlap",
     "RotamerViolations",
     "RamachandranViolations",
+    "RILOScore",
+    "RILOScore",
 ]
 
 import itertools
@@ -35,6 +37,7 @@ import biotite.structure as struc
 import numpy as np
 from numpy.typing import NDArray
 from rdkit import Chem
+import pandas as pd
 from peppr.bisyrmsd import bisy_rmsd
 from peppr.clashes import find_clashes
 from peppr.common import (
@@ -62,8 +65,7 @@ from peppr.rotamer import (
     get_fraction_of_rotamer_outliers,
 )
 from peppr.volume import volume_overlap
-
-
+from peppr.logodds import PLI_LOG_ODDS, PPI_LOG_ODDS, SCALING_FACTORS
 class Metric(ABC):
     """
     The base class for all evaluation metrics.
@@ -1243,7 +1245,30 @@ class PLIFRecovery(Metric):
                     mode="ring",
                 )
 
-        return plifs
+        return plifs, receptor, ligand
+
+    def _get_plifs_per_residue_from_ligand_shards(
+        self,
+        receptor: struc.AtomArray,
+        ligand_shards: list[struc.AtomArray],
+    ) -> Dict[int, Counter["PLIFRecovery.InteractionType"]]:
+        """
+        Generates a Protein-Ligand Interaction Fingerprint dictionary where counts
+        are aggregated per residue for each interaction type.
+        This version uses splits the ligand into smaller shards to reduce memory usage.
+        """
+        plif_dict: Dict[int, Counter["PLIFRecovery.InteractionType"]] = {}
+        for shard in ligand_shards:
+            temp_plif_dict, receptor, shard = self._get_plifs_per_residue(
+                receptor=receptor,
+                ligand=shard,
+            )
+            for res_id, counter in temp_plif_dict.items():
+                if res_id not in plif_dict:
+                    plif_dict[res_id] = Counter()
+                plif_dict[res_id].update(counter)
+        return plif_dict, receptor, ligand_shards
+
 
     def _calculate_recovery_score(
         self,
@@ -1295,8 +1320,8 @@ class PLIFRecovery(Metric):
             return np.nan
 
         try:
-            reference_plifs = self._get_plifs_per_residue(ref_receptor, ref_ligand)
-            pose_plifs = self._get_plifs_per_residue(pose_receptor, pose_ligand)
+            reference_plifs, _, _ = self._get_plifs_per_residue(ref_receptor, ref_ligand)
+            pose_plifs, _, _ = self._get_plifs_per_residue(pose_receptor, pose_ligand)
         except struc.BadStructureError:
             return np.nan
         return self._calculate_recovery_score(reference_plifs, pose_plifs)
@@ -1552,6 +1577,278 @@ class PocketVolumeOverlap(Metric):
                 dvo.append(intersection_volume / union_volume)
 
         return np.mean(dvo).item()
+
+    def smaller_is_better(self) -> bool:
+        return False
+
+
+class RILOScore(Metric):
+    r"""
+    Residue Interaction Log Odds Score (RILOScore) is a metric
+    for evaluating the quality of receptorligand interactions.
+    It's an adaption of the Residue Log Odds Score _[1] where instead of
+    considering residue-residue pairs, it focuses on residue-interaction pairs.
+    For details on the calculations, see _[2].
+
+    The RILOScore is calculated by dividing the receptor-ligand interface
+    into small "shards" of residues and evaluating the interactions.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1002/1097-0134(20010501)43:2<89::AID-PROT1021>3.0.CO;2-H
+    .. [2] <link to notebook>
+    """
+
+    def __init__(
+        self,
+        ligand_is_protein: bool = True,
+        binding_site_cutoff: float = 4.5,
+        number_of_res_in_shard: int = 2,
+        scale_score: bool = False
+    ) -> None:
+        self._ligand_is_protein = ligand_is_protein
+        self._binding_site_cutoff = binding_site_cutoff
+        self._number_of_res_in_shard = number_of_res_in_shard
+        self._scale_score = scale_score
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "RiloScore"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        return OrderedDict([("low", 0.0), ("high", 0.5)])
+
+    def _find_contacts(
+        self,
+        receptor: struc.AtomArray,
+        ligand: struc.AtomArray,
+        inclusion_radius: float,
+    ) -> NDArray[np.int_]:
+        """
+        Find contacts between the atoms in the given structure.
+
+        Parameters
+        ----------
+        receptor : AtomArray
+            The receptor structure to find the contacts for.
+        ligand : AtomArray
+            The ligand structure to find the contacts for.
+        inclusion_radius : float
+            Pairwise atom distances are considered within this radius.
+
+        Returns
+        -------
+        ndarray, shape=(n,2), dtype=int
+            The array of contacts.
+            Each element represents a pair of atom indices that are in contact.
+        """
+        coords = struc.coord(ligand)
+        # Use a cell list to find atoms within inclusion radius in O(n) time complexity
+        cell_list = struc.CellList(receptor, inclusion_radius)
+        # Pairs of indices for atoms within the inclusion radius
+        all_contacts = cell_list.get_atoms(coords, inclusion_radius)
+
+        contacts = all_contacts.flatten()
+        # Create tuples of contact indices
+        return sorted(list(set([i for i in contacts if i != -1])))
+
+    def _extract_partner_interface_residues(
+            self,
+            protein_partner_1: struc.AtomArray,
+            protein_partner_2: struc.AtomArray,
+            inclusion_radius: float = 4.5) -> tuple[struc.AtomArray, struc.AtomArray]:
+        partner_1_interface_indices = self._find_contacts(
+            receptor=protein_partner_1,
+            ligand=protein_partner_2,
+            inclusion_radius=inclusion_radius
+        )
+        partner_1_resids = sorted(list(set(protein_partner_1.res_id[partner_1_interface_indices])))
+        partner_1_interface = protein_partner_1[np.isin(protein_partner_1.res_id, partner_1_resids)]
+
+        return partner_1_interface
+
+    def _shard_atom_array_by_res_ids(
+            self,
+            atom_array: struc.AtomArray,
+            number_of_res_in_shard: int,
+    ) -> struc.AtomArray:
+        res_ids = sorted(list(set(atom_array.res_id)))
+        # split into shards
+        shards = []
+        if len(res_ids) <= number_of_res_in_shard:
+            return [atom_array]
+        else:
+            n_shards = int(np.ceil(len(res_ids) / number_of_res_in_shard))
+            for i in range(n_shards):
+                shard = atom_array[np.isin(atom_array.res_id, res_ids[i * number_of_res_in_shard:(i + 1) * number_of_res_in_shard])]
+                shard.hetero[:] = True
+                shards.append(shard)
+        return shards
+
+    def _get_interface_interaction_counts(
+        self,
+        receptor: struc.AtomArray,
+        ligand: struc.AtomArray,
+        binding_site_cutoff: float = 4.5,
+        ligand_is_protein: bool = False,
+        number_of_res_in_shard: int = 2
+    ) -> dict[str, list[tuple[str, int]]]:
+        """
+        Get the interaction counts for each residue in the receptor that is in contact with the ligand.
+
+        Parameters
+        ----------
+        receptor : AtomArray
+            The receptor structure to get the interaction counts for.
+        ligand : AtomArray
+            The ligand structure to get the interaction counts for.
+        binding_site_cutoff : float
+            Pairwise atom distances are considered within this radius, by default 4.5
+
+        Returns
+        -------
+        dict
+            A dictionary mapping residue names to their interaction counts.
+        """
+        plif = PLIFRecovery(binding_site_cutoff=binding_site_cutoff)
+        if ligand_is_protein:
+            ligand = self._extract_partner_interface_residues(
+                protein_partner_1=ligand,
+                protein_partner_2=receptor,
+                inclusion_radius=binding_site_cutoff
+            )
+            ligand_shards = self._shard_atom_array_by_res_ids(
+                atom_array=ligand,
+                number_of_res_in_shard=number_of_res_in_shard,
+            )
+            plifs_dict, receptor, _ = plif._get_plifs_per_residue_from_ligand_shards(
+                receptor=receptor,
+                ligand_shards=ligand_shards
+            )
+        else:
+            plifs_dict, receptor, _ = plif._get_plifs_per_residue(
+                receptor=receptor, ligand=ligand
+            )
+        plifs_dict = {k: v for k, v in plifs_dict.items() if len(v) > 0}
+        if len(plifs_dict) == 0:
+            raise ValueError("No interface residues found.")
+        interface_residues = list(plifs_dict.keys())
+        receptor_contact_atoms = receptor[np.isin(receptor.res_id, interface_residues)]
+        contact_resid_names = dict(zip(receptor_contact_atoms.res_id, receptor_contact_atoms.res_name))
+        return {f"{k}:{contact_resid_names[k]}": v for k, v in plifs_dict.items() if k in contact_resid_names}
+
+
+    def _unroll_plif_dict(self, plif_dict: dict[str, list[tuple[str, int]]], system_id: str) -> pd.DataFrame:
+        unroll_data = []#[(k, interaction, count) for k, v in interface_plif.items() for interaction, count in v.items()]
+        for k, v in plif_dict.items():
+            #for interaction in PLIFRecovery.InteractionType:
+                #unroll_data.append((k, interaction, v.get(interaction, 0), system_id))
+            for interaction, count in v.items():
+                unroll_data.append((k, interaction.name, count, system_id))
+        return pd.DataFrame.from_records(unroll_data, columns=["residue", "interaction", "count", "system_id"])
+
+
+    def _get_interaction_counts_for_ppi(
+            self,
+            receptor: struc.AtomArray,
+            ligand: struc.AtomArray,
+            system_id: str | None = None,
+            binding_site_cutoff: float = 4.5,
+            number_of_res_in_shard: int = 2) -> pd.DataFrame:
+
+        interface_plif_r = self._get_interface_interaction_counts(
+                receptor=receptor,
+                ligand=ligand,
+                ligand_is_protein=True,
+                binding_site_cutoff=binding_site_cutoff,
+                number_of_res_in_shard=number_of_res_in_shard
+            )
+        interface_plif_r = {f"R_{k}": v for k, v in interface_plif_r.items()}
+        interface_plif_l = self._get_interface_interaction_counts(
+                receptor=ligand,
+                ligand=receptor,
+                ligand_is_protein=True,
+                binding_site_cutoff=binding_site_cutoff,
+                number_of_res_in_shard=number_of_res_in_shard
+            )
+        interface_plif_l = {f"L_{k}": v for k, v in interface_plif_l.items()}
+        interface_plif = {**interface_plif_r, **interface_plif_l}
+        return self._unroll_plif_dict(interface_plif, system_id)
+
+    def _get_interaction_counts_for_pli(
+            self,
+            receptor: struc.AtomArray,
+            ligand: struc.AtomArray,
+            binding_site_cutoff: float = 4.5,
+            system_id: str | None = None) -> pd.DataFrame:
+
+        interface_plif = self._get_interface_interaction_counts(
+                receptor=receptor,
+                ligand=ligand,
+                ligand_is_protein=False,
+                binding_site_cutoff=binding_site_cutoff,
+                number_of_res_in_shard=1
+            )
+        return self._unroll_plif_dict(interface_plif, system_id)
+
+
+    def _calculate_rilo_score(
+        self,
+        receptor: struc.AtomArray,
+        ligand: struc.AtomArray,
+        ligand_is_protein: bool = False,
+        binding_site_cutoff: float = 4.5,
+        number_of_res_in_shard: int = 2,
+        scale_score: bool = False) -> float:
+        score = 0.0
+        if ligand_is_protein:
+            count_df = self._get_interaction_counts_for_ppi(
+                receptor,
+                ligand,
+                binding_site_cutoff=binding_site_cutoff,
+                number_of_res_in_shard=number_of_res_in_shard
+                )
+            log_odd_dict = PPI_LOG_ODDS
+
+        else:
+            count_df = self._get_interaction_counts_for_pli(
+                receptor,
+                ligand,
+                binding_site_cutoff=binding_site_cutoff
+                )
+            log_odd_dict = PLI_LOG_ODDS
+        count_df["resname"] = count_df["residue"].str.split(":").str[1]
+        residue_interaction_tuples = count_df[["resname", "interaction", "count"]].itertuples(index=False)
+        for resname, interaction, count in residue_interaction_tuples:
+            log_odd = log_odd_dict.get(interaction, {})
+            log_odd = log_odd.get(resname, log_odd["XXX"])
+            # Scale score by 10 and multiply by count of interaction
+            score += 10 * log_odd * count
+        if scale_score:
+            # Scale score to be between 0 and 1 using a logistic function
+            upper_asymptote = SCALING_FACTORS["upper_asymptote"]
+            midpoint = SCALING_FACTORS["midpoint"]
+            steepness = SCALING_FACTORS["steepness"]
+            lower_asymptote = SCALING_FACTORS["lower_asymptote"]
+            score = upper_asymptote /(1 + np.exp(-steepness * (score - midpoint))) + lower_asymptote
+        return score
+
+    def evaluate(self, pose_receptor: struc.AtomArray, pose_ligand: struc.AtomArray) -> float:
+        if pose_receptor.array_length() == 0 or pose_ligand.array_length() == 0:
+            return np.nan
+
+        try:
+            return self._calculate_rilo_score(
+                receptor=pose_receptor,
+                ligand=pose_ligand,
+                ligand_is_protein=self._ligand_is_protein,
+                binding_site_cutoff=self._binding_site_cutoff,
+                number_of_res_in_shard=self._number_of_res_in_shard,
+                scale_score=self._scale_score)
+        except struc.BadStructureError:
+            return np.nan
 
     def smaller_is_better(self) -> bool:
         return False
