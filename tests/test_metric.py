@@ -1,11 +1,14 @@
 import itertools
 from pathlib import Path
+import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 import biotite.structure.info as info
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
+from rdkit import Chem
 import peppr
+from peppr.metric import _select_isolated_ligands
 from tests.common import (
     assemble_predictions,
     get_reference_metric,
@@ -39,6 +42,7 @@ ALL_METRICS = [
     peppr.PocketVolumeOverlap(),
     peppr.RotamerViolations(),
     peppr.RamachandranViolations(),
+    peppr.LigandValenceViolations(),
 ]
 
 
@@ -85,6 +89,7 @@ def _no_bond_atom_array(is_small_molecule):
         (peppr.PocketVolumeOverlap(), (0.0, 1.0)),
         (peppr.RotamerViolations(), (0.0, 1.0)),
         (peppr.RamachandranViolations(), (0.0, 1.0)),
+        (peppr.LigandValenceViolations(), (0.0, 2.0)),
     ],
     ids=lambda x: x.name if isinstance(x, peppr.Metric) else "",
 )
@@ -424,3 +429,157 @@ def _assemble_matched_predictions(system_id):
     assert matched_reference == reference
     assert matched_poses == poses
     return reference, poses
+
+
+def _test_mols_valence_violations() -> dict[Chem.Mol, int]:
+    good_smiles = [
+        "C1=CC=CC=C1",
+        "C1=CC=CC=C1[H]",
+        "N(=O)=O",
+        "C=P(=O)O",
+        "O=Cl(=O)O",
+        "OC1C(COP(=O)(OP(=O)(OP(=O)(O)O)O)O)OC(C1O)n1cnc2c1ncnc2N",
+        "CO(C)C",  # Oxygen charge +1
+    ]
+
+    one_viol = [
+        "C[C@H](FC)C",
+        "CF(C)C",
+    ]
+
+    two_viols = ["NC(O)NCCC1:C:C:C:C([C@H](C=F)/C=O/C(=O)(O)O):C:1"]
+
+    params = Chem.SmilesParserParams()
+    params.sanitize = False
+    good_mols = {Chem.MolFromSmiles(smile, params=params): 0 for smile in good_smiles}
+    one_viol = {Chem.MolFromSmiles(smile, params=params): 1 for smile in one_viol}
+    two_viols = {Chem.MolFromSmiles(smile, params=params): 2 for smile in two_viols}
+    return good_mols | one_viol | two_viols
+
+
+@pytest.mark.parametrize(
+    ["mol", "expected_viols"],
+    [
+        (mol, num_exp_viols)
+        for mol, num_exp_viols in _test_mols_valence_violations().items()
+    ],
+)
+def test_ligand_valence_violations(mol, expected_viols):
+    """
+    Check if the correct number of valence violations are found by
+    :class:`LigandValenceViolations` by checking the metric against
+    reference molecules with a known number of violations.
+    """
+    metric = peppr.LigandValenceViolations()
+    smiles = Chem.MolToSmiles(mol)
+    atom_stack = rdkit_interface.from_mol(mol, add_hydrogen=False)
+    aarray = atom_stack[0]
+    aarray.hetero[:] = True
+    num_violations = metric.evaluate(aarray, aarray)
+    assert num_violations == expected_viols, (
+        f"Expected {expected_viols} violations for {smiles}, got {num_violations}"
+    )
+
+
+def _dummy_protein_ligand() -> tuple[struc.AtomArray, struc.AtomArray]:
+    """Assemble a test system with a protein chain and a ligand."""
+    # Create a simple protein chain (3 alanines)
+    protein: struc.AtomArray = info.residue("ALA")
+    protein.chain_id[:] = "P"
+    protein.add_annotation("mask", bool)
+    protein = struc.concatenate([protein] * 3)
+
+    # Create a small molecule ligand
+    ligand: struc.AtomArray = info.residue("GLY")
+    ligand.chain_id[:] = "L"
+    ligand.hetero[:] = True
+    ligand.add_annotation("mask", bool)
+    ligand.mask[:] = True
+
+    # Combine into a single AtomArray
+    return protein, ligand
+
+
+def _assemble_complex() -> tuple[struc.AtomArray]:
+    """Assemble a test system with a protein chain and a ligand."""
+    protein, ligand = _dummy_protein_ligand()
+    return struc.concatenate([protein, ligand])
+
+
+def _assemble_multi_ligand_system():
+    """Assemble a system with a protein and multiple isolated ligands."""
+    protein, ligand1 = _dummy_protein_ligand()
+    ligand2 = ligand1.copy()
+    ligand2.chain_id[:] = "M"
+
+    # Combine all parts
+    multi_ligand_system = struc.concatenate([protein, ligand1, ligand2])
+    return multi_ligand_system
+
+
+def _assemble_protein_only_system() -> tuple[struc.AtomArray]:
+    """Assemble a system with only protein chains."""
+    protein1 = info.residue("ALA")
+    protein1.chain_id[:] = "A"
+    protein1.add_annotation("mask", bool)
+    protein2 = info.residue("GLY")
+    protein2.chain_id[:] = "B"
+    protein2.add_annotation("mask", bool)
+    return struc.concatenate([protein1, protein2])
+
+
+def _assemble_ligand_only_system():
+    """Assemble a system with only ligand chains."""
+    ligand1 = info.residue("ALA")
+    ligand1.chain_id[:] = "C"
+    ligand1.hetero[:] = True
+    ligand1.add_annotation("mask", bool)
+    ligand1.mask[:] = True
+    ligand2 = info.residue("GLY")
+    ligand2.chain_id[:] = "D"
+    ligand2.hetero[:] = True
+    ligand2.add_annotation("mask", bool)
+    ligand2.mask[:] = True
+    return struc.concatenate([ligand1, ligand2])
+
+
+def _get_masks(system: struc.AtomArray) -> list[np.ndarray]:
+    chain_starts = struc.get_chain_starts(system)
+    chain_masks = struc.get_chain_masks(system, chain_starts)
+    ligand_masks = chain_masks[(chain_masks & system.mask).any(axis=-1)]
+    return ligand_masks
+
+
+@pytest.mark.parametrize(
+    "system",
+    [
+        _assemble_complex(),
+        _assemble_multi_ligand_system(),
+        _assemble_protein_only_system(),
+        _assemble_ligand_only_system(),
+    ],
+    ids=[
+        "protein_ligand_complex",
+        "protein_multi_ligand",
+        "protein_only",
+        "ligand_only",
+    ],
+)
+def test_select_isolated_ligands(system):
+    """
+    Test if `_select_isolated_ligands()` returns correct masks for various system types.
+    """
+    expected_masks = _get_masks(system)
+    masks = _select_isolated_ligands(system)
+
+    assert np.equal(masks, expected_masks).all()
+
+
+def test_select_isolated_ligands_empty_input():
+    """
+    Test if :func:`_select_isolated_ligands()` handles an empty structure correctly.
+    """
+    empty_array = struc.AtomArray(0)
+    masks = _select_isolated_ligands(empty_array)
+    assert len(masks) == 0
+    assert isinstance(masks, np.ndarray)

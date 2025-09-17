@@ -22,6 +22,7 @@ __all__ = [
     "PocketVolumeOverlap",
     "RotamerViolations",
     "RamachandranViolations",
+    "LigandValenceViolations",
 ]
 
 import itertools
@@ -61,6 +62,7 @@ from peppr.rotamer import (
     get_fraction_of_rama_outliers,
     get_fraction_of_rotamer_outliers,
 )
+from peppr.sanitize import sanitize
 from peppr.volume import volume_overlap
 
 
@@ -1557,6 +1559,42 @@ class PocketVolumeOverlap(Metric):
         return False
 
 
+class LigandValenceViolations(Metric):
+    r"""
+    Counts the total number atoms with valance violations over all ligands using
+    RDKit's internal valence checks.
+
+    This metric finds valence violations that cannot be fixed by kekulization or
+    adding or removing charges. It is useful for identifying ligands that are
+    likely to be problematic.
+    """
+
+    @property
+    def name(self) -> str:
+        return "Ligand valence violations"
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        isolated_ligand_masks = _select_isolated_ligands(pose)
+        ligand_atomarrays = [pose[mask] for mask in isolated_ligand_masks]
+        num_violations_per_ligand = [
+            _count_valence_violations(aarray) for aarray in ligand_atomarrays
+        ]
+        return np.sum(num_violations_per_ligand).item()
+
+
+def _count_valence_violations(ligand: struc.AtomArray) -> int:
+    mol = rdkit_interface.to_mol(ligand, explicit_hydrogen=False)
+    try:
+        sanitize(mol)
+    except Exception:
+        return sum(atom.HasValenceViolation() for atom in mol.GetAtoms())
+
+    return 0
+
+
 def _run_for_each_monomer(
     reference: struc.AtomArray,
     pose: struc.AtomArray,
@@ -1761,3 +1799,29 @@ def _select_receptor_and_ligand(
         return (reference_chain1, reference_chain2, pose_chain1, pose_chain2)
     else:
         return (reference_chain2, reference_chain1, pose_chain2, pose_chain1)
+
+
+def _select_isolated_ligands(pose: struc.AtomArray) -> NDArray[np.bool_]:
+    """
+    Returns masks that select ligannds in the system without protein chains.
+
+    Parameters
+    ----------
+    pose : AtomArray, shape=(n,)
+        The system to select from.
+
+    Returns
+    -------
+    NDArray[bool], shape=(n_subsets, n)
+        The masks that can be used to select isolated ligands in the system.
+        The first dimension of the array is the subset index.
+    """
+    ligand_mask = pose.hetero
+    chain_starts = struc.get_chain_starts(pose)
+    if len(chain_starts) == 0:
+        # No chains in the structure
+        return np.array([], dtype=bool)
+    chain_masks = struc.get_chain_masks(pose, chain_starts)
+    # Only keep chain masks that correspond to ligand chains
+    ligand_masks = chain_masks[(chain_masks & ligand_mask).any(axis=-1)]
+    return ligand_masks

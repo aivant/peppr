@@ -45,6 +45,7 @@ _METRICS = {
     "dvo": PocketVolumeOverlap(),
     "rotamer-violations": RotamerViolations(),
     "ramachandran-violations": RamachandranViolations(),
+    "valence-violations": LigandValenceViolations(),
 }
 
 
