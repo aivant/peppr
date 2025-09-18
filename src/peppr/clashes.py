@@ -112,3 +112,18 @@ def _to_sparse_indices(all_contacts: NDArray[np.int_]) -> NDArray[np.int_]:
     combined_indices = np.stack([query_indices, contact_indices], axis=1)
     # Remove the padding values
     return combined_indices[contact_indices != -1]
+
+
+def _find_interface_contacts(
+    atoms1: struc.AtomArray,
+    atoms2: struc.AtomArray,
+    inclusion_radius: float,
+) -> NDArray[np.int_]:
+    last_index_atoms1 = atoms1.array_length()
+    combined_atoms = struc.concatenate((atoms1, atoms2))
+    contacts = _find_contacts(combined_atoms, inclusion_radius)
+    # Only keep contacts between atoms1 and atoms2
+    interface_contacts = contacts[
+        (contacts[:, 0] < last_index_atoms1) & (contacts[:, 1] >= last_index_atoms1)
+    ]
+    return interface_contacts

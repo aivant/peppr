@@ -39,7 +39,7 @@ from numpy.typing import NDArray
 from rdkit import Chem
 import pandas as pd
 from peppr.bisyrmsd import bisy_rmsd
-from peppr.clashes import find_clashes
+from peppr.clashes import find_clashes, _find_interface_contacts
 from peppr.common import (
     ACCEPTOR_PATTERN,
     DONOR_PATTERN,
@@ -66,6 +66,7 @@ from peppr.rotamer import (
 )
 from peppr.volume import volume_overlap
 from peppr.logodds import PLI_LOG_ODDS, PPI_LOG_ODDS, SCALING_FACTORS
+from peppr.packing import _compute_packing_entropy
 class Metric(ABC):
     """
     The base class for all evaluation metrics.
@@ -1853,6 +1854,71 @@ class RILOScore(Metric):
     def smaller_is_better(self) -> bool:
         return False
 
+
+class iPackingEntropy(Metric):
+    """
+    Interface Packing Entropy (iPackingEntropy) is a metric for evaluating the
+    quality of receptor-ligand interactions.
+    It quantifies how well-packed the interface between the receptor and ligand is,
+    based on the distribution of distances between atoms at the interface.
+
+    The metric is calculated by dividing the interface into small "shards" of residues
+    and evaluating the packing entropy for each shard.
+    The final score is the average packing entropy across all shards.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1002/prot.22203
+    """
+
+    def __init__(
+        self,
+        binding_site_cutoff: float = 4.5,
+    ):
+        self._binding_site_cutoff = binding_site_cutoff
+
+    @property
+    def name(self) -> str:
+        return "iPackingEntropy"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        return OrderedDict([("low", 0.0), ("high", 1.0)])
+
+    def evaluate(self, pose_receptor: struc.AtomArray, pose_ligand: struc.AtomArray) -> float:
+        pose_receptor.chain_id[:] = "R"
+        pose_ligand.chain_id[:] = "L"
+
+        if (
+            pose_receptor.array_length() == 0
+            or pose_ligand.array_length() == 0
+        ):
+            return np.nan
+
+        contact_atoms = _find_interface_contacts(
+            atoms1=pose_receptor,
+            atoms2=pose_ligand,
+            inclusion_radius=self._binding_site_cutoff
+        )
+        receptor_interface_atom_indices = list(set(contact_atoms[:, 0]))
+        ligand_interface_chain_resids = list(set(contact_atoms[:, 1]))
+        if len(receptor_interface_atom_indices) == 0 or len(ligand_interface_chain_resids) == 0:
+            return np.nan
+        combined_atoms = pose_receptor + pose_ligand
+        receptor_interface_chain_resids =  [(a.chain_id, a.res_id) for a in combined_atoms[receptor_interface_atom_indices]]
+        ligand_interface_chain_resids =  [(a.chain_id, a.res_id) for a in combined_atoms[ligand_interface_chain_resids]]
+        packing_df = _compute_packing_entropy(
+            atoms_in=combined_atoms,
+            chains=["R", "L"],
+        )
+        packing_df["is_interface"] = packing_df.apply(
+            lambda row: (row.chain_id, row.res_id) in \
+                receptor_interface_chain_resids + ligand_interface_chain_resids, axis=1)
+        return packing_df[packing_df["is_interface"]]["packing_entropy"].mean().item()
+
+
+    def smaller_is_better(self) -> bool:
+        return True
 
 def _run_for_each_monomer(
     reference: struc.AtomArray,
