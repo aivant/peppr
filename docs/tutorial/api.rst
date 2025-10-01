@@ -180,6 +180,12 @@ classes such as :class:`DockQScore`.
     for bin, lower_threshold in peppr.DockQScore().thresholds.items():
         print(f"{bin}: {lower_threshold:.2f}")
 
+.. note::
+
+    The input ``AtomArray`` objects need to fulfill some requirements to ensure that
+    the reference and pose can be correctly matched.
+    See the ``Notes`` section in :meth:`Evaluator.feed()` for more details.
+
 Selecting the right pose
 ------------------------
 Until now we fed only a single pose per system to the :class:`Evaluator`.
