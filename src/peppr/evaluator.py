@@ -206,6 +206,8 @@ class Evaluator(Mapping):
           small molecule.
           Conversely, chains where the ``hetero`` annotation is ``False`` is always
           interpreted as protein or nucleic acid chain.
+        - Two small molecules can only be matched to each other if they have the same
+          ``res_name``.
 
         The optimal atom matching is handled automatically based on the
         :class:`MatchMethod`.

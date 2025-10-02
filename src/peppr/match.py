@@ -140,6 +140,7 @@ def find_optimal_match(
     them is minimized.
 
     'Matching' has two effects here:
+
     - Chains and atoms within each residue *that have a counterpart* in the respective
       other structure, are reordered if necessary so that they are in the same order.
     - A ``matched`` annotation is added, which is ``False`` for all atoms, that
@@ -183,6 +184,7 @@ def find_optimal_match(
     -----
     Atoms that are not matched (``matched=False``), are positioned in the reordered
     return value as follows:
+
     - Unmatched chains are appended to the end.
     - Unmatched residues within a matched chain are kept at their original sequence
       position.
