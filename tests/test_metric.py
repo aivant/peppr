@@ -583,3 +583,26 @@ def test_select_isolated_ligands_empty_input():
     masks = _select_isolated_ligands(empty_array)
     assert len(masks) == 0
     assert isinstance(masks, np.ndarray)
+
+
+def test_bond_length_violations():
+    """
+    For any reasonable system the :class:`BondLengthViolations` should be close to 0.
+    However, if the atom coordinates are scaled up or down significantly, the bond
+    length violations should be close to 1.
+    """
+    TOLERANCE = 0.05
+
+    reference, poses = _assemble_matched_predictions("7znt__2__1.F_1.G__1.J")
+    pose = poses[0]
+    metric = peppr.BondLengthViolations()
+
+    assert metric.evaluate(reference, pose) == pytest.approx(0.0, abs=TOLERANCE)
+
+    scaled_pose = pose.copy()
+    scaled_pose.coord *= 10
+    assert metric.evaluate(reference, scaled_pose) == pytest.approx(1.0, abs=TOLERANCE)
+
+    scaled_pose = pose.copy()
+    scaled_pose.coord *= 0.1
+    assert metric.evaluate(reference, scaled_pose) == pytest.approx(1.0, abs=TOLERANCE)
