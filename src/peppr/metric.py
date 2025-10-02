@@ -1721,7 +1721,7 @@ def _average_over_ligands(
         # No ligands in the structure
         return np.nan
     else:
-        return np.mean(values).item()
+        return np.nanmean(values).item()
 
 
 def _run_for_each_ligand(
