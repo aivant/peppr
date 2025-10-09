@@ -61,6 +61,9 @@ class Evaluator(Mapping):
         If set to ``True``, allow entire entities to be unmatched.
         This is useful if a pose is compared to a reference which may contain different
         molecules.
+    remove_monoatomic_ions : bool, optional
+        If set to ``True``, monoatomic ions will be removed from the reference and pose
+        during :meth:`standardize()`.
 
     Attributes
     ----------
@@ -113,6 +116,7 @@ class Evaluator(Mapping):
         tolerate_exceptions: bool = False,
         min_sequence_identity: float = 0.95,
         allow_unmatched_entities: bool = False,
+        remove_monoatomic_ions: bool = True,
     ):
         self._metrics = tuple(metrics)
         self._match_method = match_method
@@ -122,6 +126,7 @@ class Evaluator(Mapping):
         self._tolerate_exceptions = tolerate_exceptions
         self._min_sequence_identity = min_sequence_identity
         self._allow_unmatched_entities = allow_unmatched_entities
+        self._remove_monoatomic_ions = remove_monoatomic_ions
 
     @property
     def metrics(self) -> tuple[Metric, ...]:
@@ -213,13 +218,28 @@ class Evaluator(Mapping):
         :class:`MatchMethod`.
         """
         try:
-            reference = standardize(reference)
+            reference = standardize(
+                reference, remove_monoatomic_ions=self._remove_monoatomic_ions
+            )
             if isinstance(poses, struc.AtomArray):
-                poses = [standardize(poses)]
+                poses = [
+                    standardize(
+                        poses, remove_monoatomic_ions=self._remove_monoatomic_ions
+                    )
+                ]
             elif isinstance(poses, struc.AtomArrayStack):
-                poses = list(standardize(poses))
+                poses = list(
+                    standardize(
+                        poses, remove_monoatomic_ions=self._remove_monoatomic_ions
+                    )
+                )
             else:
-                poses = [standardize(pose) for pose in poses]
+                poses = [
+                    standardize(
+                        pose, remove_monoatomic_ions=self._remove_monoatomic_ions
+                    )
+                    for pose in poses
+                ]
             if len(poses) == 0:
                 raise ValueError("No poses provided")
         except Exception as e:
