@@ -56,6 +56,7 @@ def is_small_molecule(chain: struc.AtomArray) -> bool:
 
 def standardize(
     system: struc.AtomArray | struc.AtomArrayStack,
+    remove_monoatomic_ions: bool = True,
 ) -> struc.AtomArray | struc.AtomArrayStack:
     """
     Standardize the given system.
@@ -63,24 +64,25 @@ def standardize(
     This function
 
     - removes hydrogen atoms
-    - removes solvent atoms and monoatomic ions
+    - removes solvent atoms
+    - removes monoatomic ions, if specified
     - checks if an associated :class:`biotite.structure.BondList` is present
 
     Parameters
     ----------
     system : struc.AtomArray or struc.AtomArrayStack
         The system to standardize.
+    remove_monoatomic_ions : bool, optional
+        If set to ``True``, monoatomic ions will be removed from system.
 
     Returns
     -------
     struc.AtomArray or struc.AtomArrayStack
-        The standardize system.
+        The standardized system.
     """
     if system.bonds is None:
         raise ValueError("The system must have an associated BondList")
-    mask = (
-        (system.element != "H")
-        & ~struc.filter_solvent(system)
-        & ~struc.filter_monoatomic_ions(system)
-    )
+    mask = (system.element != "H") & ~struc.filter_solvent(system)
+    if remove_monoatomic_ions:
+        mask &= ~struc.filter_monoatomic_ions(system)
     return system[..., mask]
