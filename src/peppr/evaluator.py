@@ -64,6 +64,11 @@ class Evaluator(Mapping):
     remove_monoatomic_ions : bool, optional
         If set to ``True``, monoatomic ions will be removed from the reference and pose
         during :meth:`standardize()`.
+    use_entity_annotation : bool, optional
+        If set to ``True``, use the ``entity_id`` annotation to determine which chains
+        are the same entity and therefore are mappable to each other.
+        By default, the entity is determined from sequence identity for polymers and
+        residue name for small molecules.
 
     Attributes
     ----------
@@ -117,6 +122,7 @@ class Evaluator(Mapping):
         min_sequence_identity: float = 0.95,
         allow_unmatched_entities: bool = False,
         remove_monoatomic_ions: bool = True,
+        use_entity_annotation: bool = False,
     ):
         self._metrics = tuple(metrics)
         self._match_method = match_method
@@ -127,6 +133,7 @@ class Evaluator(Mapping):
         self._min_sequence_identity = min_sequence_identity
         self._allow_unmatched_entities = allow_unmatched_entities
         self._remove_monoatomic_ions = remove_monoatomic_ions
+        self._use_entity_annotation = use_entity_annotation
 
     @property
     def metrics(self) -> tuple[Metric, ...]:
@@ -429,6 +436,7 @@ class Evaluator(Mapping):
                 use_heuristic=use_heuristic,
                 max_matches=self._max_matches,
                 allow_unmatched_entities=self._allow_unmatched_entities,
+                use_entity_annotation=self._use_entity_annotation,
             )
         except Exception as e:
             self._raise_or_warn(
@@ -513,6 +521,8 @@ class Evaluator(Mapping):
                         reference,
                         pose,
                         min_sequence_identity=self._min_sequence_identity,
+                        allow_unmatched_entities=self._allow_unmatched_entities,
+                        use_entity_annotation=self._use_entity_annotation,
                     )
                 ):
                     if self._max_matches is not None and it >= self._max_matches:
