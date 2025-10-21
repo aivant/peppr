@@ -134,6 +134,7 @@ def find_optimal_match(
     use_heuristic: bool = True,
     max_matches: int | None = None,
     allow_unmatched_entities: bool = False,
+    use_entity_annotation: bool = False,
 ) -> tuple[struc.AtomArray, struc.AtomArray]:
     """
     Match the atoms from the given reference and pose structure so that the RMSD between
@@ -168,6 +169,11 @@ def find_optimal_match(
         If set to ``True``, allow entire entities to be unmatched.
         This is useful if a pose is compared to a reference which may contain different
         molecules.
+    use_entity_annotation : bool, optional
+        If set to ``True``, use the ``entity_id`` annotation to determine which chains
+        are the same entity and therefore are mappable to each other.
+        By default, the entity is determined from sequence identity for polymers and
+        residue name for small molecules.
 
     Returns
     -------
@@ -223,6 +229,7 @@ def find_optimal_match(
             pose_chains,
             min_sequence_identity,
             allow_unmatched_entities,
+            use_entity_annotation,
         )
     else:
         return _find_optimal_match_precise(
@@ -231,6 +238,7 @@ def find_optimal_match(
             min_sequence_identity,
             max_matches,
             allow_unmatched_entities,
+            use_entity_annotation,
         )
 
 
@@ -239,6 +247,7 @@ def find_all_matches(
     pose: struc.AtomArray,
     min_sequence_identity: float = 0.95,
     allow_unmatched_entities: bool = False,
+    use_entity_annotation: bool = False,
 ) -> Iterator[tuple[struc.AtomArray, struc.AtomArray]]:
     """
     Find all possible atom mappings between the reference and the pose.
@@ -258,6 +267,11 @@ def find_all_matches(
         If set to ``True``, allow entire entities to be unmatched.
         This is useful if a pose is compared to a reference which may contain different
         molecules.
+    use_entity_annotation : bool, optional
+        If set to ``True``, use the ``entity_id`` annotation to determine which chains
+        are the same entity and therefore are mappable to each other.
+        By default, the entity is determined from sequence identity for polymers and
+        residue name for small molecules.
 
     Yields
     ------
@@ -283,7 +297,11 @@ def find_all_matches(
     reference_chains = list(struc.chain_iter(reference))
     pose_chains = list(struc.chain_iter(pose))
     for m in _all_global_mappings(
-        reference_chains, pose_chains, min_sequence_identity, allow_unmatched_entities
+        reference_chains,
+        pose_chains,
+        min_sequence_identity,
+        allow_unmatched_entities,
+        use_entity_annotation,
     ):
         yield m
 
@@ -355,6 +373,7 @@ def _find_optimal_match_fast(
     pose_chains: list[struc.AtomArray],
     min_sequence_identity: float,
     allow_unmatched_entities: bool,
+    use_entity_annotation: bool,
 ) -> tuple[struc.AtomArray, struc.AtomArray]:
     """
     Find matching atoms that minimize the centroid RMSD between the pose and the
@@ -371,6 +390,9 @@ def _find_optimal_match_fast(
         If set to ``True``, allow entire entities to be unmatched.
         This is useful if a pose is compared to a reference which may contain different
         molecules.
+    use_entity_annotation : bool, optional
+        If set to ``True``, use the ``entity_id`` annotation to determine which chains
+        are the same entity and therefore are mappable to each other.
 
     Returns
     -------
@@ -379,7 +401,11 @@ def _find_optimal_match_fast(
         the corresponding order.
     """
     reference_entity_ids, pose_entity_ids = _assign_entity_ids(
-        reference_chains, pose_chains, min_sequence_identity, allow_unmatched_entities
+        reference_chains,
+        pose_chains,
+        min_sequence_identity,
+        allow_unmatched_entities,
+        use_entity_annotation,
     )
 
     # Find corresponding chains by identifying the chain permutation that minimizes
@@ -433,6 +459,7 @@ def _find_optimal_match_precise(
     min_sequence_identity: float,
     max_matches: int | None,
     allow_unmatched_entities: bool,
+    use_entity_annotation: bool,
 ) -> tuple[struc.AtomArray, struc.AtomArray]:
     """
     Find matching atoms that minimize that minimize the all-atom RMSD between the pose
@@ -451,6 +478,9 @@ def _find_optimal_match_precise(
         If set to ``True``, allow entire entities to be unmatched.
         This is useful if a pose is compared to a reference which may contain different
         molecules.
+    use_entity_annotation : bool, optional
+        If set to ``True``, use the ``entity_id`` annotation to determine which chains
+        are the same entity and therefore are mappable to each other.
 
     Returns
     -------
@@ -469,6 +499,7 @@ def _find_optimal_match_precise(
             pose_chains,
             min_sequence_identity,
             allow_unmatched_entities,
+            use_entity_annotation,
         )
     ):
         if max_matches is not None and it >= max_matches:
@@ -493,6 +524,7 @@ def _all_global_mappings(
     pose_chains: list[struc.AtomArray],
     min_sequence_identity: float = 0.95,
     allow_unmatched_entities: bool = False,
+    use_entity_annotation: bool = False,
 ) -> Iterator[tuple[struc.AtomArray, struc.AtomArray]]:
     """
     Find all possible atom mappings between the reference and the pose.
@@ -510,6 +542,9 @@ def _all_global_mappings(
         If set to ``True``, allow entire entities to be unmatched.
         This is useful if a pose is compared to a reference which may contain different
         molecules.
+    use_entity_annotation : bool, optional
+        If set to ``True``, use the ``entity_id`` annotation to determine which chains
+        are the same entity and therefore are mappable to each other.
 
     Yields
     ------
@@ -530,7 +565,11 @@ def _all_global_mappings(
         chain.set_annotation("matched", np.full(chain.array_length(), False))
 
     reference_entity_ids, pose_entity_ids = _assign_entity_ids(
-        reference_chains, pose_chains, min_sequence_identity, allow_unmatched_entities
+        reference_chains,
+        pose_chains,
+        min_sequence_identity,
+        allow_unmatched_entities,
+        use_entity_annotation,
     )
     for ref_chain_indices, pose_chain_indices in _all_chain_mappings(
         reference_entity_ids, pose_entity_ids
@@ -993,6 +1032,7 @@ def _assign_entity_ids(
     pose_chains: list[struc.AtomArray],
     min_sequence_identity: float,
     allow_unmatched_entities: bool = False,
+    use_entity_annotation: bool = False,
 ) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
     """
     Assign a unique entity ID to each distinct chain.
@@ -1010,6 +1050,9 @@ def _assign_entity_ids(
     allow_unmatched_entities : bool, optional
         If set to ``True``, allow the reference and pose to have different entities.
         Otherwise an :class:`UnmappableEntityError` is raised.
+    use_entity_annotation : bool, optional
+        If set to ``True``, use the ``entity_id`` annotation to determine which chains
+        are the same entity and therefore are mappable to each other.
 
     Returns
     -------
@@ -1020,7 +1063,7 @@ def _assign_entity_ids(
     # Assign reference and pose entity IDs in a single call
     # in order to assign the same ID to corresponding chains between reference and pose
     entity_ids = _assign_entity_ids_to_chains(
-        reference_chains + pose_chains, min_sequence_identity
+        reference_chains + pose_chains, min_sequence_identity, use_entity_annotation
     )
 
     # Split the entity IDs again
@@ -1053,6 +1096,7 @@ def _assign_entity_ids(
 def _assign_entity_ids_to_chains(
     chains: list[struc.AtomArray],
     min_sequence_identity: float,
+    use_entity_annotation: bool,
 ) -> NDArray[np.int_]:
     """
     Assign a unique entity ID to each distinct chain.
@@ -1067,19 +1111,36 @@ def _assign_entity_ids_to_chains(
     min_sequence_identity : float
         The minimum sequence identity between two chains to be considered the same
         entity.
+    use_entity_annotation : bool, optional
+        If set to ``True``, use the ``entity_id`` annotation to determine which chains
+        are the same entity and therefore are mappable to each other.
 
     Returns
     -------
     entity_ids : np.ndarray, shape=(n,), dtype=int
         The entity IDs.
     """
+    entity_ids: list[int] = []
+    if use_entity_annotation:
+        for chain in chains:
+            if "entity_id" not in chain.get_annotation_categories():
+                raise struc.BadStructureError(
+                    "'use_entity_annotation=True' requires the 'entity_id' annotation"
+                )
+            entity_id = chain.entity_id[0].item()
+            if not np.all(chain.entity_id == entity_id):
+                raise struc.BadStructureError(
+                    "'entity_id' annotation must be the same for all atoms in a chain"
+                )
+            entity_ids.append(chain.entity_id[0].item())
+        return np.array(entity_ids, dtype=int)
+
     sequences = [
         struc.to_sequence(chain)[0][0] if not is_small_molecule(chain) else None
         for chain in chains
     ]
 
     current_entity_id = 0
-    entity_ids: list[int] = []
     for i, (chain, sequence) in enumerate(zip(chains, sequences)):
         for j in range(i):
             if (sequence is None and sequences[j] is not None) or (
