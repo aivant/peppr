@@ -13,6 +13,7 @@ __all__ = [
     "NoContactError",
 ]
 
+import warnings
 from dataclasses import dataclass, field
 from typing import overload
 import biotite.structure as struc
@@ -86,9 +87,12 @@ class DockQ:
     reference_ligand_index: int | None = None
 
     def __post_init__(self) -> None:
-        score = np.nanmean(
-            [self.fnat, _scale(self.irmsd, 1.5), _scale(self.lrmsd, 8.5)], axis=0
-        )
+        with warnings.catch_warnings():
+            # All score components may be NaN -> ignore the respective warning
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            score = np.nanmean(
+                [self.fnat, _scale(self.irmsd, 1.5), _scale(self.lrmsd, 8.5)], axis=0
+            )
         n_poses = None if np.isscalar(score) else len(score)
         super().__setattr__("score", score)
         super().__setattr__("n_poses", n_poses)
