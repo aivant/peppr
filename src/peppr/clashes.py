@@ -5,6 +5,8 @@ import biotite.structure.info as info
 import numpy as np
 from numpy.typing import NDArray
 
+_FALLBACK_VDW_RADIUS = 1.0
+
 
 def find_clashes(atoms: struc.AtomArray, vdw_scaling: float = 0.65) -> NDArray[np.int_]:
     """
@@ -31,7 +33,13 @@ def find_clashes(atoms: struc.AtomArray, vdw_scaling: float = 0.65) -> NDArray[n
 
     # Although we only consider heavy atoms,
     # we cannot properly use ProtOr radii as they lead to intra residue clashes
-    vdw_radii = np.array([info.vdw_radius_single(e) for e in atoms.element])
+    vdw_radii = np.zeros(atoms.array_length(), dtype=float)
+    for i in range(atoms.array_length()):
+        radius = info.vdw_radius_single(atoms.element[i])
+        if radius is None:
+            # Unknown radius for element -> use quite permissive radius
+            radius = _FALLBACK_VDW_RADIUS
+        vdw_radii[i] = radius
 
     # Any pair of atoms, whose distance is larger than the largest possible VdW radius,
     # is not relevant for clash detection
