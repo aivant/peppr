@@ -6,7 +6,8 @@ import biotite.structure.info as info
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
-from rdkit import Chem
+import rdkit.Chem.AllChem as Chem
+from rdkit.rdBase import BlockLogs
 import peppr
 from peppr.metric import _select_isolated_ligands
 from tests.common import (
@@ -585,24 +586,66 @@ def test_select_isolated_ligands_empty_input():
     assert isinstance(masks, np.ndarray)
 
 
-def test_bond_length_violations():
+@pytest.mark.parametrize(
+    "metric",
+    [peppr.BondLengthViolations(), peppr.BondAngleViolations()],
+    ids=lambda metric: metric.name,
+)
+def test_geometry_violations(metric):
     """
-    For any reasonable system the :class:`BondLengthViolations` should be close to 0.
-    However, if the atom coordinates are scaled up or down significantly, the bond
-    length violations should be close to 1.
+    For any reasonable system the :class:`BondLengthViolations` and
+    :class:`BondAngleViolations` should be close to 0.
+    However, if the atom coordinates are randomized, the violations should be close to
+    1.
     """
-    TOLERANCE = 0.05
+    TOLERANCE = 1e-1
 
-    reference, poses = _assemble_matched_predictions("7znt__2__1.F_1.G__1.J")
+    _, poses = _assemble_matched_predictions("7znt__2__1.F_1.G__1.J")
     pose = poses[0]
-    metric = peppr.BondLengthViolations()
 
-    assert metric.evaluate(reference, pose) == pytest.approx(0.0, abs=TOLERANCE)
+    assert metric.evaluate(pose, pose) == pytest.approx(0.0, abs=TOLERANCE)
 
-    scaled_pose = pose.copy()
-    scaled_pose.coord *= 10
-    assert metric.evaluate(reference, scaled_pose) == pytest.approx(1.0, abs=TOLERANCE)
+    randomized_pose = pose.copy()
+    rng = np.random.default_rng(0)
+    randomized_pose.coord = rng.normal(scale=10, size=pose.coord.shape)
+    assert metric.evaluate(randomized_pose, randomized_pose) == pytest.approx(
+        1.0, abs=TOLERANCE
+    )
 
-    scaled_pose = pose.copy()
-    scaled_pose.coord *= 0.1
-    assert metric.evaluate(reference, scaled_pose) == pytest.approx(1.0, abs=TOLERANCE)
+
+@pytest.mark.parametrize("seed", range(5))
+@pytest.mark.parametrize(
+    "smiles",
+    [
+        "C(=O)=O",  # Carbon dioxide
+        "CCCC",  # Butane
+        "C1=CC=CC=C1",  # Benzene
+        "C[Hg]C",  # Dimethylmercury (Organometallic compound)
+        "CCC.CCC",  # Disconnected propane molecules
+    ],
+)
+@pytest.mark.parametrize(
+    "metric",
+    [peppr.BondLengthViolations(), peppr.BondAngleViolations()],
+    ids=lambda metric: metric.name,
+)
+def test_geometry_violations_small_molecule(metric, smiles, seed):
+    """
+    The same as :func:`test_geometry_violations`, but for small molecules
+    including edge cases.
+    """
+    mol = Chem.MolFromSmiles(smiles)
+    mol = Chem.AddHs(mol)
+    with BlockLogs():
+        Chem.EmbedMolecule(mol, randomSeed=seed)
+        Chem.UFFOptimizeMolecule(mol)
+    atoms = rdkit_interface.from_mol(mol, add_hydrogen=False)[0]
+    atoms.hetero[:] = True
+    atoms = atoms[atoms.element != "H"]
+
+    assert metric.evaluate(atoms, atoms) == 0
+
+    randomized_atoms = atoms.copy()
+    rng = np.random.default_rng(seed)
+    randomized_atoms.coord = rng.normal(scale=10, size=atoms.coord.shape)
+    assert metric.evaluate(randomized_atoms, randomized_atoms) == 1
