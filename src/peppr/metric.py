@@ -1672,7 +1672,7 @@ def _run_for_each_chain_pair(
                 pose_chains[chain_j],
             )
         )
-    if len(results) == 0 or np.isnan(results).all():
+    if np.isnan(results).all():
         return np.nan
     return np.nanmean(results).item()
 
@@ -1705,8 +1705,7 @@ def _average_over_ligands(
         If the input structure contains no ligand atoms, *NaN* is returned.
     """
     values = _run_for_each_ligand(reference, pose, function)
-    if len(values) == 0:
-        # No ligands in the structure
+    if np.isnan(values).all():
         return np.nan
     else:
         return np.nanmean(values).item()
