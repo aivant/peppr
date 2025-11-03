@@ -213,15 +213,6 @@ def find_optimal_match(
         raise UnmappableEntityError("Reference is empty")
     if len(pose_chains) == 0:
         raise UnmappableEntityError("Pose is empty")
-    elif len(reference_chains) == 1 and len(pose_chains) == 1:
-        # Only one chain -> no need to match
-        return _match_using_chain_order(
-            reference_chains,
-            pose_chains,
-            np.array([0]),
-            np.array([0]),
-            superimpose=True,
-        )
 
     if use_heuristic:
         return _find_optimal_match_fast(
