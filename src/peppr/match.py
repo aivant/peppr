@@ -461,8 +461,9 @@ def _find_optimal_match_fast(
         pose_chains,
         best_reference_indices,
         best_pose_indices,
-        # Superimposition is already defined by centroids
-        superimpose=False,
+        # Superimposition is already defined by at least two centroids,
+        # as they leave no degrees of freedom
+        superimpose=False if len(reference_centroids) > 1 else True,
     )
 
 
@@ -1203,8 +1204,8 @@ def _assign_entity_ids_to_chains(
                     # It is only a complete structure match,
                     # if i is a non-strict subset of j and j is a non-strict subset of i
                     if (
-                        molecules[i].HasSubstructMatch(molecules[j]) and
-                        molecules[j].HasSubstructMatch(molecules[i])
+                        molecules[i].HasSubstructMatch(molecules[j]) and  # type: ignore[union-attr]
+                        molecules[j].HasSubstructMatch(molecules[i])  # type: ignore[union-attr]
                     ):  # fmt: skip
                         entity_ids.append(entity_ids[j])
                         break
