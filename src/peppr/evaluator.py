@@ -69,6 +69,11 @@ class Evaluator(Mapping):
         are the same entity and therefore are mappable to each other.
         By default, the entity is determined from sequence identity for polymers and
         residue name for small molecules.
+    use_structure_match : bool, optional
+        If set to ``True``, use structure matching, i.e. isomorphism on the bond graph,
+        to determine which small molecules are the same entity.
+        Otherwise, match small molecules by residue name.
+        Note that the structure match requires more computation time.
 
     Attributes
     ----------
@@ -123,6 +128,7 @@ class Evaluator(Mapping):
         allow_unmatched_entities: bool = False,
         remove_monoatomic_ions: bool = True,
         use_entity_annotation: bool = False,
+        use_structure_match: bool = False,
     ):
         self._metrics = tuple(metrics)
         self._match_method = match_method
@@ -134,6 +140,7 @@ class Evaluator(Mapping):
         self._allow_unmatched_entities = allow_unmatched_entities
         self._remove_monoatomic_ions = remove_monoatomic_ions
         self._use_entity_annotation = use_entity_annotation
+        self._use_structure_match = use_structure_match
 
     @property
     def metrics(self) -> tuple[Metric, ...]:
@@ -437,6 +444,7 @@ class Evaluator(Mapping):
                 max_matches=self._max_matches,
                 allow_unmatched_entities=self._allow_unmatched_entities,
                 use_entity_annotation=self._use_entity_annotation,
+                use_structure_match=self._use_structure_match,
             )
         except Exception as e:
             self._raise_or_warn(
@@ -523,6 +531,7 @@ class Evaluator(Mapping):
                         min_sequence_identity=self._min_sequence_identity,
                         allow_unmatched_entities=self._allow_unmatched_entities,
                         use_entity_annotation=self._use_entity_annotation,
+                        use_structure_match=self._use_structure_match,
                     )
                 ):
                     if self._max_matches is not None and it >= self._max_matches:

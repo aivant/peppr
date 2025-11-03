@@ -529,6 +529,55 @@ def test_exhaustive_mappings():
     assert len(set(test_mappings)) == len(test_mappings)
 
 
+@pytest.mark.parametrize("use_structure_match", [True, False])
+@pytest.mark.parametrize(
+    ["same_residue_name", "same_bond_graph"],
+    [
+        (False, True),
+        (True, False),
+    ],
+)
+def test_small_molecule_entities(
+    use_structure_match, same_residue_name, same_bond_graph
+):
+    """
+    If ``use_structure_match=True``, the small molecules should be matched by structure
+    matching, irrespective of the residue name, and the other way around if
+    ``use_structure_match=False``.
+
+    Test this by matching molecules with the same residue name but different bond graph,
+    and vice versa.
+    """
+    reference = struc.info.residue("LEU")
+    reference.hetero[:] = True
+    reference = reference[reference.element != "H"]
+    if same_bond_graph:
+        pose = reference.copy()
+    else:
+        pose = struc.info.residue("ILE")
+        pose.hetero[:] = True
+        pose = pose[pose.element != "H"]
+
+    if same_residue_name:
+        pose.res_name[:] = reference.res_name
+    else:
+        pose.res_name[:] = "ILE"
+
+    if (use_structure_match and same_bond_graph) or (
+        not use_structure_match and same_residue_name
+    ):
+        matched_reference, matched_pose = peppr.find_optimal_match(
+            reference, pose, use_structure_match=use_structure_match
+        )
+        assert matched_reference.matched.all()
+        assert matched_pose.matched.all()
+    else:
+        with pytest.raises(peppr.UnmappableEntityError):
+            matched_reference, matched_pose = peppr.find_optimal_match(
+                reference, pose, use_structure_match=use_structure_match
+            )
+
+
 def _annotate_atom_order(atoms):
     """
     Add the ``atom_id`` annotation to the given atoms for later comparison

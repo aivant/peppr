@@ -135,6 +135,7 @@ def find_optimal_match(
     max_matches: int | None = None,
     allow_unmatched_entities: bool = False,
     use_entity_annotation: bool = False,
+    use_structure_match: bool = False,
 ) -> tuple[struc.AtomArray, struc.AtomArray]:
     """
     Match the atoms from the given reference and pose structure so that the RMSD between
@@ -174,6 +175,11 @@ def find_optimal_match(
         are the same entity and therefore are mappable to each other.
         By default, the entity is determined from sequence identity for polymers and
         residue name for small molecules.
+    use_structure_match : bool, optional
+        If set to ``True``, use structure matching, i.e. isomorphism on the bond graph,
+        to determine which small molecules are the same entity.
+        Otherwise, match small molecules by residue name.
+        Note that the structure match requires more computation time.
 
     Returns
     -------
@@ -221,6 +227,7 @@ def find_optimal_match(
             min_sequence_identity,
             allow_unmatched_entities,
             use_entity_annotation,
+            use_structure_match,
         )
     else:
         return _find_optimal_match_precise(
@@ -230,6 +237,7 @@ def find_optimal_match(
             max_matches,
             allow_unmatched_entities,
             use_entity_annotation,
+            use_structure_match,
         )
 
 
@@ -239,6 +247,7 @@ def find_all_matches(
     min_sequence_identity: float = 0.95,
     allow_unmatched_entities: bool = False,
     use_entity_annotation: bool = False,
+    use_structure_match: bool = False,
 ) -> Iterator[tuple[struc.AtomArray, struc.AtomArray]]:
     """
     Find all possible atom mappings between the reference and the pose.
@@ -263,6 +272,11 @@ def find_all_matches(
         are the same entity and therefore are mappable to each other.
         By default, the entity is determined from sequence identity for polymers and
         residue name for small molecules.
+    use_structure_match : bool, optional
+        If set to ``True``, use structure matching, i.e. isomorphism on the bond graph,
+        to determine which small molecules are the same entity.
+        Otherwise, match small molecules by residue name.
+        Note that the structure match requires more computation time.
 
     Yields
     ------
@@ -293,6 +307,7 @@ def find_all_matches(
         min_sequence_identity,
         allow_unmatched_entities,
         use_entity_annotation,
+        use_structure_match,
     ):
         yield m
 
@@ -365,6 +380,7 @@ def _find_optimal_match_fast(
     min_sequence_identity: float,
     allow_unmatched_entities: bool,
     use_entity_annotation: bool,
+    use_structure_match: bool,
 ) -> tuple[struc.AtomArray, struc.AtomArray]:
     """
     Find matching atoms that minimize the centroid RMSD between the pose and the
@@ -384,6 +400,11 @@ def _find_optimal_match_fast(
     use_entity_annotation : bool, optional
         If set to ``True``, use the ``entity_id`` annotation to determine which chains
         are the same entity and therefore are mappable to each other.
+    use_structure_match : bool, optional
+        If set to ``True``, use structure matching, i.e. isomorphism on the bond graph,
+        to determine which small molecules are the same entity.
+        Otherwise, match small molecules by residue name.
+        Note that the structure match requires more computation time.
 
     Returns
     -------
@@ -397,6 +418,7 @@ def _find_optimal_match_fast(
         min_sequence_identity,
         allow_unmatched_entities,
         use_entity_annotation,
+        use_structure_match,
     )
 
     # Find corresponding chains by identifying the chain permutation that minimizes
@@ -451,6 +473,7 @@ def _find_optimal_match_precise(
     max_matches: int | None,
     allow_unmatched_entities: bool,
     use_entity_annotation: bool,
+    use_structure_match: bool,
 ) -> tuple[struc.AtomArray, struc.AtomArray]:
     """
     Find matching atoms that minimize that minimize the all-atom RMSD between the pose
@@ -472,6 +495,11 @@ def _find_optimal_match_precise(
     use_entity_annotation : bool, optional
         If set to ``True``, use the ``entity_id`` annotation to determine which chains
         are the same entity and therefore are mappable to each other.
+    use_structure_match : bool, optional
+        If set to ``True``, use structure matching, i.e. isomorphism on the bond graph,
+        to determine which small molecules are the same entity.
+        Otherwise, match small molecules by residue name.
+        Note that the structure match requires more computation time.
 
     Returns
     -------
@@ -491,6 +519,7 @@ def _find_optimal_match_precise(
             min_sequence_identity,
             allow_unmatched_entities,
             use_entity_annotation,
+            use_structure_match,
         )
     ):
         if max_matches is not None and it >= max_matches:
@@ -516,6 +545,7 @@ def _all_global_mappings(
     min_sequence_identity: float = 0.95,
     allow_unmatched_entities: bool = False,
     use_entity_annotation: bool = False,
+    use_structure_match: bool = False,
 ) -> Iterator[tuple[struc.AtomArray, struc.AtomArray]]:
     """
     Find all possible atom mappings between the reference and the pose.
@@ -536,6 +566,11 @@ def _all_global_mappings(
     use_entity_annotation : bool, optional
         If set to ``True``, use the ``entity_id`` annotation to determine which chains
         are the same entity and therefore are mappable to each other.
+    use_structure_match : bool, optional
+        If set to ``True``, use structure matching, i.e. isomorphism on the bond graph,
+        to determine which small molecules are the same entity.
+        Otherwise, match small molecules by residue name.
+        Note that the structure match requires more computation time.
 
     Yields
     ------
@@ -561,6 +596,7 @@ def _all_global_mappings(
         min_sequence_identity,
         allow_unmatched_entities,
         use_entity_annotation,
+        use_structure_match,
     )
     for ref_chain_indices, pose_chain_indices in _all_chain_mappings(
         reference_entity_ids, pose_entity_ids
@@ -1024,12 +1060,14 @@ def _assign_entity_ids(
     min_sequence_identity: float,
     allow_unmatched_entities: bool = False,
     use_entity_annotation: bool = False,
+    use_structure_match: bool = False,
 ) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
     """
     Assign a unique entity ID to each distinct chain.
 
     This means that two chains with the same entity ID have sufficient sequence
-    identity or in case of small molecules have the same ``res_name``.
+    identity or in case of small molecules have the same ``res_name`` (or the same
+    bond graph if `use_structure_match` is set to ``True``).
 
     Parameters
     ----------
@@ -1044,6 +1082,11 @@ def _assign_entity_ids(
     use_entity_annotation : bool, optional
         If set to ``True``, use the ``entity_id`` annotation to determine which chains
         are the same entity and therefore are mappable to each other.
+    use_structure_match : bool, optional
+        If set to ``True``, use structure matching, i.e. isomorphism on the bond graph,
+        to determine which small molecules are the same entity.
+        Otherwise, match small molecules by residue name.
+        Note that the structure match requires more computation time.
 
     Returns
     -------
@@ -1054,7 +1097,10 @@ def _assign_entity_ids(
     # Assign reference and pose entity IDs in a single call
     # in order to assign the same ID to corresponding chains between reference and pose
     entity_ids = _assign_entity_ids_to_chains(
-        reference_chains + pose_chains, min_sequence_identity, use_entity_annotation
+        reference_chains + pose_chains,
+        min_sequence_identity,
+        use_entity_annotation,
+        use_structure_match,
     )
 
     # Split the entity IDs again
@@ -1088,12 +1134,14 @@ def _assign_entity_ids_to_chains(
     chains: list[struc.AtomArray],
     min_sequence_identity: float,
     use_entity_annotation: bool,
+    use_structure_match: bool,
 ) -> NDArray[np.int_]:
     """
     Assign a unique entity ID to each distinct chain.
 
     This means that two chains with the same entity ID have sufficient sequence
-    identity or in case of small molecules have the same ``res_name``.
+    identity or in case of small molecules have the same ``res_name`` (or the same
+    bond graph if `use_structure_match` is set to ``True``).
 
     Parameters
     ----------
@@ -1105,6 +1153,12 @@ def _assign_entity_ids_to_chains(
     use_entity_annotation : bool, optional
         If set to ``True``, use the ``entity_id`` annotation to determine which chains
         are the same entity and therefore are mappable to each other.
+    use_structure_match : bool, optional
+        If set to ``True``, use structure matching, i.e. isomorphism on the bond graph,
+        to determine which small molecules are the same entity.
+        Otherwise, match small molecules by residue name.
+        Note that the structure match requires more computation time.
+
 
     Returns
     -------
@@ -1130,6 +1184,10 @@ def _assign_entity_ids_to_chains(
         struc.to_sequence(chain)[0][0] if not is_small_molecule(chain) else None
         for chain in chains
     ]
+    if use_structure_match:
+        molecules = [
+            _to_mol(chain) if is_small_molecule(chain) else None for chain in chains
+        ]
 
     current_entity_id = 0
     for i, (chain, sequence) in enumerate(zip(chains, sequences)):
@@ -1140,12 +1198,23 @@ def _assign_entity_ids_to_chains(
                 # Cannot match small molecules to polymer chains
                 continue
             elif sequence is None:
-                # Match small molecules by residue name
-                if chain.res_name[0] == chains[j].res_name[0] and _equal_composition(
-                    [chain, chains[j]]
-                ):
-                    entity_ids.append(entity_ids[j])
-                    break
+                # Small molecule case
+                if use_structure_match:
+                    # It is only a complete structure match,
+                    # if i is a non-strict subset of j and j is a non-strict subset of i
+                    if (
+                        molecules[i].HasSubstructMatch(molecules[j]) and
+                        molecules[j].HasSubstructMatch(molecules[i])
+                    ):  # fmt: skip
+                        entity_ids.append(entity_ids[j])
+                        break
+                else:
+                    # Match small molecules by residue name
+                    if chain.res_name[0] == chains[j].res_name[
+                        0
+                    ] and _equal_composition([chain, chains[j]]):
+                        entity_ids.append(entity_ids[j])
+                        break
             else:
                 # Match polymer chains by sequence identity
                 alignment = align.align_optimal(
