@@ -30,13 +30,14 @@ import warnings
 from abc import ABC, abstractmethod
 from collections import Counter, OrderedDict
 from enum import Enum, auto
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 import numpy as np
 from numpy.typing import NDArray
 from rdkit import Chem
 from peppr.bisyrmsd import bisy_rmsd
+from peppr.bounds import get_distance_bounds
 from peppr.clashes import find_clashes
 from peppr.common import (
     ACCEPTOR_PATTERN,
@@ -55,8 +56,6 @@ from peppr.dockq import (
     lrmsd,
     pocket_aligned_lrmsd,
 )
-from peppr.graph import graph_to_connected_triples
-from peppr.idealize import idealize_bonds
 from peppr.match import filter_matched, find_matching_centroids
 from peppr.rotamer import (
     get_fraction_of_rama_outliers,
@@ -719,53 +718,29 @@ class BondLengthViolations(Metric):
     Parameters
     ----------
     tolerance : float, optional
-        The tolerance in Angstroms for acceptable deviation from ideal bond lengths.
-        Default is 0.1 Angstroms.
-    reference_bonds : dict, optional
-        Dictionary mapping atom type pairs to ideal bond lengths.
-        If not provided, uses a default set of common bond lengths.
+        The relative tolerance for acceptable deviation from ideal bond length bounds.
+
+    Notes
+    -----
+    Violations across residues are not considered.
     """
 
-    # Default reference bond lengths in Angstroms
-    _DEFAULT_REFERENCE_BONDS = {
-        ("C", "C"): np.array([1.54, 1.33, 1.20]),
-        ("C", "N"): np.array([1.47, 1.27, 1.15]),
-        ("C", "O"): np.array([1.43, 1.21]),
-        ("N", "H"): np.array([1.01]),
-        ("O", "H"): np.array([0.96]),
-        ("C", "H"): np.array([1.09]),
-        ("C", "S"): np.array([1.82]),
-        ("S", "S"): np.array([2.05]),
-    }
-
-    def __init__(
-        self,
-        tolerance: float = 0.1,
-        reference_bonds: Dict[Tuple[str, str], np.ndarray] | None = None,
-    ) -> None:
+    def __init__(self, tolerance: float = 0.1) -> None:
         self._tolerance = tolerance
-        self._reference_bonds = (
-            reference_bonds
-            if reference_bonds is not None
-            else self._DEFAULT_REFERENCE_BONDS
-        )
-        # Add reverse pairs for convenience
-        reverse_bonds = {(b, a): v for (a, b), v in self._reference_bonds.items()}
-        self._reference_bonds.update(reverse_bonds)
         super().__init__()
 
     @property
     def name(self) -> str:
-        return "Bond-length-violation"
+        return "Bond length violations"
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
         return OrderedDict(
             [
-                ("poor", 0.0),
-                ("acceptable", 0.9),
-                ("good", 0.95),
-                ("excellent", 0.99),
+                ("excellent", 0),
+                ("good", 0.01),
+                ("acceptable", 0.05),
+                ("poor", 0.1),
             ]
         )
 
@@ -785,33 +760,29 @@ class BondLengthViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
-        if pose.bonds is None:
+        if pose.array_length() == 0:
             return np.nan
 
-        total_checked = 0
-        valid_bonds = 0
-
-        # Get all bonds and iterate through the bond tuples
-        for i, j, _ in pose.bonds.as_array():
-            atom1_type = pose.element[i]
-            atom2_type = pose.element[j]
-
-            if (atom1_type, atom2_type) in self._reference_bonds:
-                bond_length = struc.distance(pose[i], pose[j])
-                ideal_lengths = self._reference_bonds.get((atom1_type, atom2_type))
-                if ideal_lengths is None:
-                    warnings.warn(
-                        f"No reference bond length for {atom1_type}-{atom2_type} found. Ignoring {atom1_type}-{atom2_type} bond."
-                    )
-                    continue
-                if np.any(np.abs(bond_length - ideal_lengths) <= self._tolerance):
-                    valid_bonds += 1
-                total_checked += 1
-
-        if total_checked == 0:
+        try:
+            bounds = get_distance_bounds(pose)
+        except struc.BadStructureError:
             return np.nan
 
-        return 1 - (valid_bonds / total_checked)
+        bond_indices = np.sort(pose.bonds.as_array()[:, :2], axis=1)
+        if len(bond_indices) == 0:
+            return np.nan
+        bond_lengths = struc.index_distance(pose, bond_indices)
+        # The bounds matrix has the lower bounds in the lower triangle
+        # and the upper bounds in the upper triangle
+        lower_bounds = bounds[bond_indices[:, 1], bond_indices[:, 0]]
+        upper_bounds = bounds[bond_indices[:, 0], bond_indices[:, 1]]
+        invalid_mask = (bond_lengths < lower_bounds * (1 - self._tolerance)) | (
+            bond_lengths > upper_bounds * (1 + self._tolerance)
+        )
+
+        return float(
+            np.count_nonzero(invalid_mask) / np.count_nonzero(np.isfinite(lower_bounds))
+        )
 
     def smaller_is_better(self) -> bool:
         return True
@@ -823,28 +794,35 @@ class BondAngleViolations(Metric):
     idealized bond geometry.
     Returns the percentage of bonds that are outside acceptable ranges.
 
+    This approach does not measure directly bond angles, but rather checks the
+    distance between the atoms ``A`` and ``C`` in the bond angle ``ABC``.
+
     Parameters
     ----------
     tolerance : float, optional
-        The tolerance in radians for acceptable deviation from ideal bond angles.
+        The relative tolerance for acceptable deviation from ideal distances.
+
+    Notes
+    -----
+    Violations across residues are not considered.
     """
 
-    def __init__(self, tolerance: float = np.deg2rad(15.0)) -> None:
+    def __init__(self, tolerance: float = 0.2) -> None:
         self._tolerance = tolerance
         super().__init__()
 
     @property
     def name(self) -> str:
-        return "Bond-angle-violation"
+        return "Bond angle violations"
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
         return OrderedDict(
             [
-                ("poor", 0.0),
-                ("acceptable", 0.9),
-                ("good", 0.95),
-                ("excellent", 0.99),
+                ("excellent", 0),
+                ("good", 0.01),
+                ("acceptable", 0.05),
+                ("poor", 0.1),
             ]
         )
 
@@ -867,24 +845,34 @@ class BondAngleViolations(Metric):
         if pose.array_length() == 0:
             return np.nan
 
-        # Idealize the pose local geometry to make the reference
         try:
-            reference = idealize_bonds(pose)
+            bounds = get_distance_bounds(pose)
         except struc.BadStructureError:
             return np.nan
 
-        # Check the angle of all bonded triples
-        bonded_triples = graph_to_connected_triples(reference.bonds.as_graph())
-        ref_angles = struc.index_angle(reference, bonded_triples)
-        pose_angles = struc.index_angle(pose, bonded_triples)
-        angle_diffs = np.abs(ref_angles - pose_angles)
-        valid_angles = (angle_diffs <= self._tolerance).sum()
-        total_checked = len(bonded_triples)
-
-        if total_checked == 0:
+        all_bonds, _ = reference.bonds.get_all_bonds()
+        # For a bond angle 'ABC', this lost contains the atom indices for 'A' and 'C'
+        bond_indices = []  # type: ignore[var-annotated]
+        for bonded_indices in all_bonds:
+            # Remove padding values
+            bonded_indices = bonded_indices[bonded_indices != -1]
+            bond_indices.extend(itertools.combinations(bonded_indices, 2))
+        if len(bond_indices) == 0:
             return np.nan
+        bond_indices = np.sort(bond_indices, axis=1)
 
-        return 1 - (valid_angles / total_checked)
+        bond_lengths = struc.index_distance(pose, bond_indices)
+        # The bounds matrix has the lower bounds in the lower triangle
+        # and the upper bounds in the upper triangle
+        lower_bounds = bounds[bond_indices[:, 1], bond_indices[:, 0]]
+        upper_bounds = bounds[bond_indices[:, 0], bond_indices[:, 1]]
+        invalid_mask = (bond_lengths < lower_bounds * (1 - self._tolerance)) | (
+            bond_lengths > upper_bounds * (1 + self._tolerance)
+        )
+
+        return float(
+            np.count_nonzero(invalid_mask) / np.count_nonzero(np.isfinite(lower_bounds))
+        )
 
     def smaller_is_better(self) -> bool:
         return True
@@ -1684,7 +1672,7 @@ def _run_for_each_chain_pair(
                 pose_chains[chain_j],
             )
         )
-    if len(results) == 0 or np.isnan(results).all():
+    if np.isnan(results).all():
         return np.nan
     return np.nanmean(results).item()
 
@@ -1717,8 +1705,7 @@ def _average_over_ligands(
         If the input structure contains no ligand atoms, *NaN* is returned.
     """
     values = _run_for_each_ligand(reference, pose, function)
-    if len(values) == 0:
-        # No ligands in the structure
+    if np.isnan(values).all():
         return np.nan
     else:
         return np.nanmean(values).item()
