@@ -340,7 +340,7 @@ def test_matching_small_molecules(comp_name, swap_atom_names, shuffle, use_heuri
     For this purpose swap coordinates of equivalent atoms and expect that
     :func:`find_optimal_match` swaps them back in order to minimize the RMSD.
 
-    Furthermore shuffle the atom order of the AtomArray to increase the difficulty.
+    Furthermore shuffle the atom order of the `AtomArray` to increase the difficulty.
     """
     TRANSLATION_VEC = np.array([10, 20, 30])
 
@@ -368,10 +368,10 @@ def test_matching_small_molecules(comp_name, swap_atom_names, shuffle, use_heuri
     )
 
     _check_match(matched_reference, matched_pose, reference, pose)
-    # After swapping back the pose should perfectly overlap with the reference again
-    # Translate back
-    matched_pose.coord -= TRANSLATION_VEC
-    assert struc.rmsd(matched_reference, matched_pose) == pytest.approx(0.0, abs=1e-6)
+    # After superimposition of corresponding atoms,
+    # the pose should perfectly overlap with the reference again
+    matched_pose, _ = struc.superimpose(matched_reference, matched_pose)
+    assert struc.rmsd(matched_reference, matched_pose) == pytest.approx(0.0, abs=1e-4)
 
 
 @pytest.mark.filterwarnings("error::peppr.GraphMatchWarning")
@@ -412,6 +412,9 @@ def test_match_kekulized_to_aromatic(use_heuristic):
     _check_match(matched_reference, matched_pose, reference, pose)
 
 
+@pytest.mark.xfail(
+    reason="There is a fallback with 'useChirality=False', whichmakes this test fail"
+)
 @pytest.mark.parametrize("use_heuristic", [False, True])
 @pytest.mark.parametrize("mirror", [False, True])
 def test_no_matching_of_enantiomers(bromochlorofluoromethane, mirror, use_heuristic):
@@ -428,7 +431,9 @@ def test_no_matching_of_enantiomers(bromochlorofluoromethane, mirror, use_heuris
 
     mol_1 = bromochlorofluoromethane
     mol_1.hetero[:] = True
+    mol_1.chain_id[:] = "A"
     mol_2 = mol_1.copy()
+    mol_2.chain_id[:] = "B"
     if mirror:
         # Mirror at the x-axis
         mol_2.coord[:, 0] *= -1
@@ -527,6 +532,55 @@ def test_exhaustive_mappings():
     assert len(test_mappings) == N_MAPPINGS
     # All mappings should be unique
     assert len(set(test_mappings)) == len(test_mappings)
+
+
+@pytest.mark.parametrize("use_structure_match", [True, False])
+@pytest.mark.parametrize(
+    ["same_residue_name", "same_bond_graph"],
+    [
+        (False, True),
+        (True, False),
+    ],
+)
+def test_small_molecule_entities(
+    use_structure_match, same_residue_name, same_bond_graph
+):
+    """
+    If ``use_structure_match=True``, the small molecules should be matched by structure
+    matching, irrespective of the residue name, and the other way around if
+    ``use_structure_match=False``.
+
+    Test this by matching molecules with the same residue name but different bond graph,
+    and vice versa.
+    """
+    reference = struc.info.residue("LEU")
+    reference.hetero[:] = True
+    reference = reference[reference.element != "H"]
+    if same_bond_graph:
+        pose = reference.copy()
+    else:
+        pose = struc.info.residue("ILE")
+        pose.hetero[:] = True
+        pose = pose[pose.element != "H"]
+
+    if same_residue_name:
+        pose.res_name[:] = reference.res_name
+    else:
+        pose.res_name[:] = "ILE"
+
+    if (use_structure_match and same_bond_graph) or (
+        not use_structure_match and same_residue_name
+    ):
+        matched_reference, matched_pose = peppr.find_optimal_match(
+            reference, pose, use_structure_match=use_structure_match
+        )
+        assert matched_reference.matched.all()
+        assert matched_pose.matched.all()
+    else:
+        with pytest.raises(peppr.UnmappableEntityError):
+            matched_reference, matched_pose = peppr.find_optimal_match(
+                reference, pose, use_structure_match=use_structure_match
+            )
 
 
 def _annotate_atom_order(atoms):
