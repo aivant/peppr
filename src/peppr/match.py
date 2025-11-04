@@ -119,7 +119,7 @@ def filter_matched(
             f"Filtered reference has {reference.array_length()} atoms, "
             f"but filtered pose has {pose.array_length()} atoms"
         )
-    if np.any(reference.element != pose.element):
+    if np.any(np.char.upper(reference.element) != np.char.upper(pose.element)):
         raise StructureMismatchError(
             "Filtered reference and pose have different chemical elements "
             "mapped to each other"
