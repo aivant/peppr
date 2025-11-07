@@ -55,7 +55,11 @@ def test_tabulate_metrics_for_single(evaluator_fed_with_single_poses):
     table = evaluator_fed_with_single_poses.tabulate_metrics()
 
     assert table.index.to_list() == list_test_predictions()
-    assert table.columns.to_list() == ["CA-RMSD", "intra protein lDDT", "TM-score"]
+    assert table.columns.to_list() == [
+        "backbone RMSD",
+        "intra polymer lDDT",
+        "TM-score",
+    ]
 
 
 def test_tabulate_metrics_for_multi(evaluator_fed_with_multiple_poses, selectors):
@@ -67,10 +71,10 @@ def test_tabulate_metrics_for_multi(evaluator_fed_with_multiple_poses, selectors
 
     assert table.index.to_list() == list_test_predictions()
     assert table.columns.to_list() == [
-        "CA-RMSD (mean)",
-        "CA-RMSD (Oracle)",
-        "intra protein lDDT (mean)",
-        "intra protein lDDT (Oracle)",
+        "backbone RMSD (mean)",
+        "backbone RMSD (Oracle)",
+        "intra polymer lDDT (mean)",
+        "intra polymer lDDT (Oracle)",
         "TM-score (mean)",
         "TM-score (Oracle)",
     ]
@@ -130,12 +134,12 @@ def test_summarize_metrics(
     per system.
     """
     METRIC_NAMES = [
-        "CA-RMSD <5.0",
-        "CA-RMSD >5.0",
-        "CA-RMSD mean",
-        "CA-RMSD median",
-        "intra protein lDDT mean",
-        "intra protein lDDT median",
+        "backbone RMSD <5.0",
+        "backbone RMSD >5.0",
+        "backbone RMSD mean",
+        "backbone RMSD median",
+        "intra polymer lDDT mean",
+        "intra polymer lDDT median",
         "TM-score mean",
         "TM-score median",
         "TM-score random",

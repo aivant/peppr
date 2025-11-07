@@ -17,8 +17,8 @@ from tests.common import (
 )
 
 ALL_METRICS = [
-    peppr.MonomerRMSD(5.0, ca_only=True),
-    peppr.MonomerRMSD(5.0, ca_only=False),
+    peppr.MonomerRMSD(5.0, backbone_only=True),
+    peppr.MonomerRMSD(5.0, backbone_only=False),
     peppr.MonomerTMScore(),
     peppr.MonomerLDDTScore(),
     peppr.IntraLigandLDDTScore(),
@@ -64,8 +64,8 @@ def _no_bond_atom_array(is_small_molecule):
 @pytest.mark.parametrize(
     ["metric", "value_range"],
     [
-        (peppr.MonomerRMSD(5.0, ca_only=True), (0.0, 10.0)),
-        (peppr.MonomerRMSD(5.0, ca_only=False), (0.0, 10.0)),
+        (peppr.MonomerRMSD(5.0, backbone_only=True), (0.0, 10.0)),
+        (peppr.MonomerRMSD(5.0, backbone_only=False), (0.0, 10.0)),
         (peppr.MonomerTMScore(), (0.4, 1.0)),
         (peppr.MonomerLDDTScore(), (0.4, 1.0)),
         (peppr.IntraLigandLDDTScore(), (0.4, 1.0)),
@@ -132,7 +132,7 @@ def test_no_modification(metric):
         _no_bond_atom_array(is_small_molecule=False),
         _no_bond_atom_array(is_small_molecule=True),
     ],
-    ids=["empty", "no_bond_protein", "no_bond_small_mol"],
+    ids=["empty", "no_bond_polymer", "no_bond_small_mol"],
 )
 @pytest.mark.parametrize("metric", ALL_METRICS, ids=lambda metric: metric.name)
 def test_edge_case_systems(metric, atoms):
@@ -221,7 +221,7 @@ def test_intra_ligand_lddt_score(system_id, move_structure):
     # as moving ligand might change the atom mapping
     original_lddt = np.array([metric.evaluate(reference, pose) for pose in poses])
 
-    # Move the ligands (and proteins as well) towards (or rather into) each other
+    # Move the ligands (and polymers as well) towards (or rather into) each other
     if move_structure == "reference":
         reference = _place_at_origin(reference)
     elif move_structure == "pose":
@@ -261,7 +261,7 @@ def _find_matching_ligand(ref_metrics, test_metrics):
 
 def _place_at_origin(system):
     """
-    Place each chain (ligands and proteins as well) into the coordinate origin
+    Place each chain (ligands and polymers as well) into the coordinate origin
 
     Parameters
     ----------
@@ -294,7 +294,7 @@ def test_ligand_rmsd_with_no_contacts():
     pose = poses[0]
     reference, pose = peppr.find_optimal_match(reference, pose)
 
-    # Assert that the reference contains only two protein chains
+    # Assert that the reference contains only two polymer chains
     assert set(reference.chain_id[~reference.hetero]) == {"0", "1"}
 
     # Assert that LigandRMSD is not NaN before translation
@@ -316,7 +316,7 @@ def test_ligand_rmsd_with_no_contacts():
 def test_ligand_only_system(metric):
     """
     Check that metrics work correctly when given only ligand atoms.
-    This tests that metrics don't make assumptions about the presence of protein chains
+    This tests that metrics don't make assumptions about the presence of polymer chains
     that could break when working with ligand-only systems.
     """
     # Choose any system that is suitable for all metrics

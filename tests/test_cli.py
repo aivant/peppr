@@ -176,7 +176,7 @@ def test_summarize(metrics, system_dir, tmp_path, selector, selector_name):
         raise result.exception
     with open(summary_path) as f:
         summary = json.load(f)
-    assert f"CA-RMSD <2.0 ({selector.name})" in summary.keys()
+    assert f"backbone RMSD <2.0 ({selector.name})" in summary.keys()
 
 
 def test_single_multi_core_equivalence(tmp_path, system_dir, metrics):

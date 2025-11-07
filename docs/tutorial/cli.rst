@@ -132,6 +132,11 @@ In this case we select the best value of the three most confident poses.
     ! peppr tabulate $TMPDIR/peppr.pkl $TMPDIR/table.csv top3
     ! cat $TMPDIR/table.csv
 
+.. note::
+
+    The term '*polymer*' is used throughout ``peppr`` to refer to protein or nucleic
+    acid chains.
+
 Aggregating results over systems
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 The other type of report is an aggregated value for each metric (and each selector)
@@ -147,8 +152,8 @@ system.
 For each metric the mean and median value over all systems are reported.
 For some metrics, such as ``rmsd`` and ``dockq``, there is also bins the values are
 sorted into.
-For example, ``CA-RMSD <2.0`` gives the percentage of systems with a *CA-RMSD* below
-2.0 Å.
+For example, ``backbone RMSD <2.0`` gives the percentage of systems with a
+:math:`C_{\alpha}`-RMSD below 2.0 Å.
 
 Increasing the accuracy
 -----------------------

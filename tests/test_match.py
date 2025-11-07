@@ -59,7 +59,7 @@ def test_matching_atoms(pdb_id, crop, seed, use_heuristic):
         chains = [chain for i, chain in enumerate(chains) if i % 2 == 0]
         reference = struc.concatenate(chains)
     if crop:
-        # Remove the the first and last residue of protein chains,
+        # Remove the the first and last residue of polymer chains,
         # to check if also similar chains are matched correctly
         chains = [
             chain[~np.isin(chain.res_id, (chain.res_id[0], chain.res_id[-1]))]
@@ -500,7 +500,7 @@ def test_exhaustive_mappings():
     Check if :func:`find_all_matches()` finds all possible atom mappings
     for a known example.
     """
-    # Hemoglobin: 2*2 equivalent protein chains and 4 heme molecules
+    # Hemoglobin: 2*2 equivalent polymer chains and 4 heme molecules
     N_MAPPINGS = (
         # Mappings between alpha or beta chains
         factorial(2) ** 2

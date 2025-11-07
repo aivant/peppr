@@ -375,7 +375,7 @@ class ContactMeasurement:
         return [
             self._map_stacking_indices(combined_atoms, indices_1, indices_2, kind)
             for indices_1, indices_2, kind in all_interactions
-            # filter out intra protein and intra ligand interactions
+            # filter out intra polymer and intra ligand interactions
             if combined_atoms.hetero[indices_1[0]]
             != combined_atoms.hetero[indices_2[0]]
         ]
@@ -388,13 +388,13 @@ class ContactMeasurement:
         kind: struc.PiStacking,
     ) -> tuple[NDArray[np.int_], NDArray[np.int_], struc.PiStacking]:
         """Map combined structure indices back to original receptor and ligand."""
-        # Sort to ensure protein indices comes first then ligand
-        protein_idx, ligand_idx = sorted(
+        # Sort to ensure polymer indices comes first then ligand
+        polymer_idx, ligand_idx = sorted(
             [indices_1, indices_2], key=lambda idx: combined_atoms.hetero[idx[0]]
         )
 
         return (
-            self._binding_site_indices[protein_idx],  # Map to full receptor
+            self._binding_site_indices[polymer_idx],  # Map to full receptor
             ligand_idx - len(self._binding_site),  # Map to ligand
             kind,
         )
@@ -438,7 +438,7 @@ class ContactMeasurement:
         return [
             self._map_pi_cation_indices(ring_indices, cation_index)
             for ring_indices, cation_index in all_interactions
-            #  filter out intra protein and intra ligand interactions
+            #  filter out intra polymer and intra ligand interactions
             if (ring_indices[0] >= binding_site_size)
             != (cation_index >= binding_site_size)
         ]
