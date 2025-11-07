@@ -1,7 +1,10 @@
-__all__ = ["is_small_molecule", "standardize"]
+__all__ = ["MoleculeType", "standardize"]
 
 
+import functools
+from enum import Enum, auto
 import biotite.structure as struc
+import biotite.structure.info as info
 
 DONOR_PATTERN = (
     "["
@@ -35,6 +38,48 @@ ACCEPTOR_PATTERN = (
 HALOGEN_PATTERN = "[F,Cl,Br,I;+0]"
 HBOND_DISTANCE_SCALING = (0.8, 1.15)
 HALOGEN_DISTANCE_SCALING = (0.8, 1.05)
+
+
+class MoleculeType(Enum):
+    """
+    The type of a molecule.
+    """
+
+    SMALL_MOLECULE = auto()
+    PROTEIN = auto()
+    NUCLEIC_ACID = auto()
+
+    @staticmethod
+    def of(chain: struc.AtomArray) -> "MoleculeType":
+        """
+        Determine the :class:`MoleculeType` of the given chain.
+
+        Parameters
+        ----------
+        chain : struc.AtomArray, shape=(n,)
+            The chain to determine the :class:`MoleculeType` of.
+
+        Returns
+        -------
+        MoleculeType
+            The :class:`MoleculeType` of the given chain.
+
+        Warnings
+        --------
+        This function does not check if `chain` is truly a single chain, this is the
+        responsibility of the caller.
+        """
+        if chain.hetero[0].item():
+            return MoleculeType.SMALL_MOLECULE
+        res_name = chain.res_name[0].item()
+        if res_name in _amino_acid_names():
+            return MoleculeType.PROTEIN
+        if res_name in _nucleotide_names():
+            return MoleculeType.NUCLEIC_ACID
+        raise ValueError(
+            f"Chain contains residue '{res_name}' which is not polymer component, "
+            "but it is also not marked as a small molecule"
+        )
 
 
 def is_small_molecule(chain: struc.AtomArray) -> bool:
@@ -86,3 +131,19 @@ def standardize(
     if remove_monoatomic_ions:
         mask &= ~struc.filter_monoatomic_ions(system)
     return system[..., mask]
+
+
+@functools.cache
+def _amino_acid_names() -> set[str]:
+    """
+    Get the names of all residues considered to be amino acids.
+    """
+    return set(info.amino_acid_names())
+
+
+@functools.cache
+def _nucleotide_names() -> set[str]:
+    """
+    Get the names of all residues considered to be nucleotides.
+    """
+    return set(info.nucleotide_names())

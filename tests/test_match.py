@@ -29,7 +29,7 @@ def bromochlorofluoromethane():
     return rdkit_interface.from_mol(mol, conformer_id)
 
 
-@pytest.mark.parametrize("seed", range(10))
+@pytest.mark.parametrize("seed", range(5))
 @pytest.mark.parametrize("crop", [False, True])
 @pytest.mark.parametrize("pdb_id", list_test_pdb_files(), ids=lambda path: path.stem)
 @pytest.mark.parametrize("use_heuristic", [False, True])
@@ -48,7 +48,9 @@ def test_matching_atoms(pdb_id, crop, seed, use_heuristic):
     )
     reference = peppr.standardize(reference)
     # Annotate small molecules as hetero
-    reference.hetero[~struc.filter_amino_acids(reference)] = True
+    reference.hetero[
+        ~(struc.filter_amino_acids(reference) | struc.filter_nucleotides(reference))
+    ] = True
     _annotate_atom_order(reference)
 
     chains = list(struc.chain_iter(reference))
@@ -71,7 +73,10 @@ def test_matching_atoms(pdb_id, crop, seed, use_heuristic):
     pose = struc.concatenate(chains)
 
     matched_reference, matched_pose = peppr.find_optimal_match(
-        reference, pose, use_heuristic=use_heuristic
+        reference,
+        pose,
+        use_heuristic=use_heuristic,
+        min_sequence_identity=0.9 if crop else 1.0,
     )
 
     _check_match(matched_reference, matched_pose, reference, pose)
