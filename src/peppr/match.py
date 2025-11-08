@@ -1103,6 +1103,7 @@ def _assign_entity_ids(
         use_entity_annotation,
         use_structure_match,
     )
+    max_entity_id = np.max(entity_ids)
 
     # Split the entity IDs again
     reference_entity_ids = entity_ids[: len(reference_chains)]
@@ -1110,9 +1111,9 @@ def _assign_entity_ids(
     # In the worst case, the number of distinct entity IDs
     # is equal to the number of chains -> use this as 'minlength'
     reference_entity_id_counts = np.bincount(
-        reference_entity_ids, minlength=len(entity_ids)
+        reference_entity_ids, minlength=max_entity_id + 1
     )
-    pose_entity_id_counts = np.bincount(pose_entity_ids, minlength=len(entity_ids))
+    pose_entity_id_counts = np.bincount(pose_entity_ids, minlength=max_entity_id + 1)
     if (
         not allow_unmatched_entities
         and (reference_entity_id_counts != pose_entity_id_counts).any()
