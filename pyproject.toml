@@ -52,9 +52,9 @@ tests = [
 ]
 
 [project.urls]
-#homepage = "https://www.peppr.org"
+homepage = "https://peppr.vant.ai/"
 repository = "https://github.com/aivant/peppr"
-#documentation = "https://www.peppr.org"
+documentation = "https://peppr.vant.ai/"
 
 [project.scripts]
 peppr = "peppr.cli:cli"
