@@ -852,8 +852,14 @@ def _match_common_residues(
     ref_order, pose_order, ref_common_mask, pose_common_mask = _find_atom_intersection(
         reference[ref_aligned_mask], pose[pose_aligned_mask]
     )
-    reference[ref_aligned_mask] = reference[ref_aligned_mask][ref_order]
-    pose[pose_aligned_mask] = pose[pose_aligned_mask][pose_order]
+    global_ref_order = np.arange(reference.array_length())
+    global_pose_order = np.arange(pose.array_length())
+    global_ref_order[ref_aligned_mask] = global_ref_order[ref_aligned_mask][ref_order]
+    global_pose_order[pose_aligned_mask] = global_pose_order[pose_aligned_mask][
+        pose_order
+    ]
+    reference = reference[global_ref_order]
+    pose = pose[global_pose_order]
     reference.matched[ref_aligned_mask] = ref_common_mask
     pose.matched[pose_aligned_mask] = pose_common_mask
 
