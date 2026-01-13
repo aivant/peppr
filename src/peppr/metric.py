@@ -166,20 +166,21 @@ class MonomerRMSD(Metric):
     ----------
     threshold : float
         The RMSD threshold to use for the *good* predictions.
-    ca_only : bool, optional
-        If ``True``, only consider :math:`C_{\alpha}` atoms.
+    backbone_only : bool, optional
+        If ``True``, only consider :math:`C_{\alpha}` from peptides and :math:`C_3^'`
+        from nucleic acids.
         Otherwise, consider all heavy atoms.
     """
 
-    def __init__(self, threshold: float, ca_only: bool = True) -> None:
+    def __init__(self, threshold: float, backbone_only: bool = True) -> None:
         self._threshold = threshold
-        self._ca_only = ca_only
+        self._backbone_only = backbone_only
         super().__init__()
 
     @property
     def name(self) -> str:
-        if self._ca_only:
-            return "CA-RMSD"
+        if self._backbone_only:
+            return "backbone RMSD"
         else:
             return "all-atom RMSD"
 
@@ -194,11 +195,12 @@ class MonomerRMSD(Metric):
             pose_chain, _ = struc.superimpose(reference_chain, pose_chain)
             return struc.rmsd(reference_chain, pose_chain)
 
-        if self._ca_only:
+        if self._backbone_only:
             reference, pose = filter_matched(
                 reference,
                 pose,
-                prefilter=lambda atoms: ~atoms.hetero & (atoms.atom_name == "CA"),
+                prefilter=lambda atoms: ~atoms.hetero
+                & np.isin(atoms.atom_name, ["CA", "C3'"]),
             )
         else:
             reference, pose = filter_matched(
@@ -212,8 +214,8 @@ class MonomerRMSD(Metric):
 
 class MonomerTMScore(Metric):
     """
-    Compute the *TM-score* score for each monomer and take the mean weighted by the
-    number of atoms.
+    Compute the *TM-score* score for each protein monomer and take the mean weighted
+    by the number of atoms.
     """
 
     @property
@@ -248,10 +250,10 @@ class MonomerTMScore(Metric):
                 else:
                     raise
 
-        # TM-score is only defined for peptide chains
         reference, pose = filter_matched(
             reference,
             pose,
+            # TM-score is only defined for peptide chains
             prefilter=lambda atoms: struc.filter_amino_acids(atoms) & ~atoms.hetero,
         )
         return _run_for_each_monomer(reference, pose, superimpose_and_tm_score)
@@ -268,7 +270,7 @@ class MonomerLDDTScore(Metric):
 
     @property
     def name(self) -> str:
-        return "intra protein lDDT"
+        return "intra polymer lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         reference, pose = filter_matched(
@@ -318,7 +320,7 @@ class IntraLigandLDDTScore(Metric):
 
 class LDDTPLIScore(Metric):
     """
-    Compute the CASP LDDT-PLI score, i.e. the lDDT for protein-ligand interactions
+    Compute the CASP LDDT-PLI score, i.e. the lDDT for polymer-ligand interactions
     as defined by [1]_.
 
     References
@@ -328,7 +330,7 @@ class LDDTPLIScore(Metric):
 
     @property
     def name(self) -> str:
-        return "protein-ligand lDDT"
+        return "polymer-ligand lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         def lddt_pli(reference, pose):  # type: ignore[no-untyped-def]
@@ -336,7 +338,7 @@ class LDDTPLIScore(Metric):
             polymer_mask = ~ligand_mask
 
             if not polymer_mask.any():
-                # No protein present -> metric is undefined
+                # No polymer present -> metric is undefined
                 return np.nan
 
             binding_site_contacts = np.unique(
@@ -344,7 +346,7 @@ class LDDTPLIScore(Metric):
                     reference[polymer_mask], reference[ligand_mask], cutoff=4.0
                 )[:, 0]
             )
-            # No contacts between the ligand and protein in reference -> no binding site
+            # No contacts between the ligand and polymer in reference -> no binding site
             # -> metric is undefined
             if len(binding_site_contacts) == 0:
                 return np.nan
@@ -370,13 +372,13 @@ class LDDTPLIScore(Metric):
 
 class LDDTPPIScore(Metric):
     """
-    Compute the the lDDT for protein-protein interactions, i.e. all intra-chain
+    Compute the the lDDT for polymer-polymer interactions, i.e. all intra-chain
     contacts are not included.
     """
 
     @property
     def name(self) -> str:
-        return "protein-protein lDDT"
+        return "polymer-polymer lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         reference, pose = filter_matched(
@@ -502,7 +504,7 @@ class DockQScore(Metric):
 
 class LigandRMSD(Metric):
     """
-    Compute the *Ligand RMSD* for the given protein complex as defined in [1]_.
+    Compute the *Ligand RMSD* for the given polymer complex as defined in [1]_.
     The score is first separately computed for all pairs of chains that are in contact,
     and the averaged. If the reference doesn't contain any chains in contact, *NaN* is returned.
 
@@ -538,9 +540,7 @@ class LigandRMSD(Metric):
                 )
 
         reference, pose = filter_matched(
-            reference,
-            pose,
-            prefilter=lambda atoms: struc.filter_amino_acids(atoms) & ~atoms.hetero,
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
         )
         return _run_for_each_chain_pair(reference, pose, lrmsd_on_interfaces_only)
 
@@ -550,7 +550,7 @@ class LigandRMSD(Metric):
 
 class InterfaceRMSD(Metric):
     """
-    Compute the *Interface RMSD* for the given protein complex as defined in [1]_.
+    Compute the *Interface RMSD* for the given polymer complex as defined in [1]_.
 
     References
     ----------
@@ -563,9 +563,7 @@ class InterfaceRMSD(Metric):
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         reference, pose = filter_matched(
-            reference,
-            pose,
-            prefilter=lambda atoms: struc.filter_amino_acids(atoms) & ~atoms.hetero,
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
         )
         # iRMSD is independent of the selection of receptor and ligand chain
         return _run_for_each_chain_pair(reference, pose, irmsd)
@@ -590,9 +588,7 @@ class ContactFraction(Metric):
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         reference, pose = filter_matched(
-            reference,
-            pose,
-            prefilter=lambda atoms: struc.filter_amino_acids(atoms) & ~atoms.hetero,
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
         )
         # Fnat is independent of the selection of receptor and ligand chain
         # Caution: `fnat()` returns both fnat and fnonnat -> select first element
@@ -623,7 +619,7 @@ class PocketAlignedLigandRMSD(Metric):
                 for chain in [reference_chain1, reference_chain2]
             )
             if n_small_molecules != 1:
-                # Either two proteins or two small molecules -> not a valid PLI pair
+                # Either two polymers or two small molecules -> not a valid PLI pair
                 return np.nan
             return pocket_aligned_lrmsd(
                 *_select_receptor_and_ligand(
@@ -1005,9 +1001,9 @@ class ClashCount(Metric):
 
 class PLIFRecovery(Metric):
     r"""
-    Calculates the Protein-Ligand Interaction Fingerprint (PLIF) recovery rate.
+    Calculates the Polymer-Ligand Interaction Fingerprint (PLIF) recovery rate.
 
-    This metric quantifies how well a predicted protein-ligand pose structure
+    This metric quantifies how well a predicted polymer-ligand pose structure
     recapitulates the specific interactions observed in a reference (e.g., crystal)
     structure [1]_:
 
@@ -1125,7 +1121,7 @@ class PLIFRecovery(Metric):
         ligand: struc.AtomArray,
     ) -> Dict[int, Counter["PLIFRecovery.InteractionType"]]:
         """
-        Generates a Protein-Ligand Interaction Fingerprint dictionary where counts
+        Generates a Polymer-Ligand Interaction Fingerprint dictionary where counts
         are aggregated per residue for each interaction type.
         """
         if ligand.array_length() == 0 or receptor.array_length() == 0:
@@ -1276,7 +1272,7 @@ class PLIFRecovery(Metric):
         ref_ligand = reference[reference.hetero]
         pose_ligand = pose[pose.hetero]
 
-        # Only evaluate on PLI systems - check for both ligands and proteins
+        # Only evaluate on PLI systems - check for both ligands and polymers
         if (
             ref_receptor.array_length() == 0
             or ref_ligand.array_length() == 0
@@ -1717,7 +1713,7 @@ def _run_for_each_ligand(
     function: Callable[[struc.AtomArray, struc.AtomArray], Any],
 ) -> list[Any]:
     """
-    Run the given function for each isolated ligand in complex with all proteins from
+    Run the given function for each isolated ligand in complex with all polymers from
     the system.
 
     Parameters
@@ -1790,7 +1786,7 @@ def _select_receptor_and_ligand(
 
 def _select_isolated_ligands(pose: struc.AtomArray) -> NDArray[np.bool_]:
     """
-    Returns masks that select ligannds in the system without protein chains.
+    Returns masks that select ligannds in the system without polymer chains.
 
     Parameters
     ----------

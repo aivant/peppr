@@ -26,16 +26,22 @@ from rdkit.Chem import (
     SanitizeFlags,
     SanitizeMol,
 )
-from peppr.common import is_small_molecule
+from peppr.common import MoleculeType
 
 # To match atoms between pose and reference chain,
 # the residue and atom name are sufficient to unambiguously identify an atom
 _ANNOTATIONS_FOR_ATOM_MATCHING = ["res_name", "atom_name"]
-_IDENTITY_MATRIX = align.SubstitutionMatrix(
-    seq.ProteinSequence.alphabet,
-    seq.ProteinSequence.alphabet,
-    np.eye(len(seq.ProteinSequence.alphabet), dtype=np.int32),
-)
+_IDENTITY_MATRIX = {
+    molecule_type: align.SubstitutionMatrix(
+        alphabet,
+        alphabet,
+        np.eye(len(alphabet), dtype=np.int32),
+    )
+    for molecule_type, alphabet in (
+        (MoleculeType.PROTEIN, seq.ProteinSequence.alphabet),
+        (MoleculeType.NUCLEIC_ACID, seq.NucleotideSequence.alphabet_amb),
+    )
+}
 _PADDING = -1
 _UNMAPPABLE_ENTITY_ID = -1
 
@@ -610,7 +616,10 @@ def _all_global_mappings(
             list[tuple[struc.AtomArray, struc.AtomArray]]
         ] = []
         for ref_chain_i, pose_chain_i in zip(ref_chain_indices, pose_chain_indices):
-            if is_small_molecule(reference_chains[ref_chain_i]):
+            if (
+                MoleculeType.of(reference_chains[ref_chain_i])
+                == MoleculeType.SMALL_MOLECULE
+            ):
                 pose_mappings = _molecule_mappings(
                     reference_chains[ref_chain_i], pose_chains[pose_chain_i]
                 )
@@ -761,7 +770,7 @@ def _match_using_chain_order(
     matched_reference_chains = []
     matched_pose_chains = []
     for ref_i, pose_i in zip(reference_chain_order, pose_chain_order):
-        if is_small_molecule(reference_chains[ref_i]):
+        if MoleculeType.of(reference_chains[ref_i]) == MoleculeType.SMALL_MOLECULE:
             ref_atom_order, pose_atom_order = _find_optimal_molecule_permutation(
                 reference_chains[ref_i],
                 pose_chains[pose_i],
@@ -800,7 +809,7 @@ def _match_common_residues(
     reference: struc.AtomArray, pose: struc.AtomArray
 ) -> tuple[struc.AtomArray, struc.AtomArray]:
     """
-    Find common residues (and the common atoms) in two protein chains.
+    Find common residues (and the common atoms) in two polymer chains.
 
     Parameters
     ----------
@@ -825,7 +834,7 @@ def _match_common_residues(
     alignment = align.align_optimal(
         reference_sequence,
         pose_sequence,
-        _IDENTITY_MATRIX,
+        _IDENTITY_MATRIX[MoleculeType.of(reference)],
         # We get mismatches due to cropping, not due to evolution
         # -> linear gap penalty makes most sense
         gap_penalty=-1,
@@ -1182,24 +1191,28 @@ def _assign_entity_ids_to_chains(
             entity_ids.append(chain.entity_id[0].item())
         return np.array(entity_ids, dtype=int)
 
+    molecule_types = [MoleculeType.of(chain) for chain in chains]
     sequences = [
-        struc.to_sequence(chain)[0][0] if not is_small_molecule(chain) else None
-        for chain in chains
+        struc.to_sequence(chain)[0][0]
+        if molecule_type != MoleculeType.SMALL_MOLECULE
+        else None
+        for chain, molecule_type in zip(chains, molecule_types)
     ]
     if use_structure_match:
         molecules = [
-            _to_mol(chain) if is_small_molecule(chain) else None for chain in chains
+            _to_mol(chain) if molecule_type == MoleculeType.SMALL_MOLECULE else None
+            for chain, molecule_type in zip(chains, molecule_types)
         ]
 
     current_entity_id = 0
-    for i, (chain, sequence) in enumerate(zip(chains, sequences)):
+    for i, (chain, sequence, molecule_type) in enumerate(
+        zip(chains, sequences, molecule_types)
+    ):
         for j in range(i):
-            if (sequence is None and sequences[j] is not None) or (
-                sequence is not None and sequences[j] is None
-            ):
-                # Cannot match small molecules to polymer chains
+            if molecule_type != molecule_types[j]:
+                # Cannot match different molecule types to each other
                 continue
-            elif sequence is None:
+            elif molecule_type == MoleculeType.SMALL_MOLECULE:
                 # Small molecule case
                 if use_structure_match:
                     # It is only a complete structure match,
@@ -1222,7 +1235,7 @@ def _assign_entity_ids_to_chains(
                 alignment = align.align_optimal(
                     sequence,
                     sequences[j],
-                    _IDENTITY_MATRIX,
+                    _IDENTITY_MATRIX[molecule_type],
                     # We get mismatches due to experimental artifacts, not evolution
                     # -> linear gap penalty makes most sense
                     gap_penalty=-1,
@@ -1273,19 +1286,22 @@ def _all_anchor_combinations(
         raise UnmappableEntityError(
             "No chain in the pose can be mapped to a reference chain"
         )
-    protein_chain_mask = np.array(
-        [not is_small_molecule(chain) for chain in pose_chains]
+    polymer_chain_mask = np.array(
+        [
+            not MoleculeType.of(chain) != MoleculeType.SMALL_MOLECULE
+            for chain in pose_chains
+        ]
     )
-    valid_anchor_mask = protein_chain_mask & mappable_mask
+    valid_anchor_mask = polymer_chain_mask & mappable_mask
     if not valid_anchor_mask.any():
-        # No mappable protein chains
+        # No mappable polymer chains
         # -> Simply use the first mappable small molecule as anchor
         anchor_entity_id = pose_entity_ids[np.where(mappable_mask)[0][0]]
     else:
         valid_anchor_indices = np.where(valid_anchor_mask)[0]
-        protein_entity_ids = pose_entity_ids[valid_anchor_indices]
-        multiplicities_of_entity_ids = np.bincount(protein_entity_ids)
-        multiplicities = multiplicities_of_entity_ids[protein_entity_ids]
+        polymer_entity_ids = pose_entity_ids[valid_anchor_indices]
+        multiplicities_of_entity_ids = np.bincount(polymer_entity_ids)
+        multiplicities = multiplicities_of_entity_ids[polymer_entity_ids]
         least_multiplicity_indices = np.where(multiplicities == np.min(multiplicities))[
             0
         ]
@@ -1335,7 +1351,7 @@ def _get_superimposition_transform(
     transform : AffineTransformation
         The transformation that superimposes the pose chain onto the reference chain.
     """
-    if is_small_molecule(reference_chain):
+    if MoleculeType.of(reference_chain) == MoleculeType.SMALL_MOLECULE:
         if reference_chain.array_length() == pose_chain.array_length():
             _, transform = struc.superimpose(reference_chain, pose_chain)
         else:
@@ -1351,7 +1367,7 @@ def _get_superimposition_transform(
         _, transform, _, _ = struc.superimpose_homologs(
             reference_chain,
             pose_chain,
-            _IDENTITY_MATRIX,
+            _IDENTITY_MATRIX[MoleculeType.of(reference_chain)],
             gap_penalty=-1,
             min_anchors=1,
             # No outlier removal
