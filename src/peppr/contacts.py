@@ -1,6 +1,7 @@
 __all__ = [
     "ContactMeasurement",
     "find_atoms_by_pattern",
+    "find_charged_atoms_in_resonance_structures",
 ]
 
 from enum import IntEnum
@@ -284,12 +285,12 @@ class ContactMeasurement:
         """
         if use_resonance:
             pos_mask, neg_mask, binding_site_conjugated_groups = (
-                _find_charged_atoms_in_resonance_structures(self._binding_site_mol)
+                find_charged_atoms_in_resonance_structures(self._binding_site_mol)
             )
             binding_site_pos_indices = np.where(pos_mask)[0]
             binding_site_neg_indices = np.where(neg_mask)[0]
             pos_mask, neg_mask, ligand_conjugated_groups = (
-                _find_charged_atoms_in_resonance_structures(self._ligand_mol)
+                find_charged_atoms_in_resonance_structures(self._ligand_mol)
             )
             ligand_pos_indices = np.where(pos_mask)[0]
             ligand_neg_indices = np.where(neg_mask)[0]
@@ -583,7 +584,7 @@ def _acceptable_angle(
     return abs(angle - ref_angle) <= tolerance
 
 
-def _find_charged_atoms_in_resonance_structures(
+def find_charged_atoms_in_resonance_structures(
     mol: Chem.Mol,
 ) -> tuple[NDArray[np.bool_], NDArray[np.bool_], NDArray[np.int_]]:
     """
