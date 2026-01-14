@@ -27,7 +27,7 @@
 
 This page does not exist (anymore).
 
-.. button-link:: https://peppr.vant.ai/
+.. button-link:: https://peppr.proximabio.com/
     :color: primary
     :shadow:
 
