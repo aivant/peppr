@@ -200,12 +200,12 @@ def test_find_charged_atoms_in_resonance_structures():
     pos_mask, neg_mask, ligand_conjugated_groups = (
         peppr.find_charged_atoms_in_resonance_structures(ligand_mol)
     )
-    assert len(set(ligand_conjugated_groups)) < len(
-        ligand_conjugated_groups
-    ), "Some atoms are in the same conjugated group"
+    assert len(set(ligand_conjugated_groups)) < len(ligand_conjugated_groups), (
+        "Some atoms are in the same conjugated group"
+    )
     charged_atom_mask = pos_mask | neg_mask
     ligand_charged_in_resonance_atoms = np.where(charged_atom_mask)[0]
-    assert set(ligand_charged_atoms) != set(
-        ligand_charged_in_resonance_atoms
-    ), "Charged atoms do not match those found in resonance structures"
+    assert set(ligand_charged_atoms) != set(ligand_charged_in_resonance_atoms), (
+        "Charged atoms do not match those found in resonance structures"
+    )
     assert np.equal(ligand_charged_in_resonance_atoms, [0, 3, 6, 7, 8]).all()
