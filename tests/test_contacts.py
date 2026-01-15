@@ -5,6 +5,7 @@ import biotite.structure.info as info
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
+from biotite.interface import rdkit as rdkit_interface
 import peppr
 from peppr.common import ACCEPTOR_PATTERN, DONOR_PATTERN, HBOND_DISTANCE_SCALING
 
@@ -301,3 +302,37 @@ def test_no_bonds(contact_method):
 
     contact_measurement = peppr.ContactMeasurement(receptor, ligand, 10.0)
     contact_method(contact_measurement)
+
+
+def test_find_resonance_charges():
+    """
+    Test finding charged atoms in resonance structures using a real ligand from a PDB file.
+    """
+    ligand = info.residue("ASP")
+    # standardize removes hydrogens - needed to estimate formal charges
+    ligand = peppr.standardize(ligand)
+
+    # set annotations for the benefit of finding charged atoms
+    ligand.set_annotation("charge", peppr.estimate_formal_charges(ligand, 7.4))
+    # create rdkit ligand object
+    ligand_mol = rdkit_interface.to_mol(ligand)
+    try:
+        peppr.sanitize(ligand_mol)
+    except Exception:
+        return np.nan
+    ligand_charged_atoms = np.where(ligand.charge != 0)[0]
+    assert np.equal(ligand_charged_atoms, [0, 7, 8]).all()
+
+    # get charged atoms and their resonance groups
+    pos_mask, neg_mask, ligand_conjugated_groups = peppr.find_resonance_charges(
+        ligand_mol
+    )
+    assert len(set(ligand_conjugated_groups)) < len(ligand_conjugated_groups), (
+        "Number of groups expected less than number of atoms as some are conjugated"
+    )
+    charged_atom_mask = pos_mask | neg_mask
+    ligand_charged_in_resonance_atoms = np.where(charged_atom_mask)[0]
+    assert set(ligand_charged_atoms) != set(ligand_charged_in_resonance_atoms), (
+        "Charged atoms do not match those found in resonance structures"
+    )
+    assert np.equal(ligand_charged_in_resonance_atoms, [0, 3, 6, 7, 8]).all()
