@@ -113,7 +113,7 @@ Miscellaneous
     get_contact_residues
     find_atoms_by_pattern
     estimate_formal_charges
-    find_charged_atoms_in_resonance_structures
+    find_resonance_charges
     MatchWarning
     EvaluationWarning
     NoContactError

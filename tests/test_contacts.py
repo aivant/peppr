@@ -304,19 +304,13 @@ def test_no_bonds(contact_method):
     contact_method(contact_measurement)
 
 
-def test_find_charged_atoms_in_resonance_structures():
+def test_find_resonance_charges():
     """
     Test finding charged atoms in resonance structures using a real ligand from a PDB file.
     """
-    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "3eca.cif")
-    structure = pdbx.get_structure(
-        pdbx_file,
-        model=1,
-        include_bonds=True,
-    )
-    structure = peppr.standardize(structure)
-    structure = structure[structure.chain_id == "A"]
-    ligand = structure[structure.hetero]
+    ligand = info.residue("ASP")
+    # standardize removes hydrogens - needed to estimate formal charges
+    ligand = peppr.standardize(ligand)
 
     # set annotations for the benefit of finding charged atoms
     ligand.set_annotation("charge", peppr.estimate_formal_charges(ligand, 7.4))
@@ -330,11 +324,11 @@ def test_find_charged_atoms_in_resonance_structures():
     assert np.equal(ligand_charged_atoms, [0, 7, 8]).all()
 
     # get charged atoms and their resonance groups
-    pos_mask, neg_mask, ligand_conjugated_groups = (
-        peppr.find_charged_atoms_in_resonance_structures(ligand_mol)
+    pos_mask, neg_mask, ligand_conjugated_groups = peppr.find_resonance_charges(
+        ligand_mol
     )
     assert len(set(ligand_conjugated_groups)) < len(ligand_conjugated_groups), (
-        "Some atoms are in the same conjugated group"
+        "Number of groups expected less than number of atoms as some are conjugated"
     )
     charged_atom_mask = pos_mask | neg_mask
     ligand_charged_in_resonance_atoms = np.where(charged_atom_mask)[0]
