@@ -91,20 +91,23 @@ def bisy_rmsd(
         return np.nan
 
     reference_ligand_coord = [chain.coord for chain in reference_ligand_chains]
-    superimposed_pose_ligand_coord = [
-        _superimpose_binding_site(
-            reference[receptor_mask],
-            pose[receptor_mask],
-            reference_ligand_chain,
-            inclusion_radius,
-            outlier_distance,
-            max_iterations,
-            min_anchors,
-        ).apply(pose_ligand_chain.coord)
-        for reference_ligand_chain, pose_ligand_chain in zip(
-            reference_ligand_chains, pose_ligand_chains
-        )
-    ]
+    try:
+        superimposed_pose_ligand_coord = [
+            _superimpose_binding_site(
+                reference[receptor_mask],
+                pose[receptor_mask],
+                reference_ligand_chain,
+                inclusion_radius,
+                outlier_distance,
+                max_iterations,
+                min_anchors,
+            ).apply(pose_ligand_chain.coord)
+            for reference_ligand_chain, pose_ligand_chain in zip(
+                reference_ligand_chains, pose_ligand_chains
+            )
+        ]
+    except struc.BadStructureError:
+        return np.nan
 
     # Compute the RMSD for each ligand and take the mean
     return np.mean(
@@ -181,6 +184,10 @@ def _superimpose_binding_site(
         interface_mask = np.isin(
             reference_receptor.res_id, receptor_contacts
         ) & np.isin(reference_receptor.atom_name, _BACKBONE_ATOMS)
+        if not np.any(interface_mask):
+            raise struc.BadStructureError(
+                "No interface atoms found in reference receptor"
+            )
         _, transform = struc.superimpose(
             reference_receptor.coord[interface_mask],
             pose_receptor.coord[interface_mask],

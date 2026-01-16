@@ -42,7 +42,7 @@ pepp'r documentation
         It supports
 
         - all *CASP*/*CAPRI* metrics and more
-        - small molecules to huge protein complexes
+        - small molecules to huge protein or nucleic acid complexes
         - easy extension with custom metrics
         - a command line interface and a Python API
 
@@ -64,15 +64,15 @@ pepp'r documentation
 
         .. image:: /static/assets/general/sponsor.svg
             :class: only-light
-            :width: 15%
-            :alt: VantAI
-            :target: https://www.vant.ai/
+            :width: 20%
+            :alt: Proxima
+            :target: https://proximabio.com/
 
         .. image:: /static/assets/general/sponsor_dark.svg
             :class: only-dark
-            :width: 15%
-            :alt: VantAI
-            :target: https://www.vant.ai/
+            :width: 20%
+            :alt: Proxima
+            :target: https://proximabio.com/
 
     .. grid-item::
 

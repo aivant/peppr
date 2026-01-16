@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
     reference = load_structure(showcase_dir / "reference.cif")
     pose = load_structure(showcase_dir / "pose.cif")
-    reference_order, pose_order = peppr.find_matching_atoms(reference, pose)
+    reference_order, pose_order = peppr.find_optimal_match(reference, pose)
     reference = reference[reference_order]
     pose = pose[pose_order]
 

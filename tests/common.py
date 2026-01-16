@@ -68,7 +68,7 @@ def assemble_predictions(
 
 def get_reference_metric(system_id: str, metric_name) -> np.ndarray[np.floating]:
     """
-    Parse the reference metric computed by the legacy evaluation pipeline for the given
+    Parse the reference metric computed by *OpenStructureToolkit for the given
     system from ``ref_metrics.csv``.
 
     Parameters

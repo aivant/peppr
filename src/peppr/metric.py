@@ -16,18 +16,38 @@ __all__ = [
     "BondLengthViolations",
     "BondAngleViolations",
     "ClashCount",
+    "PLIFRecovery",
+    "ChiralityViolations",
+    "PocketDistance",
+    "PocketVolumeOverlap",
+    "RotamerViolations",
+    "RamachandranViolations",
+    "LigandValenceViolations",
 ]
 
 import itertools
+import warnings
 from abc import ABC, abstractmethod
-from collections import OrderedDict
-from typing import Any, Callable, Dict, Tuple
+from collections import Counter, OrderedDict
+from enum import Enum, auto
+from typing import Any, Callable, Dict
+import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
 import numpy as np
 from numpy.typing import NDArray
+from rdkit import Chem
 from peppr.bisyrmsd import bisy_rmsd
+from peppr.bounds import get_distance_bounds
 from peppr.clashes import find_clashes
-from peppr.common import is_small_molecule
+from peppr.common import (
+    ACCEPTOR_PATTERN,
+    DONOR_PATTERN,
+    HALOGEN_DISTANCE_SCALING,
+    HALOGEN_PATTERN,
+    HBOND_DISTANCE_SCALING,
+    is_small_molecule,
+)
+from peppr.contacts import ContactMeasurement
 from peppr.dockq import (
     dockq,
     fnat,
@@ -36,8 +56,13 @@ from peppr.dockq import (
     lrmsd,
     pocket_aligned_lrmsd,
 )
-from peppr.graph import graph_to_connected_triples
-from peppr.idealize import idealize_bonds
+from peppr.match import filter_matched, find_matching_centroids
+from peppr.rotamer import (
+    get_fraction_of_rama_outliers,
+    get_fraction_of_rotamer_outliers,
+)
+from peppr.sanitize import sanitize
+from peppr.volume import volume_overlap
 
 
 class Metric(ABC):
@@ -91,7 +116,7 @@ class Metric(ABC):
 
         Returns
         -------
-        np.ndarray, shape=(m,) or None
+        float
             The metric computed for each pose.
             *NaN*, if the structure is not suitable for this metric.
 
@@ -117,6 +142,20 @@ class Metric(ABC):
         """
         raise NotImplementedError
 
+    def disable_atom_matching(self) -> bool:
+        """
+        Defines whether the upstream atom matching is disabled for this metric.
+
+        DEPRECATED: This method has no effect anymore.
+
+        Returns
+        -------
+        bool
+            No effect.
+        """
+        warnings.warn("The method has no effect anymore", DeprecationWarning)
+        return False
+
 
 class MonomerRMSD(Metric):
     r"""
@@ -127,20 +166,21 @@ class MonomerRMSD(Metric):
     ----------
     threshold : float
         The RMSD threshold to use for the *good* predictions.
-    ca_only : bool, optional
-        If ``True``, only consider :math:`C_{\alpha}` atoms.
+    backbone_only : bool, optional
+        If ``True``, only consider :math:`C_{\alpha}` from peptides and :math:`C_3^'`
+        from nucleic acids.
         Otherwise, consider all heavy atoms.
     """
 
-    def __init__(self, threshold: float, ca_only: bool = True) -> None:
+    def __init__(self, threshold: float, backbone_only: bool = True) -> None:
         self._threshold = threshold
-        self._ca_only = ca_only
+        self._backbone_only = backbone_only
         super().__init__()
 
     @property
     def name(self) -> str:
-        if self._ca_only:
-            return "CA-RMSD"
+        if self._backbone_only:
+            return "backbone RMSD"
         else:
             return "all-atom RMSD"
 
@@ -155,10 +195,18 @@ class MonomerRMSD(Metric):
             pose_chain, _ = struc.superimpose(reference_chain, pose_chain)
             return struc.rmsd(reference_chain, pose_chain)
 
-        mask = ~reference.hetero
-        if self._ca_only:
-            mask &= reference.atom_name == "CA"
-        return _run_for_each_monomer(reference[mask], pose[mask], superimpose_and_rmsd)
+        if self._backbone_only:
+            reference, pose = filter_matched(
+                reference,
+                pose,
+                prefilter=lambda atoms: ~atoms.hetero
+                & np.isin(atoms.atom_name, ["CA", "C3'"]),
+            )
+        else:
+            reference, pose = filter_matched(
+                reference, pose, prefilter=lambda atoms: ~atoms.hetero
+            )
+        return _run_for_each_monomer(reference, pose, superimpose_and_rmsd)
 
     def smaller_is_better(self) -> bool:
         return True
@@ -166,13 +214,24 @@ class MonomerRMSD(Metric):
 
 class MonomerTMScore(Metric):
     """
-    Compute the *TM-score* score for each monomer and take the mean weighted by the
-    number of atoms.
+    Compute the *TM-score* score for each protein monomer and take the mean weighted
+    by the number of atoms.
     """
 
     @property
     def name(self) -> str:
         return "TM-score"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        # Bins are adopted from https://doi.org/10.1093/nar/gki524
+        return OrderedDict(
+            [
+                ("random", 0.00),
+                ("ambiguous", 0.17),
+                ("similar", 0.50),
+            ]
+        )
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         def superimpose_and_tm_score(reference, pose):  # type: ignore[no-untyped-def]
@@ -191,10 +250,12 @@ class MonomerTMScore(Metric):
                 else:
                     raise
 
-        # TM-score is only defined for peptide chains
-        mask = struc.filter_amino_acids(reference) & ~reference.hetero
-        reference = reference[mask]
-        pose = pose[mask]
+        reference, pose = filter_matched(
+            reference,
+            pose,
+            # TM-score is only defined for peptide chains
+            prefilter=lambda atoms: struc.filter_amino_acids(atoms) & ~atoms.hetero,
+        )
         return _run_for_each_monomer(reference, pose, superimpose_and_tm_score)
 
     def smaller_is_better(self) -> bool:
@@ -209,15 +270,12 @@ class MonomerLDDTScore(Metric):
 
     @property
     def name(self) -> str:
-        return "intra protein lDDT"
+        return "intra polymer lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        protein_mask = ~reference.hetero
-        if not protein_mask.any():
-            # No protein present
-            return np.nan
-        reference = reference[protein_mask]
-        pose = pose[protein_mask]
+        reference, pose = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
         return _run_for_each_monomer(reference, pose, struc.lddt)
 
     def smaller_is_better(self) -> bool:
@@ -243,12 +301,12 @@ class IntraLigandLDDTScore(Metric):
             # Remove contacts between atoms of different molecules
             return chain_indices[:, 0] == chain_indices[:, 1]
 
-        ligand_mask = reference.hetero
-        if not ligand_mask.any():
+        reference, pose = filter_matched(
+            reference, pose, prefilter=lambda atoms: atoms.hetero
+        )
+        if reference.array_length() == 0:
             # No ligands present
             return np.nan
-        reference = reference[ligand_mask]
-        pose = pose[ligand_mask]
         return struc.lddt(
             reference,
             pose,
@@ -262,7 +320,7 @@ class IntraLigandLDDTScore(Metric):
 
 class LDDTPLIScore(Metric):
     """
-    Compute the CASP LDDT-PLI score, i.e. the lDDT for protein-ligand interactions
+    Compute the CASP LDDT-PLI score, i.e. the lDDT for polymer-ligand interactions
     as defined by [1]_.
 
     References
@@ -272,7 +330,7 @@ class LDDTPLIScore(Metric):
 
     @property
     def name(self) -> str:
-        return "protein-ligand lDDT"
+        return "polymer-ligand lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         def lddt_pli(reference, pose):  # type: ignore[no-untyped-def]
@@ -280,7 +338,7 @@ class LDDTPLIScore(Metric):
             polymer_mask = ~ligand_mask
 
             if not polymer_mask.any():
-                # No protein present -> metric is undefined
+                # No polymer present -> metric is undefined
                 return np.nan
 
             binding_site_contacts = np.unique(
@@ -288,7 +346,7 @@ class LDDTPLIScore(Metric):
                     reference[polymer_mask], reference[ligand_mask], cutoff=4.0
                 )[:, 0]
             )
-            # No contacts between the ligand and protein in reference -> no binding site
+            # No contacts between the ligand and polymer in reference -> no binding site
             # -> metric is undefined
             if len(binding_site_contacts) == 0:
                 return np.nan
@@ -305,6 +363,7 @@ class LDDTPLIScore(Metric):
                 symmetric=True,
             )
 
+        reference, pose = filter_matched(reference, pose)
         return _average_over_ligands(reference, pose, lddt_pli)
 
     def smaller_is_better(self) -> bool:
@@ -313,21 +372,21 @@ class LDDTPLIScore(Metric):
 
 class LDDTPPIScore(Metric):
     """
-    Compute the the lDDT for protein-protein interactions, i.e. all intra-chain
+    Compute the the lDDT for polymer-polymer interactions, i.e. all intra-chain
     contacts are not included.
     """
 
     @property
     def name(self) -> str:
-        return "protein-protein lDDT"
+        return "polymer-polymer lDDT"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        protein_mask = ~reference.hetero
-        if not protein_mask.any():
+        reference, pose = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
+        if reference.array_length() == 0:
             # This is not a PPI system
             return np.nan
-        reference = reference[protein_mask]
-        pose = pose[protein_mask]
         return struc.lddt(reference, pose, exclude_same_chain=True)
 
     def smaller_is_better(self) -> bool:
@@ -365,9 +424,14 @@ class GlobalLDDTScore(Metric):
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
         if self._backbone_only:
-            mask = ~reference.hetero & np.isin(reference.atom_name, ["CA", "C3'"])
-            reference = reference[mask]
-            pose = pose[mask]
+            reference, pose = filter_matched(
+                reference,
+                pose,
+                prefilter=lambda atoms: ~atoms.hetero
+                & np.isin(atoms.atom_name, ["CA", "C3'"]),
+            )
+        else:
+            reference, pose = filter_matched(reference, pose)
         if reference.array_length() == 0:
             return np.nan
         return struc.lddt(reference, pose).item()
@@ -431,6 +495,7 @@ class DockQScore(Metric):
                 )
             ).score
 
+        reference, pose = filter_matched(reference, pose)
         return _run_for_each_chain_pair(reference, pose, run_dockq)
 
     def smaller_is_better(self) -> bool:
@@ -439,7 +504,7 @@ class DockQScore(Metric):
 
 class LigandRMSD(Metric):
     """
-    Compute the *Ligand RMSD* for the given protein complex as defined in [1]_.
+    Compute the *Ligand RMSD* for the given polymer complex as defined in [1]_.
     The score is first separately computed for all pairs of chains that are in contact,
     and the averaged. If the reference doesn't contain any chains in contact, *NaN* is returned.
 
@@ -453,10 +518,6 @@ class LigandRMSD(Metric):
         return "LRMSD"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        mask = struc.filter_amino_acids(reference) & ~reference.hetero
-        reference = reference[mask]
-        pose = pose[mask]
-
         def lrmsd_on_interfaces_only(
             reference_chain1: struc.AtomArray,
             reference_chain2: struc.AtomArray,
@@ -478,6 +539,9 @@ class LigandRMSD(Metric):
                     )
                 )
 
+        reference, pose = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
         return _run_for_each_chain_pair(reference, pose, lrmsd_on_interfaces_only)
 
     def smaller_is_better(self) -> bool:
@@ -486,7 +550,7 @@ class LigandRMSD(Metric):
 
 class InterfaceRMSD(Metric):
     """
-    Compute the *Interface RMSD* for the given protein complex as defined in [1]_.
+    Compute the *Interface RMSD* for the given polymer complex as defined in [1]_.
 
     References
     ----------
@@ -498,9 +562,9 @@ class InterfaceRMSD(Metric):
         return "iRMSD"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        mask = struc.filter_amino_acids(reference) & ~reference.hetero
-        reference = reference[mask]
-        pose = pose[mask]
+        reference, pose = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
         # iRMSD is independent of the selection of receptor and ligand chain
         return _run_for_each_chain_pair(reference, pose, irmsd)
 
@@ -523,9 +587,9 @@ class ContactFraction(Metric):
         return "fnat"
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
-        mask = struc.filter_amino_acids(reference) & ~reference.hetero
-        reference = reference[mask]
-        pose = pose[mask]
+        reference, pose = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
         # Fnat is independent of the selection of receptor and ligand chain
         # Caution: `fnat()` returns both fnat and fnonnat -> select first element
         return _run_for_each_chain_pair(reference, pose, lambda *args: fnat(*args)[0])
@@ -555,7 +619,7 @@ class PocketAlignedLigandRMSD(Metric):
                 for chain in [reference_chain1, reference_chain2]
             )
             if n_small_molecules != 1:
-                # Either two proteins or two small molecules -> not a valid PLI pair
+                # Either two polymers or two small molecules -> not a valid PLI pair
                 return np.nan
             return pocket_aligned_lrmsd(
                 *_select_receptor_and_ligand(
@@ -563,6 +627,7 @@ class PocketAlignedLigandRMSD(Metric):
                 )
             )
 
+        reference, pose = filter_matched(reference, pose)
         return _run_for_each_chain_pair(reference, pose, run_lrmd)
 
     def smaller_is_better(self) -> bool:
@@ -626,6 +691,7 @@ class BiSyRMSD(Metric):
         )
 
     def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        reference, pose = filter_matched(reference, pose)
         return bisy_rmsd(
             reference,
             pose,
@@ -641,59 +707,36 @@ class BiSyRMSD(Metric):
 
 class BondLengthViolations(Metric):
     """
-    Check for unusual bond lengths in the structure by comparing against reference values.
-    Returns the percentage of bonds that are within acceptable ranges.
+    Check for unusual bond lengths in the structure by comparing against reference
+    values.
+    Returns the percentage of bonds that are outside acceptable ranges.
 
     Parameters
     ----------
     tolerance : float, optional
-        The tolerance in Angstroms for acceptable deviation from ideal bond lengths.
-        Default is 0.1 Angstroms.
-    reference_bonds : dict, optional
-        Dictionary mapping atom type pairs to ideal bond lengths.
-        If not provided, uses a default set of common bond lengths.
+        The relative tolerance for acceptable deviation from ideal bond length bounds.
+
+    Notes
+    -----
+    Violations across residues are not considered.
     """
 
-    # Default reference bond lengths in Angstroms
-    _DEFAULT_REFERENCE_BONDS = {
-        ("C", "C"): np.array([1.54, 1.33, 1.20]),
-        ("C", "N"): np.array([1.47, 1.27, 1.15]),
-        ("C", "O"): np.array([1.43, 1.21]),
-        ("N", "H"): np.array([1.01]),
-        ("O", "H"): np.array([0.96]),
-        ("C", "H"): np.array([1.09]),
-        ("C", "S"): np.array([1.82]),
-        ("S", "S"): np.array([2.05]),
-    }
-
-    def __init__(
-        self,
-        tolerance: float = 0.1,
-        reference_bonds: Dict[Tuple[str, str], np.ndarray] | None = None,
-    ) -> None:
+    def __init__(self, tolerance: float = 0.1) -> None:
         self._tolerance = tolerance
-        self._reference_bonds = (
-            reference_bonds
-            if reference_bonds is not None
-            else self._DEFAULT_REFERENCE_BONDS
-        )
-        # Add reverse pairs for convenience
-        reverse_bonds = {(b, a): v for (a, b), v in self._reference_bonds.items()}
-        self._reference_bonds.update(reverse_bonds)
         super().__init__()
 
     @property
     def name(self) -> str:
-        return "Bond-length-violation"
+        return "Bond length violations"
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
         return OrderedDict(
             [
-                ("poor", 0.0),
-                ("acceptable", 0.9),
-                ("good", 0.95),
-                ("excellent", 0.99),
+                ("excellent", 0),
+                ("good", 0.01),
+                ("acceptable", 0.05),
+                ("poor", 0.1),
             ]
         )
 
@@ -713,28 +756,29 @@ class BondLengthViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
-        if pose.bonds is None:
+        if pose.array_length() == 0:
             return np.nan
 
-        total_checked = 0
-        valid_bonds = 0
-
-        # Get all bonds and iterate through the bond tuples
-        for i, j, _ in pose.bonds.as_array():
-            atom1_type = pose.element[i]
-            atom2_type = pose.element[j]
-
-            if (atom1_type, atom2_type) in self._reference_bonds:
-                total_checked += 1
-                bond_length = struc.distance(pose[i], pose[j])
-                ideal_lengths = self._reference_bonds[(atom1_type, atom2_type)]
-                if np.any(np.abs(bond_length - ideal_lengths) <= self._tolerance):
-                    valid_bonds += 1
-
-        if total_checked == 0:
+        try:
+            bounds = get_distance_bounds(pose)
+        except struc.BadStructureError:
             return np.nan
 
-        return 1 - (valid_bonds / total_checked)
+        bond_indices = np.sort(pose.bonds.as_array()[:, :2], axis=1)
+        if len(bond_indices) == 0:
+            return np.nan
+        bond_lengths = struc.index_distance(pose, bond_indices)
+        # The bounds matrix has the lower bounds in the lower triangle
+        # and the upper bounds in the upper triangle
+        lower_bounds = bounds[bond_indices[:, 1], bond_indices[:, 0]]
+        upper_bounds = bounds[bond_indices[:, 0], bond_indices[:, 1]]
+        invalid_mask = (bond_lengths < lower_bounds * (1 - self._tolerance)) | (
+            bond_lengths > upper_bounds * (1 + self._tolerance)
+        )
+
+        return float(
+            np.count_nonzero(invalid_mask) / np.count_nonzero(np.isfinite(lower_bounds))
+        )
 
     def smaller_is_better(self) -> bool:
         return True
@@ -744,30 +788,37 @@ class BondAngleViolations(Metric):
     """
     Check for unusual bond angles in the structure by comparing against
     idealized bond geometry.
-    Returns the percentage of bonds that are within acceptable ranges.
+    Returns the percentage of bonds that are outside acceptable ranges.
+
+    This approach does not measure directly bond angles, but rather checks the
+    distance between the atoms ``A`` and ``C`` in the bond angle ``ABC``.
 
     Parameters
     ----------
     tolerance : float, optional
-        The tolerance in radians for acceptable deviation from ideal bond angles.
+        The relative tolerance for acceptable deviation from ideal distances.
+
+    Notes
+    -----
+    Violations across residues are not considered.
     """
 
-    def __init__(self, tolerance: float = np.deg2rad(15.0)) -> None:
+    def __init__(self, tolerance: float = 0.2) -> None:
         self._tolerance = tolerance
         super().__init__()
 
     @property
     def name(self) -> str:
-        return "Bond-angle-violation"
+        return "Bond angle violations"
 
     @property
     def thresholds(self) -> OrderedDict[str, float]:
         return OrderedDict(
             [
-                ("poor", 0.0),
-                ("acceptable", 0.9),
-                ("good", 0.95),
-                ("excellent", 0.99),
+                ("excellent", 0),
+                ("good", 0.01),
+                ("acceptable", 0.05),
+                ("poor", 0.1),
             ]
         )
 
@@ -787,28 +838,147 @@ class BondAngleViolations(Metric):
         float
             Percentage of bonds outside acceptable ranges (0.0 to 1.0).
         """
-        if pose.bonds is None:
+        if pose.array_length() == 0:
             return np.nan
 
-        # Idealize the pose local geometry to make the reference
-        reference = idealize_bonds(pose)
-
-        # Check the angle of all bonded triples
-        graph = reference.bonds.as_graph()
-        bonded_triples = np.array(graph_to_connected_triples(graph))
-        ref_angles = struc.index_angle(reference, bonded_triples)
-        pose_angles = struc.index_angle(pose, bonded_triples)
-        angle_diffs = np.abs(ref_angles - pose_angles)
-        valid_angles = (angle_diffs <= self._tolerance).sum()
-        total_checked = len(bonded_triples)
-
-        if total_checked == 0:
+        try:
+            bounds = get_distance_bounds(pose)
+        except struc.BadStructureError:
             return np.nan
 
-        return 1 - (valid_angles / total_checked)
+        all_bonds, _ = reference.bonds.get_all_bonds()
+        # For a bond angle 'ABC', this lost contains the atom indices for 'A' and 'C'
+        bond_indices = []  # type: ignore[var-annotated]
+        for bonded_indices in all_bonds:
+            # Remove padding values
+            bonded_indices = bonded_indices[bonded_indices != -1]
+            bond_indices.extend(itertools.combinations(bonded_indices, 2))
+        if len(bond_indices) == 0:
+            return np.nan
+        bond_indices = np.sort(bond_indices, axis=1)
+
+        bond_lengths = struc.index_distance(pose, bond_indices)
+        # The bounds matrix has the lower bounds in the lower triangle
+        # and the upper bounds in the upper triangle
+        lower_bounds = bounds[bond_indices[:, 1], bond_indices[:, 0]]
+        upper_bounds = bounds[bond_indices[:, 0], bond_indices[:, 1]]
+        invalid_mask = (bond_lengths < lower_bounds * (1 - self._tolerance)) | (
+            bond_lengths > upper_bounds * (1 + self._tolerance)
+        )
+
+        return float(
+            np.count_nonzero(invalid_mask) / np.count_nonzero(np.isfinite(lower_bounds))
+        )
 
     def smaller_is_better(self) -> bool:
         return True
+
+
+class RotamerViolations(Metric):
+    """
+    Check for the fraction of improbable amino acid rotamer angles,
+    based on known crystal structures in the *Top8000* dataset [1]_.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1002/prot.25039
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "Rotamer violations"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        # http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
+        return OrderedDict(
+            [
+                ("good", 0.000),
+                ("warning", 0.003),
+                ("bad", 0.015),
+            ]
+        )
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """
+        Calculate the percentage of residues with chi angles that are outside acceptable ranges.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            Not used in this metric as we compare against ideal bond angles.
+        pose : AtomArray
+            The structure to evaluate.
+
+        Returns
+        -------
+        float
+            Percentage of bonds outside acceptable ranges (0.0 to 1.0).
+        """
+        if pose.array_length() == 0:
+            return np.nan
+
+        return get_fraction_of_rotamer_outliers(pose)
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+
+class RamachandranViolations(Metric):
+    r"""
+    Check for the fraction of improbable :math:`\phi`/:math:`\psi` angles,
+    based on known crystal structures in the *Top8000* dataset [1]_.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1002/prot.25039
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "Ramachandran violations"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        # http://molprobity.biochem.duke.edu/help/validation_options/summary_table_guide.html
+        return OrderedDict(
+            [
+                ("good", 0.0000),
+                ("warning", 0.0005),
+                ("bad", 0.0050),
+            ]
+        )
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """
+        Calculate the percentage of bonds that are outside acceptable ranges.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            Not used in this metric as we compare against ideal bond angles.
+        pose : AtomArray
+            The structure to evaluate.
+
+        Returns
+        -------
+        float
+            Percentage of bonds outside acceptable ranges (0.0 to 1.0).
+        """
+
+        if pose.array_length() == 0:
+            return np.nan
+
+        return get_fraction_of_rama_outliers(pose)
+
+    def smaller_is_better(self) -> bool:
+        return False
 
 
 class ClashCount(Metric):
@@ -827,6 +997,586 @@ class ClashCount(Metric):
 
     def smaller_is_better(self) -> bool:
         return True
+
+
+class PLIFRecovery(Metric):
+    r"""
+    Calculates the Polymer-Ligand Interaction Fingerprint (PLIF) recovery rate.
+
+    This metric quantifies how well a predicted polymer-ligand pose structure
+    recapitulates the specific interactions observed in a reference (e.g., crystal)
+    structure [1]_:
+
+    .. math::
+
+        \textrm{PLIF Recovery} = \frac{\sum_{ir} \min(C_{ir}, P_{ir})}{\sum_{ir} C_{ir}},
+
+    where :math:`C_ir` is the count of interaction type :math:`i` with receptor residue
+    :math:`r` in the reference and :math:`P_ir` is the count of interaction type
+    :math:`i` with receptor residue :math:`r` in the pose.
+
+    Parameters
+    ----------
+    ph : float, optional
+        The pH value used for charge estimation if relevant to contact definition.
+    binding_site_cutoff : float, optional
+        A cutoff used if contact definition involves focusing on a binding site.
+    include_interactions : iterable of PLIFRecovery.InteractionType, optional
+        The types of interactions to include in the PLIF calculations.
+        By default, all of them are included.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1186/s13321-025-01011-6
+    """
+
+    class InteractionType(Enum):
+        """
+        Defines the different contact types that can be evaluated.
+
+        - ``HBOND_DONOR_RECEPTOR``: Hydrogen bond, where the donor atom is in the receptor.
+        - ``HBOND_DONOR_LIGAND``: Hydrogen bond, where the donor atom is in the ligand.
+        - ``HALOGEN_BOND``: Halogen bond.
+        - ``PI_STACKING``: Pi stacking interaction.
+        - ``CATION_PI``: Cation-Pi interaction, where the cation is in the receptor.
+        - ``PI_CATION``: Cation-Pi interaction, where the cation is in the ligand.
+        - ``IONIC_BOND``: Salt bridge.
+        """
+
+        HBOND_DONOR_RECEPTOR = auto()
+        HBOND_DONOR_LIGAND = auto()
+        HALOGEN_BOND = auto()
+        PI_STACKING = auto()
+        CATION_PI = auto()
+        PI_CATION = auto()
+        IONIC_BOND = auto()
+
+    def __init__(
+        self,
+        ph: float = 7.4,
+        binding_site_cutoff: float = 4.0,
+        include_interactions: list["PLIFRecovery.InteractionType"] | None = None,
+    ) -> None:
+        self._ph = ph
+        self._binding_site_cutoff = binding_site_cutoff
+        if include_interactions is None:
+            self._include_interactions = list(PLIFRecovery.InteractionType)
+        else:
+            self._include_interactions = include_interactions
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "PLIF Recovery"
+
+    def _add_interactions_to_plifs(
+        self,
+        plifs: Dict[int, Dict["PLIFRecovery.InteractionType", int]],
+        interaction_type: "PLIFRecovery.InteractionType",
+        interactions: list | NDArray[np.int_],
+        receptor: struc.AtomArray,
+        mode: str,
+    ) -> None:
+        """
+        Adds interactions to the PLIFs dictionary based on the specified mode.
+
+        Parameters
+        ----------
+        plifs : dict
+            The PLIF dictionary to modify.
+        interaction_type : PLIFRecovery.InteractionType
+            The type of interaction to increment.
+        interactions : list or ndarray
+            The interaction data. Format depends on the mode.
+        receptor : AtomArray
+            The receptor structure for residue lookup.
+        mode : str
+            The processing mode, either "atomic" or "ring".
+        """
+        if len(interactions) == 0:
+            return
+
+        if mode == "atomic":
+            # Assumes 'interactions' is an NDArray of shape (n, 2)
+            # Increments for each atom's residue in the contact list.
+            interactions = np.array(interactions)
+            receptor_indices = interactions[:, 0]
+            res_ids = receptor.res_id[receptor_indices]
+            for res_id in res_ids:
+                plifs[res_id][interaction_type] += 1
+
+        elif mode == "ring":
+            assert isinstance(interactions, list)
+
+            # Assumes 'interactions' is a list of interaction tuples.
+            # Increments only once per residue for each ring system.
+            for interaction in interactions:
+                receptor_ring_indices = interaction[0]
+                res_id = receptor.res_id[receptor_ring_indices[0]]
+                plifs[res_id][interaction_type] += 1
+
+    def _get_plifs_per_residue(
+        self,
+        receptor: struc.AtomArray,
+        ligand: struc.AtomArray,
+    ) -> Dict[int, Counter["PLIFRecovery.InteractionType"]]:
+        """
+        Generates a Polymer-Ligand Interaction Fingerprint dictionary where counts
+        are aggregated per residue for each interaction type.
+        """
+        if ligand.array_length() == 0 or receptor.array_length() == 0:
+            return {}
+
+        # The original residue numbering between the reference and pose may be different
+        # However the residue ID is important for this metric, as it is used to
+        # identify the interactions
+        # -> Create consistent residue numbering by just counting up
+        receptor.res_id = struc.create_continuous_res_ids(
+            receptor, restart_each_chain=False
+        )
+
+        contact_measurement = ContactMeasurement(
+            receptor=receptor,
+            ligand=ligand,
+            cutoff=self._binding_site_cutoff,
+            ph=self._ph,
+        )
+
+        # Initialize dict with ALL residues and ALL interaction types set to 0
+        unique_res_ids = set(receptor.res_id)
+        plifs: Dict[int, Counter["PLIFRecovery.InteractionType"]] = {
+            res_id: Counter() for res_id in unique_res_ids
+        }
+
+        # --- Find All Interaction Types ---
+        hbonds_rec_donor = contact_measurement.find_contacts_by_pattern(
+            receptor_pattern=DONOR_PATTERN,
+            ligand_pattern=ACCEPTOR_PATTERN,
+            distance_scaling=HBOND_DISTANCE_SCALING,
+        )
+        hbonds_lig_donor = contact_measurement.find_contacts_by_pattern(
+            receptor_pattern=ACCEPTOR_PATTERN,
+            ligand_pattern=DONOR_PATTERN,
+            distance_scaling=HBOND_DISTANCE_SCALING,
+        )
+        halogen_bonds = contact_measurement.find_contacts_by_pattern(
+            receptor_pattern=ACCEPTOR_PATTERN,
+            ligand_pattern=HALOGEN_PATTERN,
+            distance_scaling=HALOGEN_DISTANCE_SCALING,
+        )
+        ionic_bonds = contact_measurement.find_salt_bridges()
+        pi_stacking_interactions = contact_measurement.find_stacking_interactions()
+        pi_cation_interactions = contact_measurement.find_pi_cation_interactions()
+
+        # --- Populate PLIFs ---
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.HBOND_DONOR_RECEPTOR,
+            hbonds_rec_donor,
+            receptor,
+            mode="atomic",
+        )
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.HBOND_DONOR_LIGAND,
+            hbonds_lig_donor,
+            receptor,
+            mode="atomic",
+        )
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.HALOGEN_BOND,
+            halogen_bonds,
+            receptor,
+            mode="atomic",
+        )
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.IONIC_BOND,
+            ionic_bonds,
+            receptor,
+            mode="atomic",
+        )
+
+        self._add_interactions_to_plifs(
+            plifs,
+            PLIFRecovery.InteractionType.PI_STACKING,
+            pi_stacking_interactions,
+            receptor,
+            mode="ring",
+        )
+
+        # Handle the two types of pi-cation interactions separately
+        for interaction in pi_cation_interactions:
+            receptor_part, _, cation_in_receptor = interaction
+            if cation_in_receptor:
+                # Receptor has the cation (single atom), so use "atomic" mode
+                atomic_contact = np.array([[receptor_part[0], -1]], dtype=int)
+                self._add_interactions_to_plifs(
+                    plifs,
+                    PLIFRecovery.InteractionType.CATION_PI,
+                    atomic_contact,
+                    receptor,
+                    mode="atomic",
+                )
+            else:
+                # Receptor has the ring, so use "ring" mode
+                self._add_interactions_to_plifs(
+                    plifs,
+                    PLIFRecovery.InteractionType.PI_CATION,
+                    [interaction],
+                    receptor,
+                    mode="ring",
+                )
+
+        return plifs
+
+    def _calculate_recovery_score(
+        self,
+        reference_plifs: Dict[int, Counter["PLIFRecovery.InteractionType"]],
+        pose_plifs: Dict[int, Counter["PLIFRecovery.InteractionType"]],
+    ) -> float:
+        """
+        Calculate PLIF recovery score using Errington et al. formula.
+        PLIF Recovery = (sum_ir min(C_ir, P_ir)) / (sum_ir C_ir)
+        """
+        numerator = 0
+        denominator = 0
+
+        # Only iterate over residues and interactions present in the reference
+        all_residues = reference_plifs.keys()
+        all_interaction_types = self._include_interactions
+
+        for res_id in all_residues:
+            for interaction_type in all_interaction_types:
+                c_ir = reference_plifs[res_id][interaction_type]
+                p_ir = pose_plifs.get(res_id, Counter())[interaction_type]
+                numerator += min(c_ir, p_ir)
+                denominator += c_ir
+
+        if denominator == 0:
+            # If the reference has no contacts, the metric is undefined.
+            return np.nan
+
+        return numerator / denominator
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        if reference.array_length() == 0 or pose.array_length() == 0:
+            return np.nan
+
+        # Only the receptor residues need to be matched...
+        ref_receptor, pose_receptor = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
+        # ... the ligands may be different in this metric
+        ref_ligand = reference[reference.hetero]
+        pose_ligand = pose[pose.hetero]
+
+        # Only evaluate on PLI systems - check for both ligands and polymers
+        if (
+            ref_receptor.array_length() == 0
+            or ref_ligand.array_length() == 0
+            or pose_ligand.array_length() == 0
+        ):
+            return np.nan
+
+        try:
+            reference_plifs = self._get_plifs_per_residue(ref_receptor, ref_ligand)
+            pose_plifs = self._get_plifs_per_residue(pose_receptor, pose_ligand)
+        except struc.BadStructureError:
+            return np.nan
+        return self._calculate_recovery_score(reference_plifs, pose_plifs)
+
+    def smaller_is_better(self) -> bool:
+        return False
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        return OrderedDict([("Low", 0.0), ("Medium", 0.5), ("High", 0.9)])
+
+
+class ChiralityViolations(Metric):
+    """
+    Check for differences in the chirality of the reference and pose.
+    """
+
+    @property
+    def name(self) -> str:
+        return "Chirality-violation"
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        """
+        Returns the fraction of chiral centers that have a different chirality
+        in the reference as compared to the pose.
+
+        Parameters
+        ----------
+        reference : AtomArray
+            The reference structure of the system.
+        pose : AtomArray
+            The predicted pose.
+            Must have the same length and atom order as the `reference`.
+
+        Returns
+        -------
+        float
+            The fraction of chiral centers that have a different chirality in the reference as compared to the pose.
+        """
+        reference, pose = filter_matched(reference, pose)
+        if reference.array_length() == 0:
+            return np.nan
+
+        # Convert the reference and pose to RDKit molecules
+        ref_mol = rdkit_interface.to_mol(reference, explicit_hydrogen=False)
+        pose_mol = rdkit_interface.to_mol(pose, explicit_hydrogen=False)
+
+        # Assign chiral centers
+        Chem.AssignStereochemistryFrom3D(ref_mol)
+        Chem.AssignStereochemistryFrom3D(pose_mol)
+
+        # Get the chirality of the reference and pose
+        ref_chirality = np.array([atom.GetChiralTag() for atom in ref_mol.GetAtoms()])
+        pose_chirality = np.array([atom.GetChiralTag() for atom in pose_mol.GetAtoms()])
+
+        chiral_count = np.count_nonzero(
+            ref_chirality != int(Chem.ChiralType.CHI_UNSPECIFIED)
+        )
+        violation_count = np.count_nonzero(ref_chirality != pose_chirality)
+
+        if chiral_count == 0:
+            return np.nan
+
+        return float(violation_count / chiral_count)
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+
+class PocketDistance(Metric):
+    r"""
+    Calculates the distance between the centroid of the reference ligand
+    (i.e. the pocket center) and the pose in the ligand. [1]_
+
+    If multiple pockets are present, the average distance is calculated.
+
+    Parameters
+    ----------
+    use_pose_centroids : bool, optional
+        If ``True``, the metric quantifies the distance between the pocket center and
+        the pose ligand centroid (also called DCC [2]_).
+        Otherwise, the metric is more permissive and takes the minimum distance of any
+        pose ligand atom to the pocket center (also called DCA).
+
+    Notes
+    -----
+    Note that for ``use_pose_centroids=False`` even a perfect match might not have
+    a distance of zero, as centroid may not lie directly on some ligand atom directly.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1073/pnas.0707684105
+    .. [2] https://doi.org/10.1016/j.str.2011.02.015
+    """
+
+    def __init__(
+        self,
+        use_pose_centroids: bool = True,
+    ) -> None:
+        self._use_pose_centroids = use_pose_centroids
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "DCC" if self._use_pose_centroids else "DCA"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        # Based on the 'average radius of gyration for ligand molecules'
+        # (https://doi.org/10.1073/pnas.0707684105)
+        return OrderedDict([("good", 0.0), ("bad", 4.0)])
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        ref_receptor, pose_receptor = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
+        ref_ligand = reference[reference.hetero]
+        pose_ligand = pose[pose.hetero]
+
+        if (
+            ref_receptor.array_length() == 0
+            or ref_ligand.array_length() == 0
+            or pose_ligand.array_length() == 0
+        ):
+            return np.nan
+
+        # Superimpose on polymer chains
+        _, transform = struc.superimpose(ref_receptor, pose_receptor)
+        pose_ligand = transform.apply(pose_ligand)
+
+        ref_ligands = list(struc.chain_iter(ref_ligand))
+        pose_ligands = list(struc.chain_iter(pose_ligand))
+        if len(ref_ligands) != len(pose_ligands):
+            raise IndexError(
+                f"Reference has {len(ref_ligands)} ligands, "
+                f"but pose has {len(pose_ligands)} ligands"
+            )
+        ref_centroids = np.array([struc.centroid(lig) for lig in ref_ligands])
+        pose_centroids = np.array([struc.centroid(lig) for lig in pose_ligands])
+        ref_ligand_order, pose_ligand_order = find_matching_centroids(
+            ref_centroids, pose_centroids
+        )
+
+        if self._use_pose_centroids:
+            ref_centroids = ref_centroids[ref_ligand_order]
+            pose_centroids = pose_centroids[pose_ligand_order]
+            return np.mean(
+                np.linalg.norm(pose_centroids - ref_centroids, axis=1)
+            ).item()
+        else:
+            ref_ligands = [ref_ligands[i] for i in ref_ligand_order]
+            pose_ligands = [pose_ligands[i] for i in pose_ligand_order]
+            min_distances = np.array(
+                [
+                    np.min(struc.distance(pose_ligand, pocket_center))
+                    for pose_ligand, pocket_center in zip(pose_ligands, ref_centroids)
+                ]
+            )
+            return np.mean(min_distances).item()
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+
+class PocketVolumeOverlap(Metric):
+    r"""
+    Calculates the *discretized volume overlap* (DVO) between the reference and pose
+    ligand. [1]_
+
+    It is defined as the intersection of the reference and pose ligand volume
+    divided by the union of the volumes.
+    The volume of an atom is a sphere with radius equal to the *Van-der-Waals* radius.
+    If multiple ligands are present, the average DVO is calculated.
+
+    Parameters
+    ----------
+    voxel_size : float, optional
+        The size of the voxels used for the DVO calculation.
+        The computation becomes more accurate with smaller voxel sizes, but
+        the run time scales inverse cubically with voxel size.
+
+    References
+    ----------
+    .. [1] https://doi.org/10.1016/j.str.2011.02.015
+    """
+
+    def __init__(
+        self,
+        voxel_size: float = 0.5,
+    ) -> None:
+        self._voxel_size = voxel_size
+        super().__init__()
+
+    @property
+    def name(self) -> str:
+        return "DVO"
+
+    @property
+    def thresholds(self) -> OrderedDict[str, float]:
+        # Based on the 'average radius of gyration for ligand molecules'
+        # (https://doi.org/10.1073/pnas.0707684105)
+        return OrderedDict([("low", 0.0), ("high", 0.5)])
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        ref_receptor, pose_receptor = filter_matched(
+            reference, pose, prefilter=lambda atoms: ~atoms.hetero
+        )
+        ref_ligand = reference[reference.hetero]
+        pose_ligand = pose[pose.hetero]
+
+        if (
+            ref_receptor.array_length() == 0
+            or ref_ligand.array_length() == 0
+            or pose_ligand.array_length() == 0
+        ):
+            return np.nan
+
+        # Superimpose on polymer chains
+        _, transform = struc.superimpose(ref_receptor, pose_receptor)
+        pose_ligand = transform.apply(pose_ligand)
+
+        ref_ligands = list(struc.chain_iter(ref_ligand))
+        pose_ligands = list(struc.chain_iter(pose_ligand))
+        if len(ref_ligands) != len(pose_ligands):
+            raise IndexError(
+                f"Reference has {len(ref_ligands)} ligands, "
+                f"but pose has {len(pose_ligands)} ligands"
+            )
+        ref_centroids = np.array([struc.centroid(lig) for lig in ref_ligands])
+        pose_centroids = np.array([struc.centroid(lig) for lig in pose_ligands])
+        ref_ligand_order, pose_ligand_order = find_matching_centroids(
+            ref_centroids, pose_centroids
+        )
+        ref_ligands = [ref_ligands[i] for i in ref_ligand_order]
+        ref_centroids = [ref_centroids[i] for i in ref_ligand_order]
+        pose_ligands = [pose_ligands[i] for i in pose_ligand_order]
+        pose_centroids = [pose_centroids[i] for i in pose_ligand_order]
+
+        dvo = []
+        for ref_ligand, ref_centroid, pose_ligand, pose_centroid in zip(
+            ref_ligands, ref_centroids, pose_ligands, pose_centroids
+        ):
+            # Shortcut: If the two molecules are two far away of each other, we do not
+            # need to perform costly volume calculations using a large voxel grid
+            ref_radius = np.max(struc.distance(ref_ligand, ref_centroid))
+            pose_radius = np.max(struc.distance(pose_ligand, pose_centroid))
+            if ref_radius + pose_radius < struc.distance(ref_centroid, pose_centroid):
+                dvo.append(0.0)
+            else:
+                _, intersection_volume, union_volume = volume_overlap(
+                    [ref_ligand, pose_ligand], self._voxel_size
+                )
+                dvo.append(intersection_volume / union_volume)
+
+        return np.mean(dvo).item()
+
+    def smaller_is_better(self) -> bool:
+        return False
+
+
+class LigandValenceViolations(Metric):
+    r"""
+    Counts the total number atoms with valance violations over all ligands using
+    RDKit's internal valence checks.
+
+    This metric finds valence violations that cannot be fixed by kekulization or
+    adding or removing charges. It is useful for identifying ligands that are
+    likely to be problematic.
+    """
+
+    @property
+    def name(self) -> str:
+        return "Ligand valence violations"
+
+    def smaller_is_better(self) -> bool:
+        return True
+
+    def evaluate(self, reference: struc.AtomArray, pose: struc.AtomArray) -> float:
+        isolated_ligand_masks = _select_isolated_ligands(pose)
+        ligand_atomarrays = [pose[mask] for mask in isolated_ligand_masks]
+        num_violations_per_ligand = [
+            _count_valence_violations(aarray) for aarray in ligand_atomarrays
+        ]
+        return np.sum(num_violations_per_ligand).item()
+
+
+def _count_valence_violations(ligand: struc.AtomArray) -> int:
+    mol = rdkit_interface.to_mol(ligand, explicit_hydrogen=False)
+    try:
+        sanitize(mol)
+    except Exception:
+        return sum(atom.HasValenceViolation() for atom in mol.GetAtoms())
+
+    return 0
 
 
 def _run_for_each_monomer(
@@ -862,16 +1612,15 @@ def _run_for_each_monomer(
         values.append(function(reference_chain, pose_chain))
     values = np.array(values)
 
+    # Ignore chains where the values are NaN
+    not_nan_mask = np.isfinite(values)
+    values = values[not_nan_mask]
     if len(values) == 0:
         # No chains in the structure
         return np.nan
     else:
         n_atoms_per_chain = np.diff(chain_starts)
-        # Ignore chains where the values are NaN
-        not_nan_mask = np.isfinite(values)
-        return np.average(
-            values[not_nan_mask], weights=n_atoms_per_chain[not_nan_mask]
-        ).item()
+        return np.average(values, weights=n_atoms_per_chain[not_nan_mask]).item()
 
 
 def _run_for_each_chain_pair(
@@ -919,7 +1668,7 @@ def _run_for_each_chain_pair(
                 pose_chains[chain_j],
             )
         )
-    if len(results) == 0:
+    if np.isnan(results).all():
         return np.nan
     return np.nanmean(results).item()
 
@@ -952,11 +1701,10 @@ def _average_over_ligands(
         If the input structure contains no ligand atoms, *NaN* is returned.
     """
     values = _run_for_each_ligand(reference, pose, function)
-    if len(values) == 0:
-        # No ligands in the structure
+    if np.isnan(values).all():
         return np.nan
     else:
-        return np.mean(values).item()
+        return np.nanmean(values).item()
 
 
 def _run_for_each_ligand(
@@ -965,7 +1713,7 @@ def _run_for_each_ligand(
     function: Callable[[struc.AtomArray, struc.AtomArray], Any],
 ) -> list[Any]:
     """
-    Run the given function for each isolated ligand in complex with all proteins from
+    Run the given function for each isolated ligand in complex with all polymers from
     the system.
 
     Parameters
@@ -1034,3 +1782,29 @@ def _select_receptor_and_ligand(
         return (reference_chain1, reference_chain2, pose_chain1, pose_chain2)
     else:
         return (reference_chain2, reference_chain1, pose_chain2, pose_chain1)
+
+
+def _select_isolated_ligands(pose: struc.AtomArray) -> NDArray[np.bool_]:
+    """
+    Returns masks that select ligannds in the system without polymer chains.
+
+    Parameters
+    ----------
+    pose : AtomArray, shape=(n,)
+        The system to select from.
+
+    Returns
+    -------
+    NDArray[bool], shape=(n_subsets, n)
+        The masks that can be used to select isolated ligands in the system.
+        The first dimension of the array is the subset index.
+    """
+    ligand_mask = pose.hetero
+    chain_starts = struc.get_chain_starts(pose)
+    if len(chain_starts) == 0:
+        # No chains in the structure
+        return np.array([], dtype=bool)
+    chain_masks = struc.get_chain_masks(pose, chain_starts)
+    # Only keep chain masks that correspond to ligand chains
+    ligand_masks = chain_masks[(chain_masks & ligand_mask).any(axis=-1)]
+    return ligand_masks

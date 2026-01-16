@@ -75,6 +75,8 @@ class MeanSelector(Selector):
         return "mean"
 
     def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
+        if np.isnan(values).all():
+            return np.nan
         return np.nanmean(values)
 
 
@@ -88,6 +90,8 @@ class MedianSelector(Selector):
         return "median"
 
     def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
+        if np.isnan(values).all():
+            return np.nan
         return np.nanmedian(values)
 
 
@@ -101,6 +105,8 @@ class OracleSelector(Selector):
         return "Oracle"
 
     def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
+        if np.isnan(values).all():
+            return np.nan
         if smaller_is_better:
             return np.nanmin(values)
         else:
@@ -127,6 +133,8 @@ class TopSelector(Selector):
 
     def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
         top_values = values[: self._k]
+        if np.isnan(top_values).all():
+            return np.nan
         if smaller_is_better:
             return np.nanmin(top_values)
         else:
@@ -161,6 +169,8 @@ class RandomSelector(Selector):
             range(len(values)), size=self._k, replace=False
         )
         top_values = values[random_indices]
+        if np.isnan(top_values).all():
+            return np.nan
         if smaller_is_better:
             return np.nanmin(top_values)
         else:

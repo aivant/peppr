@@ -1,6 +1,7 @@
 import json
 import biotite.structure.info as info
 import biotite.structure.io as strucio
+import numpy as np
 import pandas as pd
 import pytest
 from click.testing import CliRunner
@@ -14,7 +15,7 @@ from peppr.cli import (
     summarize,
     tabulate,
 )
-from tests.common import assemble_predictions, list_test_predictions
+from tests.common import assemble_predictions
 
 N_SYSTEMS = 5
 N_POSES = 3
@@ -23,7 +24,7 @@ N_METRICS = 2
 
 @pytest.fixture(scope="module")
 def test_system():
-    return assemble_predictions(list_test_predictions()[0])
+    return assemble_predictions("7znt__2__1.F_1.G__1.J")
 
 
 @pytest.fixture()
@@ -54,6 +55,20 @@ def metrics():
     Some metric names available in the CLI.
     """
     return list(_METRICS.keys())[:N_METRICS]
+
+
+def test_all_metrics_available():
+    """
+    Check if all metrics implemented in `peppr` are available in the CLI.
+    """
+    cli_metrics = set([type(metric) for metric in _METRICS.values()])
+
+    for attr_name, attr in peppr.__dict__.items():
+        if attr is peppr.Metric:
+            # The base class itself should not be part of the CLI
+            continue
+        if isinstance(attr, type) and issubclass(attr, peppr.Metric):
+            assert attr in cli_metrics, f"{attr_name} is not available in the CLI"
 
 
 @pytest.mark.parametrize("use_multi_pose", [False, True])
@@ -161,7 +176,7 @@ def test_summarize(metrics, system_dir, tmp_path, selector, selector_name):
         raise result.exception
     with open(summary_path) as f:
         summary = json.load(f)
-    assert f"CA-RMSD <2.0 ({selector.name})" in summary.keys()
+    assert f"backbone RMSD <2.0 ({selector.name})" in summary.keys()
 
 
 def test_single_multi_core_equivalence(tmp_path, system_dir, metrics):
@@ -206,7 +221,7 @@ def test_single_multi_core_equivalence(tmp_path, system_dir, metrics):
 
 
 @pytest.mark.parametrize("metric_name", list(_METRICS.keys()))
-def test_run(system_dir, metric_name):
+def test_run_metrics(system_dir, metric_name):
     """
     Check if the ``run`` command works for all available metrics.
     This also checks if each metrics can be successfully created from name.
@@ -218,7 +233,28 @@ def test_run(system_dir, metric_name):
     if result.exception:
         raise result.exception
     # Result must be convertible to float
-    float(result.output)
+    # and not NaN as the selected system supports all metrics
+    result = float(result.output)
+    assert not np.isnan(result)
+
+
+@pytest.mark.parametrize("match_method", [m.value for m in peppr.Evaluator.MatchMethod])
+def test_run_match_method(system_dir, match_method):
+    """
+    Check if the ``run`` command works for all available match methods.
+    This also checks if each metrics can be successfully created from name.
+    """
+    reference_path = (system_dir / "references" / "system_0.bcif").as_posix()
+    pose_path = (system_dir / "poses" / "system_0" / "pose_0.bcif").as_posix()
+
+    result = CliRunner().invoke(
+        run, ["irmsd", reference_path, pose_path, "-m", match_method]
+    )
+    if result.exception:
+        raise result.exception
+    # Result must be convertible to float and not NaN
+    result = float(result.output)
+    assert not np.isnan(result)
 
 
 @pytest.mark.parametrize("format", ["cif", "bcif", "pdb", "mol", "sdf"])

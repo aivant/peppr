@@ -42,7 +42,9 @@ For the scope of this tutorial we will create an all-atom RMSD as metric.
 
         # The core of each metric
         def evaluate(self, reference, pose):
-            # It is not guaranteed that `reference` and `pose` are superimposed
+            # Filter to common atoms
+            reference, pose = peppr.filter_matched(reference, pose)
+            # `reference` and `pose` are probably not superimposed onto each other
             pose, _ = struc.superimpose(reference, pose)
             return struc.rmsd(reference, pose).item()
 
@@ -58,8 +60,12 @@ to :meth:`Evaluator.feed()`, we can rely on some properties of each system that 
 our life easier:
 
 - The input system will only contain heavy atoms (i.e. no hydrogen).
-- The input system always contains matching atoms.
-  This means that atom ``reference[i]`` corresponds to the atom ``pose[i]``.
+- The input reference and pose have a `matched` annotation that can be used as mask
+  to obtain corresponding atoms between the reference and pose.
+  This means that atom ``reference[reference.matched][i]`` corresponds to the atom
+  ``pose[pose.matched][i]``.
+  You can use the convenient :func:`peppr.filter_matched()` function to get a
+  reference and pose :class:`AtomArray` with matching shape, if required for the metric.
   Finding the optimal atom mapping in case of ambiguous scenarios, as they appear in
   homomers or symmetric molecules, is already handled under the hood beforehand.
 - The :class:`Metric` should respect the ``hetero`` annotation of the input
@@ -99,7 +105,7 @@ ordering.
 
 Bringing it all together
 ------------------------
-Now that we have created our custom metric and selector, we can use them in the
+Now that we have created our custom metric and the selector, we can use them in the
 :class:`Evaluator` to evaluate our predictions.
 
 .. jupyter-execute::
@@ -122,7 +128,7 @@ Now that we have created our custom metric and selector, we can use them in the
 
     evaluator.tabulate_metrics(selectors=[WorstCaseSelector()])
 
-And finally, we will also the bin thresholds for the RMSD metric in action.
+And finally, we will also see the bin thresholds for the RMSD metric in action.
 
 .. jupyter-execute::
 

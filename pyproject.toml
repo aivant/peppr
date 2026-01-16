@@ -52,9 +52,9 @@ tests = [
 ]
 
 [project.urls]
-#homepage = "https://www.peppr.org"
+homepage = "https://peppr.proximabio.com"
 repository = "https://github.com/aivant/peppr"
-#documentation = "https://www.peppr.org"
+documentation = "https://peppr.proximabio.com"
 
 [project.scripts]
 peppr = "peppr.cli:cli"
@@ -103,6 +103,7 @@ checks = [
   "SS06",  # Sometimes summaries are a bit longer
   "ES01",  # Some functions are simple enough to not need an extended summary
   "PR06",  # The types are quite descriptive (include shape, dtype, etc.)
+  "RT02",  # Multiple return values can be on the same line
   # Intentionally not all docstrings contain these sections
   "YD01",
   "SA01",

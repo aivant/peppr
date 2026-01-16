@@ -31,7 +31,7 @@ html[data-theme="dark"] {
 
 
 /* Separation between methods in the API reference */
-.py.method, .py.attribute{
+.py.class, .py.method, .py.attribute{
     border-top: 1px solid #cccccc;
     padding-top: 30px;
     padding-bottom: 30px;

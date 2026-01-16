@@ -36,7 +36,15 @@ The metrics for pose evaluation.
     PocketAlignedLigandRMSD
     BiSyRMSD
     BondLengthViolations
+    BondAngleViolations
+    ChiralityViolations
     ClashCount
+    PLIFRecovery
+    PocketDistance
+    PocketVolumeOverlap
+    RotamerViolations
+    RamachandranViolations
+    LigandValenceViolations
 
 Selectors
 ---------
@@ -71,20 +79,41 @@ that are not directly implemented :mod:`biotite.structure`.
     irmsd
     fnat
     DockQ
+    ContactMeasurement
+    volume
+    volume_overlap
+    RotamerScore
+    RamaScore
+    get_fraction_of_rotamer_outliers
+    get_fraction_of_rama_outliers
+
+Atom Matching
+-------------
+.. autosummary::
+    :toctree: apidoc
+    :caption: Atom Matching
+
+    find_optimal_match
+    find_all_matches
+    find_matching_centroids
+    filter_matched
+    GraphMatchWarning
+    UnmappableEntityError
+    StructureMismatchError
 
 Miscellaneous
 -------------
-
 .. autosummary::
     :toctree: apidoc
     :caption: Miscellaneous
 
-    MatchWarning
-    GraphMatchWarning
-    EvaluationWarning
-    NoContactError
+    MoleculeType
     sanitize
     standardize
-    find_matching_atoms
-    is_small_molecule
     get_contact_residues
+    find_atoms_by_pattern
+    estimate_formal_charges
+    find_resonance_charges
+    MatchWarning
+    EvaluationWarning
+    NoContactError
