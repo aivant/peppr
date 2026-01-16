@@ -61,6 +61,7 @@ Selection of the desired metric result from multiple poses.
     OracleSelector
     TopSelector
     RandomSelector
+    DeviationAggregator
 
 Analysis functions
 ------------------
