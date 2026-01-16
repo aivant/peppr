@@ -48,12 +48,12 @@ def test_random_selector():
     assert np.isclose(np.mean(selected_values), 9, rtol=0.5)
 
 
-def test_standard_deviation_selector():
+def test_deviation_aggregator():
     """
-    This test verifies that the StandardDeviationSelector returns the expected
+    This test verifies that the DeviationAggregator returns the expected
     value of standard deviation for a given set of values.
     """
-    selector = peppr.StandardDeviationSelector()
+    selector = peppr.DeviationAggregator()
     values = np.linspace(0, 10, 10 + 1)
     expected_std = np.std(values)
 
