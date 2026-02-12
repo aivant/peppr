@@ -2,6 +2,7 @@
 
 __all__ = ["sanitize"]
 
+from itertools import product
 import rdkit
 import rdkit.Chem.AllChem as Chem
 
@@ -24,7 +25,7 @@ def sanitize(mol: Chem.Mol, max_fix_iterations: int = 1000) -> None:
     -----
     Deals with cases:
 
-    - ``AtomValenceException``: add charge if total valence is exceeding default (for N, O atoms only)
+    - ``AtomValenceException``: add charge if total valence is exceeding default (for B, N, O atoms only)
     - ``KekulizeException``: for ring N atoms with unspecified protonation
     """
     mol.UpdatePropertyCache(strict=False)
@@ -59,7 +60,7 @@ def sanitize(mol: Chem.Mol, max_fix_iterations: int = 1000) -> None:
 
 def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
     """
-    Apply fixes for common problems.
+    Apply fixes for common input problems with RDKit SanitizeMol.
 
     Parameters
     ----------
@@ -109,17 +110,37 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
             # currently not implemented
             return
     if problem.GetType() == "KekulizeException":
-        # hack: only works for nitrogens with missing explicit Hs
+        # hack: fix KekulizeException related to ring N atoms with unspecified
+        # protonation by setting one or more ring nitrogens as "[nH]"
+        possible_nHs = []
+        original_nH_state = []
         for atidx in problem.GetAtomIndices():
             at = mol.GetAtomWithIdx(atidx)
-            # set one of the nitrogens with two bonds in a ring system as "[nH]"
-            if (
-                at.GetSymbol() == "N"
-                and at.GetDegree() == 2
-                and at.GetTotalNumHs() == 0
-            ):
-                at.SetNumExplicitHs(1)
-                break
+            if at.GetSymbol() == "N" and at.GetDegree() == 2:
+                possible_nHs.append(at)
+                original_nH_state.append(at.GetNumExplicitHs())
+
+        if not len(possible_nHs):
+            # no candidate nitrogens to fix the problem
+            # note this early return is unnecessary as the loops below will
+            # not be entered, but it makes the intention clearer
+            return
+
+        # if there is one or more candidates - iterate through all the possible
+        # combinations of explicit Hs for the candidate nitrogens
+        for combo in product([0, 1], repeat=len(possible_nHs)):
+            for nH, nH_explicit in zip(possible_nHs, combo):
+                nH.SetNumExplicitHs(nH_explicit)
+            # and check if the problem is resolved
+            check_problems = Chem.DetectChemistryProblems(
+                mol, sanitizeOps=Chem.rdmolops.SanitizeFlags.SANITIZE_KEKULIZE
+            )
+            if not [p for p in check_problems if _is_same_problem(p, problem)]:
+                # problem is resolved - no need to try other combinations
+                return
+        # if all combos failed - reset explicit Hs back to the original values
+        for nH, nH_explicit in zip(possible_nHs, original_nH_state):
+            nH.SetNumExplicitHs(nH_explicit)
 
 
 def _is_same_problem(problem1: Exception, problem2: Exception) -> bool:
@@ -143,6 +164,13 @@ def _is_same_problem(problem1: Exception, problem2: Exception) -> bool:
         if problem1.GetAtomIdx() != problem2.GetAtomIdx():
             return False
     elif problem_type == "KekulizeException":
-        if problem1.GetAtomIndices() != problem2.GetAtomIndices():
+        if (
+            len(
+                set(problem1.GetAtomIndices()).intersection(
+                    set(problem2.GetAtomIndices())
+                )
+            )
+            == 0
+        ):
             return False
     return True
