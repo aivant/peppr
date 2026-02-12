@@ -10,6 +10,7 @@ from peppr.sanitize import sanitize
     "smiles",
     [
         "c1ccc2nc3c(c(=O)c2c1)cccc3",
+        "O=c1c(cccc2)c2c(Cc3ccccc3)nn1",
         "n1cccc1",
         "CN(C)(C)C",
         "C1CCCC=O1",

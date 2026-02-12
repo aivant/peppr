@@ -90,10 +90,6 @@ def test_estimate_formal_charges_from_smiles(smiles, ph, ref_charges):
         # imine example
         ("MFG", 7.4, {}),
         ("MFG", 3, {"N10": 1}),
-        # tetrazole and imidazole motifs
-        ("3GK", 7.4, {"N1": -1}),
-        ("3GK", 5, {"N1": -1, "N21": 1}),
-        ("3GK", 4, {"N21": 1}),
         # thiophenol example
         ("JKE", 7.4, {"SD": -1, "OD2": -1}),
         ("JKE", 6, {"OD2": -1}),
@@ -131,6 +127,47 @@ def test_estimate_formal_charges(comp_name, ph, ref_charged_atoms, include_hydro
 
     assert len(charges) == atoms.array_length()
     assert test_charged_atoms == ref_charged_atoms
+
+
+@pytest.mark.parametrize(
+    ["comp_name", "ph", "acceptatble_charge_combos"],
+    [
+        # tetrazole and imidazole motifs
+        ("3GK", 7.4, [{"N1": -1}, {"N5": -1}]),
+        (
+            "3GK",
+            5,
+            [
+                {"N1": -1, "N21": 1},
+                {"N1": -1, "N23": 1},
+                {"N5": -1, "N21": 1},
+                {"N5": -1, "N23": 1},
+            ],
+        ),
+        ("3GK", 4, [{"N21": 1}, {"N23": 1}]),
+    ],
+)
+def test_estimate_formal_charges_heterocycles_nohydrogens(
+    comp_name, ph, acceptatble_charge_combos
+):
+    """
+    Check if formal charges are estimated correctly for more complex small molecules.
+    Especially when protonation is not specified and several options are possible.
+    """
+    atoms = info.residue(comp_name)
+    # Do not rely on charges extracted from the CCD
+    atoms.del_annotation("charge")
+    # remove hydrogens to check if the method can estimate charges without relying on them
+    atoms = atoms[atoms.element != "H"]
+
+    charges = peppr.estimate_formal_charges(atoms, ph)
+    test_charged_atoms = {
+        atom_name: charge
+        for atom_name, charge in zip(atoms.atom_name, charges)
+        if charge != 0
+    }
+
+    assert test_charged_atoms in acceptatble_charge_combos
 
 
 def test_estimate_formal_charges_peptide():

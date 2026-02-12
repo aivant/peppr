@@ -22,6 +22,7 @@ from numpy.typing import NDArray
 from rdkit.Chem import (
     AssignStereochemistryFrom3D,
     BondType,
+    GetMolFrags,
     Mol,
     SanitizeFlags,
     SanitizeMol,
@@ -1464,4 +1465,9 @@ def _to_mol(molecule: struc.AtomArray) -> Mol:
             BondType.DOUBLE,
         ]:
             bond.SetBondType(BondType.ONEANDAHALF)
+    frags = GetMolFrags(mol)
+    if len(frags) != 1:
+        raise struc.BadStructureError(
+            f"Molecule contains multiple disconnected fragments: {len(frags)}"
+        )
     return mol

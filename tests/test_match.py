@@ -483,8 +483,16 @@ def test_unmatchable_molecules(use_heuristic):
     reference = reference[reference.element != "H"]
     _annotate_atom_order(reference)
     pose = reference.copy()
-    # Remove bonds in one structure to make the bond graphs incompatible
-    pose.bonds = struc.BondList(pose.array_length())
+    bond_list = pose.bonds
+    bond_array = bond_list.as_array().copy()
+
+    # shuffle the bond types to create an incompatible bond graph
+    bond_array[:, 2] = np.random.permutation(bond_array[:, 2])
+    pose.bonds = struc.BondList(bond_list.get_atom_count(), bond_array)
+    _annotate_atom_order(pose)
+    assert not np.all(
+        reference.bonds == pose.bonds
+    )  # Sanity check to make sure the bond lists are different
 
     with pytest.warns(peppr.GraphMatchWarning, match="Incompatible bond graph"):
         matched_reference, matched_pose = peppr.find_optimal_match(
@@ -628,3 +636,30 @@ def _check_match(
             matched_reference.atom_id
         )
         assert len(np.unique(matched_pose.atom_id)) == len(matched_pose.atom_id)
+
+
+@pytest.mark.parametrize("disconnected", [True, False])
+def test__to_mol_disconnected(disconnected: bool) -> None:
+    """
+    Test that disconnected mol in rdKit is raising exception
+
+    We are creating a molecule with just appending a ligand to another
+    if `disconnected` is True
+
+    Parameters
+    ----------
+    disconnected: bool
+        Whether test a case of disconnected mol
+    """
+    ccd = "BTN"
+    mol_atom_array = struc.info.residue(ccd)
+    if disconnected:
+        mol_atom_array += struc.info.residue(ccd)
+        with pytest.raises(
+            struc.BadStructureError,
+            match="Molecule contains multiple disconnected fragments",
+        ):
+            mol = peppr.match._to_mol(mol_atom_array)
+    else:
+        mol = peppr.match._to_mol(mol_atom_array)
+        assert mol.GetNumAtoms() == len(mol_atom_array), f"Failed for {ccd}"
