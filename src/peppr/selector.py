@@ -5,6 +5,7 @@ __all__ = [
     "OracleSelector",
     "TopSelector",
     "RandomSelector",
+    "DeviationAggregator",
 ]
 
 from abc import ABC, abstractmethod
@@ -174,3 +175,17 @@ class RandomSelector(Selector):
             return np.nanmin(top_values)
         else:
             return np.nanmax(top_values)
+
+
+class DeviationAggregator(Selector):
+    """
+    Aggregator that computes the standard deviation of the values. This can be
+    used to assess the consistency of accuracy of a set of predicted poses.
+    """
+
+    @property
+    def name(self) -> str:
+        return "stdev"
+
+    def select(self, values: np.ndarray, smaller_is_better: bool) -> float:
+        return np.nanstd(values)
