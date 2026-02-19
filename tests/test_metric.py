@@ -157,14 +157,11 @@ def test_unique_names():
 @pytest.mark.parametrize(
     ["metric", "column_name", "abs_tolerance", "rel_tolerance"],
     [
-        pytest.param(
+        (
             peppr.LDDTPLIScore(),
             "lddt_pli",
             0.5,
             0.3,
-            # Expect failure for now, as peppr follows definition from CASP 15
-            # while OpenStructure uses the CASP 16 definition
-            marks=pytest.mark.xfail(reason="Different metric definition"),
         ),
         (
             peppr.BiSyRMSD(5.0, inclusion_radius=4.0, outlier_distance=np.inf),
