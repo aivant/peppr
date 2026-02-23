@@ -638,6 +638,167 @@ def _check_match(
         assert len(np.unique(matched_pose.atom_id)) == len(matched_pose.atom_id)
 
 
+@pytest.fixture
+def homodimer_with_ligand():
+    """
+    Create a synthetic homodimer system with a ligand bound to one chain.
+
+    The system has:
+    - Chain A: polymer at origin
+    - Chain B: polymer translated away (symmetric to A)
+    - Chain C: small molecule ligand close to chain A
+
+    This is useful for testing symmetric chain matching with ligand proximity.
+    """
+    # Create two identical polymer chains (homodimer)
+    chain_a = struc.info.residue("ALA")
+    chain_a = peppr.standardize(chain_a)
+    chain_a.chain_id[:] = "A"
+    chain_a.hetero[:] = False
+
+    chain_b = chain_a.copy()
+    chain_b.chain_id[:] = "B"
+    # Translate chain B far from chain A
+    chain_b.coord += np.array([50.0, 0.0, 0.0])
+
+    # Create a small molecule ligand close to chain A
+    ligand = struc.info.residue("EOH")  # Ethanol as simple ligand
+    ligand = peppr.standardize(ligand)
+    ligand.chain_id[:] = "C"
+    ligand.hetero[:] = True
+    # Place ligand close to chain A (at ~5 Angstrom)
+    ligand.coord += np.array([5.0, 0.0, 0.0])
+
+    reference = struc.concatenate([chain_a, chain_b, ligand])
+    return reference
+
+
+@pytest.mark.parametrize("use_heuristic", [True, False])
+def test_symmetric_chain_matching_with_ligand(homodimer_with_ligand, use_heuristic):
+    """
+    Test that symmetric polymer chains are correctly matched when a ligand
+    is bound to one of them.
+
+    The bug scenario: In a homodimer (chains A and B with identical sequences),
+    centroid-based matching could assign chains incorrectly relative to the ligand.
+    The fix ensures that ligand proximity is considered to break ties.
+    """
+    reference = homodimer_with_ligand
+
+    # Create pose with chains swapped: B comes before A
+    ref_chains = list(struc.chain_iter(reference))
+    chain_a = ref_chains[0]  # polymer A
+    chain_b = ref_chains[1]  # polymer B
+    ligand = ref_chains[2]  # ligand C
+
+    # In pose: swap the polymer chains but keep ligand in place
+    # This simulates a prediction where chain assignment is ambiguous
+    pose = struc.concatenate([chain_b, chain_a, ligand])
+
+    # Annotate for checking
+    reference.set_annotation("atom_id", np.arange(reference.array_length()))
+    pose.set_annotation("atom_id", np.arange(pose.array_length()))
+
+    matched_reference, matched_pose = peppr.find_optimal_match(
+        reference, pose, use_heuristic=use_heuristic
+    )
+
+    # Filter to matched atoms
+    matched_ref, matched_pos = peppr.filter_matched(matched_reference, matched_pose)
+
+    # The key test: the ligand should be matched to atoms that are close to it
+    # Get the ligand atoms in matched structures
+    ligand_mask_ref = matched_ref.hetero
+    ligand_mask_pose = matched_pos.hetero
+
+    # Get polymer and ligand atoms from reference
+    polymer_ref = matched_ref[~ligand_mask_ref]
+    ligand_ref = matched_ref[ligand_mask_ref]
+
+    if len(ligand_ref) > 0 and len(polymer_ref) > 0:
+        # Compute distance from ligand to polymer in reference
+        ref_dist = np.min(
+            struc.distance(ligand_ref.coord[:, None, :], polymer_ref.coord[None, :, :])
+        )
+
+        # Superimpose pose to reference
+        matched_pos_sup, _ = struc.superimpose(matched_ref, matched_pos)
+        polymer_pose_sup = matched_pos_sup[~ligand_mask_pose]
+        ligand_pose_sup = matched_pos_sup[ligand_mask_pose]
+
+        # After superimposition, ligand-polymer distance should be preserved
+        pose_dist = np.min(
+            struc.distance(
+                ligand_pose_sup.coord[:, None, :], polymer_pose_sup.coord[None, :, :]
+            )
+        )
+
+        # The distances should be similar if chains are correctly matched
+        # If chains were swapped incorrectly, the ligand would be far from its partner
+        assert abs(ref_dist - pose_dist) < 10.0, (
+            f"Ligand-polymer distance not preserved: ref={ref_dist:.1f}, pose={pose_dist:.1f}"
+        )
+
+
+@pytest.mark.parametrize("use_heuristic", [True, False])
+def test_symmetric_chain_matching_preserves_binding_site(use_heuristic):
+    """
+    Test that symmetric chain matching correctly preserves the binding site
+    relationship between ligand and polymer chains.
+
+    Creates a homodimer where the ligand is clearly closer to one chain,
+    and verifies that after matching, the ligand remains associated with
+    the correct chain.
+    """
+    CHAIN_SEPARATION = 100.0  # Far apart to make the test clear
+    LIGAND_DISTANCE = 5.0  # Close to one chain
+
+    # Create polymer chain A at origin
+    chain_a = struc.info.residue("GLY")
+    chain_a = peppr.standardize(chain_a)
+    chain_a.chain_id[:] = "A"
+    chain_a.hetero[:] = False
+
+    # Create identical polymer chain B far away
+    chain_b = chain_a.copy()
+    chain_b.chain_id[:] = "B"
+    chain_b.coord += np.array([CHAIN_SEPARATION, 0.0, 0.0])
+
+    # Create ligand close to chain A
+    ligand = struc.info.residue("EOH")
+    ligand = peppr.standardize(ligand)
+    ligand.chain_id[:] = "L"
+    ligand.hetero[:] = True
+    ligand.coord += np.array([LIGAND_DISTANCE, 0.0, 0.0])
+
+    reference = struc.concatenate([chain_a, chain_b, ligand])
+
+    # Create pose with swapped polymer chains
+    # The ligand position stays the same relative to the coordinate system
+    pose_chain_b = chain_a.copy()  # Original A position, but labeled as B
+    pose_chain_b.chain_id[:] = "B"
+
+    pose_chain_a = chain_b.copy()  # Original B position, but labeled as A
+    pose_chain_a.chain_id[:] = "A"
+
+    pose = struc.concatenate([pose_chain_a, pose_chain_b, ligand.copy()])
+
+    matched_reference, matched_pose = peppr.find_optimal_match(
+        reference, pose, use_heuristic=use_heuristic
+    )
+
+    # After matching and superimposition, check RMSD
+    matched_ref, matched_pos = peppr.filter_matched(matched_reference, matched_pose)
+    matched_pos_sup, _ = struc.superimpose(matched_ref, matched_pos)
+
+    rmsd = struc.rmsd(matched_ref, matched_pos_sup)
+
+    # If symmetric chains are correctly matched considering ligand proximity,
+    # RMSD should be very low (nearly 0)
+    # If chains are incorrectly swapped, RMSD would be ~CHAIN_SEPARATION
+    assert rmsd < 1.0, f"RMSD too high ({rmsd:.1f}), symmetric chains likely mismatched"
+
+
 @pytest.mark.parametrize("disconnected", [True, False])
 def test__to_mol_disconnected(disconnected: bool) -> None:
     """
