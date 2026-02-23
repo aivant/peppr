@@ -26,7 +26,6 @@ __all__ = [
 ]
 
 import itertools
-from os import write
 import warnings
 from abc import ABC, abstractmethod
 from collections import Counter, OrderedDict
@@ -354,11 +353,6 @@ class LDDTPLIScore(Metric):
             binding_site_mask = struc.get_residue_masks(
                 reference, binding_site_contacts
             ).any(axis=0)
-            from geotite.io import write_instance_cif
-
-            write_instance_cif(reference, "reference.cif")
-            write_instance_cif(pose, "pose.cif")
-
             return struc.lddt(
                 reference,
                 pose,
