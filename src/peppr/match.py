@@ -319,6 +319,155 @@ def find_all_matches(
         yield m
 
 
+def _refine_symmetric_chain_mapping(
+    reference_chains: list[struc.AtomArray],
+    pose_chains: list[struc.AtomArray],
+    reference_indices: NDArray[np.int_],
+    pose_indices: NDArray[np.int_],
+    reference_entity_ids: NDArray[np.int_],
+    pose_entity_ids: NDArray[np.int_],
+) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
+    """
+    Refine the chain mapping for symmetric chains by considering ligand proximity.
+
+    When there are multiple polymer chains with the same entity ID (symmetric chains),
+    the centroid-based matching may assign them incorrectly relative to the ligand.
+    This function tests swapping symmetric chains to find the assignment that best
+    preserves ligand-polymer distances.
+
+    Parameters
+    ----------
+    reference_chains, pose_chains : list of AtomArray
+        The reference and pose chains.
+    reference_indices, pose_indices : np.ndarray, shape=(n,)
+        The current chain mapping (reference_indices[i] maps to pose_indices[i]).
+    reference_entity_ids, pose_entity_ids : np.ndarray, shape=(n,), dtype=int
+        The entity IDs for each chain.
+
+    Returns
+    -------
+    refined_reference_indices, refined_pose_indices : np.ndarray, shape=(n,)
+        The refined chain mapping with symmetric chains potentially swapped.
+    """
+    # Identify hetero (ligand) chains and polymer chains in the mapping
+    ref_hetero_mask = np.array(
+        [reference_chains[i].hetero.all() for i in reference_indices]
+    )
+    pose_hetero_mask = np.array([pose_chains[i].hetero.all() for i in pose_indices])
+
+    # Only consider pairs where both are hetero or both are not
+    if not np.array_equal(ref_hetero_mask, pose_hetero_mask):
+        return reference_indices, pose_indices
+
+    # If no hetero atoms, nothing to refine
+    if not ref_hetero_mask.any():
+        return reference_indices, pose_indices
+
+    # Find symmetric polymer chains (same entity ID, multiple instances)
+    ref_polymer_indices = reference_indices[~ref_hetero_mask]
+    pose_polymer_indices = pose_indices[~pose_hetero_mask]
+    ref_polymer_entity_ids = reference_entity_ids[ref_polymer_indices]
+
+    # Find entity IDs with multiple polymer chains (symmetric)
+    entity_counts = Counter(ref_polymer_entity_ids)
+    symmetric_entity_ids = {eid for eid, count in entity_counts.items() if count > 1}
+
+    if not symmetric_entity_ids:
+        return reference_indices, pose_indices
+
+    # Get ligand chains
+    ref_ligand_indices = reference_indices[ref_hetero_mask]
+    pose_ligand_indices = pose_indices[pose_hetero_mask]
+
+    # Compute minimum distances from each ligand to each polymer chain
+    def compute_ligand_polymer_distances(
+        ligand_chains: list[struc.AtomArray],
+        polymer_chains: list[struc.AtomArray],
+    ) -> NDArray[np.floating]:
+        """Compute min distance from each ligand to each polymer chain."""
+        n_ligands = len(ligand_chains)
+        n_polymers = len(polymer_chains)
+        distances = np.zeros((n_ligands, n_polymers))
+        for i, lig in enumerate(ligand_chains):
+            for j, poly in enumerate(polymer_chains):
+                # Compute pairwise distances and take minimum
+                dists = struc.distance(lig.coord[:, None, :], poly.coord[None, :, :])
+                distances[i, j] = np.min(dists)
+        return distances
+
+    ref_ligands = [reference_chains[i] for i in ref_ligand_indices]
+    ref_polymers = [reference_chains[i] for i in ref_polymer_indices]
+    pose_ligands = [pose_chains[i] for i in pose_ligand_indices]
+    pose_polymers = [pose_chains[i] for i in pose_polymer_indices]
+
+    ref_distances = compute_ligand_polymer_distances(ref_ligands, ref_polymers)
+    pose_distances = compute_ligand_polymer_distances(pose_ligands, pose_polymers)
+
+    # Current mapping score: sum of squared differences in ligand-polymer distances
+    def compute_mapping_score(polymer_order: list[int]) -> float:
+        """Lower is better - measures how well distances are preserved."""
+        pose_distances_reordered = pose_distances[:, polymer_order]
+        return float(np.sum((ref_distances - pose_distances_reordered) ** 2))
+
+    current_order = list(range(len(ref_polymers)))
+    best_score = compute_mapping_score(current_order)
+    best_order = current_order
+
+    # Try all permutations of symmetric chains
+    # Group polymer indices by entity ID
+    entity_to_positions: dict[int, list[int]] = {}
+    for pos, ref_idx in enumerate(ref_polymer_indices):
+        eid = reference_entity_ids[ref_idx]
+        if eid in symmetric_entity_ids:
+            entity_to_positions.setdefault(eid, []).append(pos)
+
+    # Generate all permutations within each symmetric group
+    def generate_permutations(
+        positions_by_entity: dict[int, list[int]],
+    ) -> Iterator[list[int]]:
+        """Generate all possible orderings by permuting within symmetric groups."""
+        base_order = list(range(len(ref_polymers)))
+        groups = list(positions_by_entity.values())
+
+        if not groups:
+            yield base_order
+            return
+
+        # Generate permutations for each group
+        group_perms = [list(itertools.permutations(g)) for g in groups]
+
+        for perm_combo in itertools.product(*group_perms):
+            new_order = base_order.copy()
+            for group_positions, perm in zip(groups, perm_combo):
+                # Map original positions to permuted positions
+                original_pose_indices = [current_order[p] for p in group_positions]
+                for orig_pos, new_pos in zip(group_positions, perm):
+                    new_order[orig_pos] = original_pose_indices[
+                        group_positions.index(new_pos)
+                    ]
+            yield new_order
+
+    for order in generate_permutations(entity_to_positions):
+        score = compute_mapping_score(order)
+        if score < best_score:
+            best_score = score
+            best_order = order
+
+    # If no improvement, return original
+    if best_order == current_order:
+        return reference_indices, pose_indices
+
+    # Reconstruct the full mapping with the refined polymer order
+    new_pose_indices = pose_indices.copy()
+    for pos, new_pose_pos in enumerate(best_order):
+        # Find where this polymer is in the full index arrays
+        polymer_mask_positions = np.where(~ref_hetero_mask)[0]
+        full_pos = polymer_mask_positions[pos]
+        new_pose_indices[full_pos] = pose_polymer_indices[new_pose_pos]
+
+    return reference_indices, new_pose_indices
+
+
 def find_matching_centroids(
     reference_centroids: NDArray[np.floating],
     pose_centroids: NDArray[np.floating],
@@ -463,6 +612,17 @@ def _find_optimal_match_fast(
             best_pose_indices = pose_indices
 
     pose_chains = [best_transform.apply(chain) for chain in pose_chains]  # type: ignore[union-attr]
+
+    # Refine the mapping for symmetric chains by considering ligand proximity
+    best_reference_indices, best_pose_indices = _refine_symmetric_chain_mapping(
+        reference_chains,
+        pose_chains,
+        best_reference_indices,  # type: ignore[arg-type]
+        best_pose_indices,  # type: ignore[arg-type]
+        reference_entity_ids,
+        pose_entity_ids,
+    )
+
     return _match_using_chain_order(
         reference_chains,
         pose_chains,
@@ -518,7 +678,70 @@ def _find_optimal_match_precise(
     if max_matches is not None and max_matches < 1:
         raise ValueError("Maximum number of mappings must be at least 1")
 
-    best_rmsd = np.inf
+    def compute_ligand_proximity_score(
+        reference: struc.AtomArray, pose: struc.AtomArray
+    ) -> float:
+        """
+        Compute how well ligand-to-chain distances are preserved between ref and pose.
+
+        This function computes the minimum distance from each ligand chain to each
+        polymer chain, then compares how well these chain-specific distances are
+        preserved after mapping. This helps detect incorrect symmetric chain assignments.
+
+        Lower is better. Returns 0 if there are no ligands.
+        """
+        # Separate into chains and identify hetero/polymer chains
+        ref_chains = list(struc.chain_iter(reference))
+        pose_chains = list(struc.chain_iter(pose))
+
+        ref_hetero_chains = [
+            c for c in ref_chains if c.hetero.all() and c.matched.any()
+        ]
+        ref_polymer_chains = [
+            c for c in ref_chains if not c.hetero.all() and c.matched.any()
+        ]
+        pose_hetero_chains = [
+            c for c in pose_chains if c.hetero.all() and c.matched.any()
+        ]
+        pose_polymer_chains = [
+            c for c in pose_chains if not c.hetero.all() and c.matched.any()
+        ]
+
+        if not ref_hetero_chains or not ref_polymer_chains:
+            return 0.0
+        if len(ref_hetero_chains) != len(pose_hetero_chains):
+            return 0.0
+        if len(ref_polymer_chains) != len(pose_polymer_chains):
+            return 0.0
+
+        # Compute distance from each ligand chain to each polymer chain
+        def chain_distances(
+            ligand_chains: list[struc.AtomArray], polymer_chains: list[struc.AtomArray]
+        ) -> NDArray[np.floating]:
+            """Compute min distance from each ligand chain to each polymer chain."""
+            n_lig = len(ligand_chains)
+            n_poly = len(polymer_chains)
+            dists = np.zeros((n_lig, n_poly))
+            for i, lig in enumerate(ligand_chains):
+                for j, poly in enumerate(polymer_chains):
+                    pairwise = struc.distance(
+                        lig.coord[:, None, :], poly.coord[None, :, :]
+                    )
+                    dists[i, j] = np.min(pairwise)
+            return dists
+
+        ref_chain_dists = chain_distances(ref_hetero_chains, ref_polymer_chains)
+        pose_chain_dists = chain_distances(pose_hetero_chains, pose_polymer_chains)
+
+        # Chains are already in corresponding order after mapping
+        # Compare how well the distance pattern is preserved
+        # Using sum of squared differences weighted by proximity
+        # (closer distances matter more - they indicate binding site)
+        weight = 1.0 / (ref_chain_dists + 1.0)  # Weight closer contacts more
+        score = float(np.sum(weight * (ref_chain_dists - pose_chain_dists) ** 2))
+        return score
+
+    best_score = np.inf
     best_mapping: tuple[struc.AtomArray, struc.AtomArray] | None = None
     for it, (mapped_reference, mapped_pose) in enumerate(
         _all_global_mappings(
@@ -534,10 +757,26 @@ def _find_optimal_match_precise(
             break
         matched_ref_coord = mapped_reference.coord[mapped_reference.matched]
         matched_pose_coord = mapped_pose.coord[mapped_pose.matched]
-        matched_pose_coord, _ = struc.superimpose(matched_ref_coord, matched_pose_coord)
-        rmsd = struc.rmsd(matched_ref_coord, matched_pose_coord)
-        if rmsd < best_rmsd:
-            best_rmsd = rmsd
+        superimposed_pose_coord, transform = struc.superimpose(
+            matched_ref_coord, matched_pose_coord
+        )
+        rmsd = struc.rmsd(matched_ref_coord, superimposed_pose_coord)
+
+        # Apply transform to full pose for ligand proximity calculation
+        transformed_pose = mapped_pose.copy()
+        transformed_pose.coord = transform.apply(mapped_pose.coord)
+
+        # Compute ligand proximity score as tie-breaker for symmetric chains
+        ligand_score = compute_ligand_proximity_score(
+            mapped_reference, transformed_pose
+        )
+
+        # Combined score: RMSD dominates, ligand proximity breaks ties for symmetric chains
+        # Weight of 0.01 ensures correct chain assignment when symmetric chains give similar RMSD
+        combined_score = rmsd + 0.01 * ligand_score
+
+        if combined_score < best_score:
+            best_score = combined_score
             best_mapping = (mapped_reference, mapped_pose)
 
     if best_mapping is None:
