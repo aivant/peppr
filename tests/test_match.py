@@ -824,3 +824,334 @@ def test__to_mol_disconnected(disconnected: bool) -> None:
     else:
         mol = peppr.match._to_mol(mol_atom_array)
         assert mol.GetNumAtoms() == len(mol_atom_array), f"Failed for {ccd}"
+
+
+# ============================================================================
+# Tests for extracted helper functions
+# ============================================================================
+
+
+@pytest.fixture
+def simple_chains():
+    """Create simple chain structures for testing distance calculations."""
+    # Chain at origin
+    chain_a = struc.info.residue("ALA")
+    chain_a = peppr.standardize(chain_a)
+    chain_a.chain_id[:] = "A"
+
+    # Chain translated along x-axis
+    chain_b = struc.info.residue("ALA")
+    chain_b = peppr.standardize(chain_b)
+    chain_b.chain_id[:] = "B"
+    chain_b.coord += np.array([10.0, 0.0, 0.0])
+
+    # Ligand at specific position
+    ligand = struc.info.residue("EOH")
+    ligand = peppr.standardize(ligand)
+    ligand.chain_id[:] = "L"
+    ligand.coord += np.array([5.0, 0.0, 0.0])
+
+    return chain_a, chain_b, ligand
+
+
+class TestComputeLigandPolymerDistances:
+    """Tests for _compute_ligand_polymer_distances function."""
+
+    def test_single_ligand_single_polymer(self, simple_chains):
+        """Test with one ligand and one polymer chain."""
+        chain_a, _, ligand = simple_chains
+        distances = peppr.match._compute_ligand_polymer_distances([ligand], [chain_a])
+        assert distances.shape == (1, 1)
+        assert distances[0, 0] > 0
+
+    def test_single_ligand_multiple_polymers(self, simple_chains):
+        """Test with one ligand and multiple polymer chains."""
+        chain_a, chain_b, ligand = simple_chains
+        distances = peppr.match._compute_ligand_polymer_distances(
+            [ligand], [chain_a, chain_b]
+        )
+        assert distances.shape == (1, 2)
+        # Ligand is at x=5, chain_a at x=0, chain_b at x=10
+        # So ligand should be closer to chain_a than chain_b
+        assert distances[0, 0] < distances[0, 1]
+
+    def test_empty_ligands(self, simple_chains):
+        """Test with no ligands."""
+        chain_a, _, _ = simple_chains
+        distances = peppr.match._compute_ligand_polymer_distances([], [chain_a])
+        assert distances.shape == (0, 1)
+
+    def test_empty_polymers(self, simple_chains):
+        """Test with no polymers."""
+        _, _, ligand = simple_chains
+        distances = peppr.match._compute_ligand_polymer_distances([ligand], [])
+        assert distances.shape == (1, 0)
+
+
+class TestComputeMappingScore:
+    """Tests for _compute_mapping_score function."""
+
+    def test_identity_order(self):
+        """Test that identity order gives zero score when distances match."""
+        ref_distances = np.array([[1.0, 2.0], [3.0, 4.0]])
+        pose_distances = np.array([[1.0, 2.0], [3.0, 4.0]])
+        score = peppr.match._compute_mapping_score(
+            ref_distances, pose_distances, [0, 1]
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_swapped_order(self):
+        """Test that swapped order gives non-zero score when distances differ."""
+        ref_distances = np.array([[1.0, 10.0]])
+        pose_distances = np.array([[1.0, 10.0]])
+        # Identity order
+        score_identity = peppr.match._compute_mapping_score(
+            ref_distances, pose_distances, [0, 1]
+        )
+        # Swapped order
+        score_swapped = peppr.match._compute_mapping_score(
+            ref_distances, pose_distances, [1, 0]
+        )
+        assert score_identity == pytest.approx(0.0)
+        assert score_swapped > 0.0
+
+    def test_score_reflects_distance_differences(self):
+        """Test that larger distance differences give higher scores."""
+        ref_distances = np.array([[1.0, 2.0]])
+        pose_distances_close = np.array([[1.1, 2.1]])
+        pose_distances_far = np.array([[5.0, 10.0]])
+
+        score_close = peppr.match._compute_mapping_score(
+            ref_distances, pose_distances_close, [0, 1]
+        )
+        score_far = peppr.match._compute_mapping_score(
+            ref_distances, pose_distances_far, [0, 1]
+        )
+        assert score_close < score_far
+
+
+class TestGenerateSymmetricPermutations:
+    """Tests for _generate_symmetric_permutations function."""
+
+    def test_empty_groups(self):
+        """Test with no symmetric groups."""
+        perms = list(peppr.match._generate_symmetric_permutations(3, {}))
+        assert len(perms) == 1
+        assert perms[0] == [0, 1, 2]
+
+    def test_single_group_of_two(self):
+        """Test with one group of two symmetric chains."""
+        perms = list(peppr.match._generate_symmetric_permutations(2, {0: [0, 1]}))
+        assert len(perms) == 2
+        assert [0, 1] in perms
+        assert [1, 0] in perms
+
+    def test_single_group_of_three(self):
+        """Test with one group of three symmetric chains."""
+        perms = list(peppr.match._generate_symmetric_permutations(3, {0: [0, 1, 2]}))
+        assert len(perms) == 6  # 3! = 6
+
+    def test_multiple_groups(self):
+        """Test with multiple symmetric groups."""
+        # Two groups: positions 0,1 and positions 2,3
+        perms = list(
+            peppr.match._generate_symmetric_permutations(4, {0: [0, 1], 1: [2, 3]})
+        )
+        assert len(perms) == 4  # 2! * 2! = 4
+
+    def test_partial_group(self):
+        """Test where only some positions are symmetric."""
+        # 3 polymers, only first two are symmetric
+        perms = list(peppr.match._generate_symmetric_permutations(3, {0: [0, 1]}))
+        assert len(perms) == 2
+        # Position 2 should remain unchanged
+        for perm in perms:
+            assert perm[2] == 2
+
+
+class TestHasMatchedHeteroAtoms:
+    """Tests for _has_matched_hetero_atoms function."""
+
+    def test_with_matched_hetero(self):
+        """Test structure with matched hetero atoms."""
+        atoms = struc.info.residue("EOH")
+        atoms = peppr.standardize(atoms)
+        atoms.hetero[:] = True
+        atoms.set_annotation("matched", np.ones(len(atoms), dtype=bool))
+        assert peppr.match._has_matched_hetero_atoms(atoms) is True
+
+    def test_with_unmatched_hetero(self):
+        """Test structure with unmatched hetero atoms."""
+        atoms = struc.info.residue("EOH")
+        atoms = peppr.standardize(atoms)
+        atoms.hetero[:] = True
+        atoms.set_annotation("matched", np.zeros(len(atoms), dtype=bool))
+        assert peppr.match._has_matched_hetero_atoms(atoms) is False
+
+    def test_with_matched_non_hetero(self):
+        """Test structure with matched but non-hetero atoms."""
+        atoms = struc.info.residue("ALA")
+        atoms = peppr.standardize(atoms)
+        atoms.hetero[:] = False
+        atoms.set_annotation("matched", np.ones(len(atoms), dtype=bool))
+        assert peppr.match._has_matched_hetero_atoms(atoms) is False
+
+    def test_mixed_structure(self):
+        """Test structure with both hetero and non-hetero atoms."""
+        polymer = struc.info.residue("ALA")
+        polymer = peppr.standardize(polymer)
+        polymer.hetero[:] = False
+
+        ligand = struc.info.residue("EOH")
+        ligand = peppr.standardize(ligand)
+        ligand.hetero[:] = True
+
+        combined = struc.concatenate([polymer, ligand])
+        matched = np.zeros(len(combined), dtype=bool)
+        matched[len(polymer) :] = True  # Only ligand is matched
+        combined.set_annotation("matched", matched)
+
+        assert peppr.match._has_matched_hetero_atoms(combined) is True
+
+
+class TestComputeLigandProximityScore:
+    """Tests for _compute_ligand_proximity_score function."""
+
+    def test_identical_structures_zero_score(self):
+        """Test that identical structures have zero proximity score."""
+        polymer = struc.info.residue("ALA")
+        polymer = peppr.standardize(polymer)
+        polymer.chain_id[:] = "A"
+        polymer.hetero[:] = False
+
+        ligand = struc.info.residue("EOH")
+        ligand = peppr.standardize(ligand)
+        ligand.chain_id[:] = "L"
+        ligand.hetero[:] = True
+        ligand.coord += np.array([5.0, 0.0, 0.0])
+
+        structure = struc.concatenate([polymer, ligand])
+        structure.set_annotation("matched", np.ones(len(structure), dtype=bool))
+
+        score = peppr.match._compute_ligand_proximity_score(structure, structure.copy())
+        assert score == pytest.approx(0.0)
+
+    def test_no_ligands_zero_score(self):
+        """Test that structure without ligands has zero score."""
+        polymer = struc.info.residue("ALA")
+        polymer = peppr.standardize(polymer)
+        polymer.chain_id[:] = "A"
+        polymer.hetero[:] = False
+        polymer.set_annotation("matched", np.ones(len(polymer), dtype=bool))
+
+        score = peppr.match._compute_ligand_proximity_score(polymer, polymer.copy())
+        assert score == pytest.approx(0.0)
+
+    def test_displaced_ligand_nonzero_score(self):
+        """Test that displaced ligand gives nonzero score."""
+        polymer = struc.info.residue("ALA")
+        polymer = peppr.standardize(polymer)
+        polymer.chain_id[:] = "A"
+        polymer.hetero[:] = False
+
+        ligand = struc.info.residue("EOH")
+        ligand = peppr.standardize(ligand)
+        ligand.chain_id[:] = "L"
+        ligand.hetero[:] = True
+        ligand.coord += np.array([5.0, 0.0, 0.0])
+
+        ref = struc.concatenate([polymer, ligand])
+        ref.set_annotation("matched", np.ones(len(ref), dtype=bool))
+
+        # Create pose with displaced ligand
+        pose = ref.copy()
+        ligand_mask = pose.hetero
+        pose.coord[ligand_mask] += np.array([10.0, 0.0, 0.0])
+
+        score = peppr.match._compute_ligand_proximity_score(ref, pose)
+        assert score > 0.0
+
+
+class TestComputeLddtPliForMapping:
+    """Tests for _compute_lddt_pli_for_mapping function."""
+
+    def test_identical_structures_perfect_score(self):
+        """Test that identical structures give score of 1.0."""
+        polymer = struc.info.residue("ALA")
+        polymer = peppr.standardize(polymer)
+        polymer.chain_id[:] = "A"
+        polymer.hetero[:] = False
+
+        ligand = struc.info.residue("EOH")
+        ligand = peppr.standardize(ligand)
+        ligand.chain_id[:] = "L"
+        ligand.hetero[:] = True
+        # Place ligand close to polymer (within 6A)
+        ligand.coord += np.array([4.0, 0.0, 0.0])
+
+        structure = struc.concatenate([polymer, ligand])
+        structure.set_annotation("matched", np.ones(len(structure), dtype=bool))
+
+        score = peppr.match._compute_lddt_pli_for_mapping(structure, structure.copy())
+        # Score should be 1.0 for identical structures
+        assert score is not None
+        assert score == pytest.approx(1.0)
+
+    def test_no_ligands_returns_none(self):
+        """Test that structure without ligands returns None."""
+        polymer = struc.info.residue("ALA")
+        polymer = peppr.standardize(polymer)
+        polymer.chain_id[:] = "A"
+        polymer.hetero[:] = False
+        polymer.set_annotation("matched", np.ones(len(polymer), dtype=bool))
+
+        score = peppr.match._compute_lddt_pli_for_mapping(polymer, polymer.copy())
+        assert score is None
+
+    def test_ligand_far_from_polymer_returns_none(self):
+        """Test that ligand far from polymer (no contacts) returns None."""
+        polymer = struc.info.residue("ALA")
+        polymer = peppr.standardize(polymer)
+        polymer.chain_id[:] = "A"
+        polymer.hetero[:] = False
+
+        ligand = struc.info.residue("EOH")
+        ligand = peppr.standardize(ligand)
+        ligand.chain_id[:] = "L"
+        ligand.hetero[:] = True
+        # Place ligand far from polymer (>6A)
+        ligand.coord += np.array([100.0, 0.0, 0.0])
+
+        structure = struc.concatenate([polymer, ligand])
+        structure.set_annotation("matched", np.ones(len(structure), dtype=bool))
+
+        score = peppr.match._compute_lddt_pli_for_mapping(structure, structure.copy())
+        assert score is None
+
+    def test_displaced_pose_lower_score(self):
+        """Test that displaced pose gives lower score than identical."""
+        polymer = struc.info.residue("ALA")
+        polymer = peppr.standardize(polymer)
+        polymer.chain_id[:] = "A"
+        polymer.hetero[:] = False
+
+        ligand = struc.info.residue("EOH")
+        ligand = peppr.standardize(ligand)
+        ligand.chain_id[:] = "L"
+        ligand.hetero[:] = True
+        ligand.coord += np.array([4.0, 0.0, 0.0])
+
+        ref = struc.concatenate([polymer, ligand])
+        ref.set_annotation("matched", np.ones(len(ref), dtype=bool))
+
+        # Create pose with displaced ligand
+        pose = ref.copy()
+        ligand_mask = pose.hetero
+        pose.coord[ligand_mask] += np.array([2.0, 0.0, 0.0])
+
+        score_identical = peppr.match._compute_lddt_pli_for_mapping(ref, ref.copy())
+        score_displaced = peppr.match._compute_lddt_pli_for_mapping(ref, pose)
+
+        assert score_identical is not None
+        assert score_displaced is not None
+        assert score_displaced < score_identical

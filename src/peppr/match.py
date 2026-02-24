@@ -47,6 +47,234 @@ _PADDING = -1
 _UNMAPPABLE_ENTITY_ID = -1
 
 
+def _compute_ligand_polymer_distances(
+    ligand_chains: list[struc.AtomArray],
+    polymer_chains: list[struc.AtomArray],
+) -> NDArray[np.floating]:
+    """
+    Compute minimum distance from each ligand to each polymer chain.
+
+    Parameters
+    ----------
+    ligand_chains : list[struc.AtomArray]
+        List of ligand chain atom arrays.
+    polymer_chains : list[struc.AtomArray]
+        List of polymer chain atom arrays.
+
+    Returns
+    -------
+    NDArray[np.floating]
+        Distance matrix of shape (n_ligands, n_polymers).
+    """
+    n_ligands = len(ligand_chains)
+    n_polymers = len(polymer_chains)
+    distances = np.zeros((n_ligands, n_polymers))
+    for i, lig in enumerate(ligand_chains):
+        for j, poly in enumerate(polymer_chains):
+            dists = struc.distance(lig.coord[:, None, :], poly.coord[None, :, :])
+            distances[i, j] = np.min(dists)
+    return distances
+
+
+def _compute_mapping_score(
+    ref_distances: NDArray[np.floating],
+    pose_distances: NDArray[np.floating],
+    polymer_order: list[int],
+) -> float:
+    """
+    Compute how well distances are preserved for a given polymer ordering.
+
+    Parameters
+    ----------
+    ref_distances : NDArray[np.floating]
+        Reference ligand-polymer distance matrix of shape (n_ligands, n_polymers).
+    pose_distances : NDArray[np.floating]
+        Pose ligand-polymer distance matrix of shape (n_ligands, n_polymers).
+    polymer_order : list[int]
+        Indices specifying the order of pose polymers.
+
+    Returns
+    -------
+    float
+        Sum of squared differences in ligand-polymer distances. Lower is better.
+    """
+    pose_distances_reordered = pose_distances[:, polymer_order]
+    return float(np.sum((ref_distances - pose_distances_reordered) ** 2))
+
+
+def _generate_symmetric_permutations(
+    n_polymers: int,
+    positions_by_entity: dict[int, list[int]],
+) -> Iterator[list[int]]:
+    """
+    Generate all possible orderings by permuting within symmetric groups.
+
+    Parameters
+    ----------
+    n_polymers : int
+        Total number of polymer chains.
+    positions_by_entity : dict[int, list[int]]
+        Mapping from entity ID to list of positions in the polymer array
+        that belong to that entity.
+
+    Yields
+    ------
+    list[int]
+        All possible orderings of polymer indices.
+    """
+    base_order = list(range(n_polymers))
+    groups = list(positions_by_entity.values())
+
+    if not groups:
+        yield base_order
+        return
+
+    # Generate permutations for each group
+    group_perms = [list(itertools.permutations(g)) for g in groups]
+
+    for perm_combo in itertools.product(*group_perms):
+        new_order = base_order.copy()
+        for group_positions, perm in zip(groups, perm_combo):
+            # Map original positions to permuted positions
+            original_indices = [base_order[p] for p in group_positions]
+            for orig_pos, new_pos in zip(group_positions, perm):
+                new_order[orig_pos] = original_indices[group_positions.index(new_pos)]
+        yield new_order
+
+
+def _compute_lddt_pli_for_mapping(
+    reference: struc.AtomArray, pose: struc.AtomArray
+) -> float | None:
+    """
+    Compute lDDT-PLI score for a given reference-pose mapping.
+
+    This follows the OST approach: enumerate all mappings and pick the one
+    with the best lDDT-PLI score. This ensures optimal chain assignment
+    for symmetric chains when ligands are present.
+
+    Parameters
+    ----------
+    reference : struc.AtomArray
+        Reference structure with matched annotation.
+    pose : struc.AtomArray
+        Pose structure with matched annotation.
+
+    Returns
+    -------
+    float or None
+        lDDT-PLI score (higher is better), or None if no ligands present
+        or score cannot be computed.
+    """
+    # Filter to matched atoms to get 1:1 correspondence and equal-sized arrays.
+    # reference and pose may have different total sizes when the model contains
+    # extra chains (e.g. unmatched ligands) not present in the reference.
+    try:
+        ref_filt, pose_filt = filter_matched(reference, pose)
+    except Exception:
+        return None
+
+    # Identify ligand and polymer atoms in the filtered (matched-only) subset
+    ligand_mask = ref_filt.hetero
+    polymer_mask = ~ref_filt.hetero
+
+    if not ligand_mask.any() or not polymer_mask.any():
+        return None
+
+    # Find binding site: polymer atoms within 6A of any ligand atom
+    polymer_atoms = ref_filt[polymer_mask]
+    ligand_coords = ref_filt[ligand_mask].coord
+
+    cell_list = struc.CellList(polymer_atoms, 6.0)
+    contact_indices = cell_list.get_atoms(ligand_coords, 6.0)
+    unique_contacts = np.unique(contact_indices[contact_indices >= 0])
+
+    if len(unique_contacts) == 0:
+        return None
+
+    # Build binding site mask on filtered structure
+    polymer_indices = np.where(polymer_mask)[0]
+    binding_site_indices = polymer_indices[unique_contacts]
+    binding_site_mask = np.zeros(len(ref_filt), dtype=bool)
+    binding_site_mask[binding_site_indices] = True
+
+    # Compute lDDT-PLI
+    try:
+        score = struc.lddt(
+            ref_filt,
+            pose_filt,
+            atom_mask=ligand_mask,
+            partner_mask=binding_site_mask,
+            inclusion_radius=6.0,
+            distance_bins=(0.5, 1.0, 2.0, 4.0),
+            symmetric=True,
+        )
+        if np.isnan(score):
+            return None
+        return float(score)
+    except Exception:
+        return None
+
+
+def _compute_ligand_proximity_score(
+    reference: struc.AtomArray, pose: struc.AtomArray
+) -> float:
+    """
+    Compute ligand-polymer distance preservation score as fallback.
+
+    Used when lDDT-PLI cannot be computed (e.g., for single-atom ligands).
+    Lower score is better. Returns 0 if no ligands present.
+
+    Parameters
+    ----------
+    reference : struc.AtomArray
+        Reference structure with matched annotation.
+    pose : struc.AtomArray
+        Pose structure with matched annotation.
+
+    Returns
+    -------
+    float
+        Weighted sum of squared differences in ligand-polymer distances.
+    """
+    ref_chains = list(struc.chain_iter(reference))
+    pose_chains = list(struc.chain_iter(pose))
+
+    ref_hetero = [c for c in ref_chains if c.hetero.all() and c.matched.any()]
+    ref_polymer = [c for c in ref_chains if not c.hetero.all() and c.matched.any()]
+    pose_hetero = [c for c in pose_chains if c.hetero.all() and c.matched.any()]
+    pose_polymer = [c for c in pose_chains if not c.hetero.all() and c.matched.any()]
+
+    if not ref_hetero or not ref_polymer:
+        return 0.0
+    if len(ref_hetero) != len(pose_hetero):
+        return 0.0
+    if len(ref_polymer) != len(pose_polymer):
+        return 0.0
+
+    ref_d = _compute_ligand_polymer_distances(ref_hetero, ref_polymer)
+    pose_d = _compute_ligand_polymer_distances(pose_hetero, pose_polymer)
+
+    weight = 1.0 / (ref_d + 1.0)
+    return float(np.sum(weight * (ref_d - pose_d) ** 2))
+
+
+def _has_matched_hetero_atoms(structure: struc.AtomArray) -> bool:
+    """
+    Check if structure has any matched hetero atoms.
+
+    Parameters
+    ----------
+    structure : struc.AtomArray
+        Structure with hetero and matched annotations.
+
+    Returns
+    -------
+    bool
+        True if there are any atoms that are both hetero and matched.
+    """
+    return bool((structure.hetero & structure.matched).any())
+
+
 class GraphMatchWarning(UserWarning):
     """
     This warning is raised if the RDKit based molecule matching fails.
@@ -380,63 +608,16 @@ def _refine_symmetric_chain_mapping(
     pose_ligand_indices = pose_indices[pose_hetero_mask]
 
     # Compute minimum distances from each ligand to each polymer chain
-    def compute_ligand_polymer_distances(
-        ligand_chains: list[struc.AtomArray],
-        polymer_chains: list[struc.AtomArray],
-    ) -> NDArray[np.floating]:
-        """
-        Compute minimum distance from each ligand to each polymer chain.
-
-        Parameters
-        ----------
-        ligand_chains : list[struc.AtomArray]
-            List of ligand chain atom arrays.
-        polymer_chains : list[struc.AtomArray]
-            List of polymer chain atom arrays.
-
-        Returns
-        -------
-        NDArray[np.floating]
-            Distance matrix of shape (n_ligands, n_polymers).
-        """
-        n_ligands = len(ligand_chains)
-        n_polymers = len(polymer_chains)
-        distances = np.zeros((n_ligands, n_polymers))
-        for i, lig in enumerate(ligand_chains):
-            for j, poly in enumerate(polymer_chains):
-                # Compute pairwise distances and take minimum
-                dists = struc.distance(lig.coord[:, None, :], poly.coord[None, :, :])
-                distances[i, j] = np.min(dists)
-        return distances
-
     ref_ligands = [reference_chains[i] for i in ref_ligand_indices]
     ref_polymers = [reference_chains[i] for i in ref_polymer_indices]
     pose_ligands = [pose_chains[i] for i in pose_ligand_indices]
     pose_polymers = [pose_chains[i] for i in pose_polymer_indices]
 
-    ref_distances = compute_ligand_polymer_distances(ref_ligands, ref_polymers)
-    pose_distances = compute_ligand_polymer_distances(pose_ligands, pose_polymers)
-
-    # Current mapping score: sum of squared differences in ligand-polymer distances
-    def compute_mapping_score(polymer_order: list[int]) -> float:
-        """
-        Compute how well distances are preserved for a given polymer ordering.
-
-        Parameters
-        ----------
-        polymer_order : list[int]
-            Indices specifying the order of pose polymers.
-
-        Returns
-        -------
-        float
-            Sum of squared differences in ligand-polymer distances. Lower is better.
-        """
-        pose_distances_reordered = pose_distances[:, polymer_order]
-        return float(np.sum((ref_distances - pose_distances_reordered) ** 2))
+    ref_distances = _compute_ligand_polymer_distances(ref_ligands, ref_polymers)
+    pose_distances = _compute_ligand_polymer_distances(pose_ligands, pose_polymers)
 
     current_order = list(range(len(ref_polymers)))
-    best_score = compute_mapping_score(current_order)
+    best_score = _compute_mapping_score(ref_distances, pose_distances, current_order)
     best_order = current_order
 
     # Try all permutations of symmetric chains
@@ -447,47 +628,10 @@ def _refine_symmetric_chain_mapping(
         if eid in symmetric_entity_ids:
             entity_to_positions.setdefault(eid, []).append(pos)
 
-    # Generate all permutations within each symmetric group
-    def generate_permutations(
-        positions_by_entity: dict[int, list[int]],
-    ) -> Iterator[list[int]]:
-        """
-        Generate all possible orderings by permuting within symmetric groups.
-
-        Parameters
-        ----------
-        positions_by_entity : dict[int, list[int]]
-            Mapping from entity ID to list of positions in the polymer array
-            that belong to that entity.
-
-        Yields
-        ------
-        list[int]
-            All possible orderings of polymer indices.
-        """
-        base_order = list(range(len(ref_polymers)))
-        groups = list(positions_by_entity.values())
-
-        if not groups:
-            yield base_order
-            return
-
-        # Generate permutations for each group
-        group_perms = [list(itertools.permutations(g)) for g in groups]
-
-        for perm_combo in itertools.product(*group_perms):
-            new_order = base_order.copy()
-            for group_positions, perm in zip(groups, perm_combo):
-                # Map original positions to permuted positions
-                original_pose_indices = [current_order[p] for p in group_positions]
-                for orig_pos, new_pos in zip(group_positions, perm):
-                    new_order[orig_pos] = original_pose_indices[
-                        group_positions.index(new_pos)
-                    ]
-            yield new_order
-
-    for order in generate_permutations(entity_to_positions):
-        score = compute_mapping_score(order)
+    for order in _generate_symmetric_permutations(
+        len(ref_polymers), entity_to_positions
+    ):
+        score = _compute_mapping_score(ref_distances, pose_distances, order)
         if score < best_score:
             best_score = score
             best_order = order
@@ -717,123 +861,6 @@ def _find_optimal_match_precise(
     if max_matches is not None and max_matches < 1:
         raise ValueError("Maximum number of mappings must be at least 1")
 
-    def compute_lddt_pli_for_mapping(
-        reference: struc.AtomArray, pose: struc.AtomArray
-    ) -> float | None:
-        """
-        Compute lDDT-PLI score for a given reference-pose mapping.
-
-        This follows the OST approach: enumerate all mappings and pick the one
-        with the best lDDT-PLI score. This ensures optimal chain assignment
-        for symmetric chains when ligands are present.
-
-        Parameters
-        ----------
-        reference : struc.AtomArray
-            Reference structure with matched annotation.
-        pose : struc.AtomArray
-            Pose structure with matched annotation.
-
-        Returns
-        -------
-        float or None
-            lDDT-PLI score (higher is better), or None if no ligands present
-            or score cannot be computed.
-        """
-        # Filter to matched atoms to get 1:1 correspondence and equal-sized arrays.
-        # reference and pose may have different total sizes when the model contains
-        # extra chains (e.g. unmatched ligands) not present in the reference.
-        try:
-            ref_filt, pose_filt = filter_matched(reference, pose)
-        except Exception:
-            return None
-
-        # Identify ligand and polymer atoms in the filtered (matched-only) subset
-        ligand_mask = ref_filt.hetero
-        polymer_mask = ~ref_filt.hetero
-
-        if not ligand_mask.any() or not polymer_mask.any():
-            return None
-
-        # Find binding site: polymer atoms within 6A of any ligand atom
-        polymer_atoms = ref_filt[polymer_mask]
-        ligand_coords = ref_filt[ligand_mask].coord
-
-        cell_list = struc.CellList(polymer_atoms, 6.0)
-        contact_indices = cell_list.get_atoms(ligand_coords, 6.0)
-        unique_contacts = np.unique(contact_indices[contact_indices >= 0])
-
-        if len(unique_contacts) == 0:
-            return None
-
-        # Build binding site mask on filtered structure
-        polymer_indices = np.where(polymer_mask)[0]
-        binding_site_indices = polymer_indices[unique_contacts]
-        binding_site_mask = np.zeros(len(ref_filt), dtype=bool)
-        binding_site_mask[binding_site_indices] = True
-
-        # Compute lDDT-PLI
-        try:
-            score = struc.lddt(
-                ref_filt,
-                pose_filt,
-                atom_mask=ligand_mask,
-                partner_mask=binding_site_mask,
-                inclusion_radius=6.0,
-                distance_bins=(0.5, 1.0, 2.0, 4.0),
-                symmetric=True,
-            )
-            if np.isnan(score):
-                return None
-            return float(score)
-        except Exception:
-            return None
-
-    def compute_ligand_proximity_score(
-        reference: struc.AtomArray, pose: struc.AtomArray
-    ) -> float:
-        """
-        Compute ligand-polymer distance preservation score as fallback.
-
-        Used when lDDT-PLI cannot be computed (e.g., for single-atom ligands).
-        Lower score is better. Returns 0 if no ligands present.
-        """
-        ref_chains = list(struc.chain_iter(reference))
-        pose_chains = list(struc.chain_iter(pose))
-
-        ref_hetero = [c for c in ref_chains if c.hetero.all() and c.matched.any()]
-        ref_polymer = [c for c in ref_chains if not c.hetero.all() and c.matched.any()]
-        pose_hetero = [c for c in pose_chains if c.hetero.all() and c.matched.any()]
-        pose_polymer = [
-            c for c in pose_chains if not c.hetero.all() and c.matched.any()
-        ]
-
-        if not ref_hetero or not ref_polymer:
-            return 0.0
-        if len(ref_hetero) != len(pose_hetero):
-            return 0.0
-        if len(ref_polymer) != len(pose_polymer):
-            return 0.0
-
-        # Compute min distance from each ligand to each polymer chain
-        def chain_dists(ligs: list, polys: list) -> NDArray[np.floating]:
-            dists = np.zeros((len(ligs), len(polys)))
-            for i, lig in enumerate(ligs):
-                for j, poly in enumerate(polys):
-                    d = struc.distance(lig.coord[:, None, :], poly.coord[None, :, :])
-                    dists[i, j] = np.min(d)
-            return dists
-
-        ref_d = chain_dists(ref_hetero, ref_polymer)
-        pose_d = chain_dists(pose_hetero, pose_polymer)
-
-        weight = 1.0 / (ref_d + 1.0)
-        return float(np.sum(weight * (ref_d - pose_d) ** 2))
-
-    def has_hetero_atoms(structure: struc.AtomArray) -> bool:
-        """Check if structure has any matched hetero atoms."""
-        return (structure.hetero & structure.matched).any()
-
     # Track best mapping
     best_score = np.inf  # Lower is better (negative lDDT-PLI or RMSD+proximity)
     best_mapping: tuple[struc.AtomArray, struc.AtomArray] | None = None
@@ -863,15 +890,15 @@ def _find_optimal_match_precise(
 
         # Compute score for this mapping
         # OST approach: optimize lDDT-PLI directly when possible
-        lddt_pli = compute_lddt_pli_for_mapping(mapped_reference, transformed_pose)
+        lddt_pli = _compute_lddt_pli_for_mapping(mapped_reference, transformed_pose)
 
         if lddt_pli is not None:
             # Use negative lDDT-PLI so lower is better (consistent with RMSD)
             score = -lddt_pli
-        elif has_hetero_atoms(mapped_reference):
+        elif _has_matched_hetero_atoms(mapped_reference):
             # Ligands present but lDDT-PLI unavailable (e.g., single-atom ligand)
             # Fall back to RMSD + ligand proximity score
-            proximity = compute_ligand_proximity_score(
+            proximity = _compute_ligand_proximity_score(
                 mapped_reference, transformed_pose
             )
             score = rmsd + 0.01 * proximity
