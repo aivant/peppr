@@ -343,21 +343,18 @@ class LDDTPLIScore(Metric):
 
             binding_site_contacts = np.unique(
                 get_contact_residues(
-                    reference[polymer_mask], reference[ligand_mask], cutoff=4.0
+                    reference[polymer_mask], reference[ligand_mask], cutoff=6.0
                 )[:, 0]
             )
             # No contacts between the ligand and polymer in reference -> no binding site
             # -> metric is undefined
             if len(binding_site_contacts) == 0:
                 return np.nan
-            binding_site_mask = struc.get_residue_masks(
-                reference, binding_site_contacts
-            ).any(axis=0)
             return struc.lddt(
                 reference,
                 pose,
                 atom_mask=ligand_mask,
-                partner_mask=binding_site_mask,
+                partner_mask=polymer_mask,
                 inclusion_radius=6.0,
                 distance_bins=(0.5, 1.0, 2.0, 4.0),
                 symmetric=True,

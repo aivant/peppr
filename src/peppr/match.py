@@ -740,16 +740,24 @@ def _find_optimal_match_precise(
             lDDT-PLI score (higher is better), or None if no ligands present
             or score cannot be computed.
         """
-        # Identify ligand and polymer atoms
-        ligand_mask = reference.hetero & reference.matched
-        polymer_mask = ~reference.hetero & reference.matched
+        # Filter to matched atoms to get 1:1 correspondence and equal-sized arrays.
+        # reference and pose may have different total sizes when the model contains
+        # extra chains (e.g. unmatched ligands) not present in the reference.
+        try:
+            ref_filt, pose_filt = filter_matched(reference, pose)
+        except Exception:
+            return None
+
+        # Identify ligand and polymer atoms in the filtered (matched-only) subset
+        ligand_mask = ref_filt.hetero
+        polymer_mask = ~ref_filt.hetero
 
         if not ligand_mask.any() or not polymer_mask.any():
             return None
 
         # Find binding site: polymer atoms within 6A of any ligand atom
-        polymer_atoms = reference[polymer_mask]
-        ligand_coords = reference[ligand_mask].coord
+        polymer_atoms = ref_filt[polymer_mask]
+        ligand_coords = ref_filt[ligand_mask].coord
 
         cell_list = struc.CellList(polymer_atoms, 6.0)
         contact_indices = cell_list.get_atoms(ligand_coords, 6.0)
@@ -758,17 +766,17 @@ def _find_optimal_match_precise(
         if len(unique_contacts) == 0:
             return None
 
-        # Build binding site mask on full structure
+        # Build binding site mask on filtered structure
         polymer_indices = np.where(polymer_mask)[0]
         binding_site_indices = polymer_indices[unique_contacts]
-        binding_site_mask = np.zeros(len(reference), dtype=bool)
+        binding_site_mask = np.zeros(len(ref_filt), dtype=bool)
         binding_site_mask[binding_site_indices] = True
 
         # Compute lDDT-PLI
         try:
             score = struc.lddt(
-                reference,
-                pose,
+                ref_filt,
+                pose_filt,
                 atom_mask=ligand_mask,
                 partner_mask=binding_site_mask,
                 inclusion_radius=6.0,
