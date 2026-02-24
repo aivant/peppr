@@ -25,12 +25,6 @@ dependencies = [
   "pandas >= 2.0.0",
   "rdkit >= 2025.03.5",
   "click >= 8.0.0",
-  "polars>=1.38.1",
-  "tqdm>=4.67.3",
-  "vantutil>=0.11.6",
-  "pyarrow>=23.0.1",
-  "plotly>=6.5.2",
-  "statsmodels>=0.14.6",
 ]
 dynamic = ["version"]
 
