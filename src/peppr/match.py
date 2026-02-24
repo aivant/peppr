@@ -384,7 +384,21 @@ def _refine_symmetric_chain_mapping(
         ligand_chains: list[struc.AtomArray],
         polymer_chains: list[struc.AtomArray],
     ) -> NDArray[np.floating]:
-        """Compute min distance from each ligand to each polymer chain."""
+        """
+        Compute minimum distance from each ligand to each polymer chain.
+
+        Parameters
+        ----------
+        ligand_chains : list[struc.AtomArray]
+            List of ligand chain atom arrays.
+        polymer_chains : list[struc.AtomArray]
+            List of polymer chain atom arrays.
+
+        Returns
+        -------
+        NDArray[np.floating]
+            Distance matrix of shape (n_ligands, n_polymers).
+        """
         n_ligands = len(ligand_chains)
         n_polymers = len(polymer_chains)
         distances = np.zeros((n_ligands, n_polymers))
@@ -405,7 +419,19 @@ def _refine_symmetric_chain_mapping(
 
     # Current mapping score: sum of squared differences in ligand-polymer distances
     def compute_mapping_score(polymer_order: list[int]) -> float:
-        """Lower is better - measures how well distances are preserved."""
+        """
+        Compute how well distances are preserved for a given polymer ordering.
+
+        Parameters
+        ----------
+        polymer_order : list[int]
+            Indices specifying the order of pose polymers.
+
+        Returns
+        -------
+        float
+            Sum of squared differences in ligand-polymer distances. Lower is better.
+        """
         pose_distances_reordered = pose_distances[:, polymer_order]
         return float(np.sum((ref_distances - pose_distances_reordered) ** 2))
 
@@ -425,7 +451,20 @@ def _refine_symmetric_chain_mapping(
     def generate_permutations(
         positions_by_entity: dict[int, list[int]],
     ) -> Iterator[list[int]]:
-        """Generate all possible orderings by permuting within symmetric groups."""
+        """
+        Generate all possible orderings by permuting within symmetric groups.
+
+        Parameters
+        ----------
+        positions_by_entity : dict[int, list[int]]
+            Mapping from entity ID to list of positions in the polymer array
+            that belong to that entity.
+
+        Yields
+        ------
+        list[int]
+            All possible orderings of polymer indices.
+        """
         base_order = list(range(len(ref_polymers)))
         groups = list(positions_by_entity.values())
 
@@ -688,7 +727,18 @@ def _find_optimal_match_precise(
         polymer chain, then compares how well these chain-specific distances are
         preserved after mapping. This helps detect incorrect symmetric chain assignments.
 
-        Lower is better. Returns 0 if there are no ligands.
+        Parameters
+        ----------
+        reference : struc.AtomArray
+            Reference structure with chain assignments.
+        pose : struc.AtomArray
+            Pose structure with chain assignments.
+
+        Returns
+        -------
+        float
+            Weighted sum of squared distance differences. Lower is better.
+            Returns 0 if there are no ligands.
         """
         # Separate into chains and identify hetero/polymer chains
         ref_chains = list(struc.chain_iter(reference))
@@ -718,7 +768,21 @@ def _find_optimal_match_precise(
         def chain_distances(
             ligand_chains: list[struc.AtomArray], polymer_chains: list[struc.AtomArray]
         ) -> NDArray[np.floating]:
-            """Compute min distance from each ligand chain to each polymer chain."""
+            """
+            Compute minimum distance from each ligand chain to each polymer chain.
+
+            Parameters
+            ----------
+            ligand_chains : list[struc.AtomArray]
+                List of ligand chain atom arrays.
+            polymer_chains : list[struc.AtomArray]
+                List of polymer chain atom arrays.
+
+            Returns
+            -------
+            NDArray[np.floating]
+                Distance matrix of shape (n_ligands, n_polymers).
+            """
             n_lig = len(ligand_chains)
             n_poly = len(polymer_chains)
             dists = np.zeros((n_lig, n_poly))
