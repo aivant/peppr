@@ -110,15 +110,27 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
             # currently not implemented
             return
     if problem.GetType() == "KekulizeException":
-        # hack: fix KekulizeException related to ring N atoms with unspecified
-        # protonation by setting one or more ring nitrogens as "[nH]"
-        possible_nHs = []
+        # get all atoms in the same ring as the problem atoms
+        problem_indices = set(problem.GetAtomIndices())
+        # need to extract ring info
+        Chem.SanitizeMol(
+            mol=mol, sanitizeOps=Chem.rdmolops.SanitizeFlags.SANITIZE_SYMMRINGS
+        )
+        ring_info = mol.GetRingInfo()
+        for ring_indices in ring_info.AtomRings():
+            if problem_indices.intersection(ring_indices):
+                problem_indices |= set(ring_indices)
+        # if KekulizeException is related to ring N atoms - it could be due to
+        # either incorrectly specified explicit protonation or charge
         original_nH_state = []
-        for atidx in problem.GetAtomIndices():
+        original_charge_state = []
+        possible_nHs = []
+        for atidx in problem_indices:
             at = mol.GetAtomWithIdx(atidx)
             if at.GetSymbol() == "N" and at.GetDegree() == 2:
-                possible_nHs.append(at)
                 original_nH_state.append(at.GetNumExplicitHs())
+                original_charge_state.append(at.GetFormalCharge())
+                possible_nHs.append(at)
 
         if not len(possible_nHs):
             # no candidate nitrogens to fix the problem
@@ -126,11 +138,30 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
             # not be entered, but it makes the intention clearer
             return
 
+        # first test if the issue is the formal charge due to explicit protonation
+        for ni, nH, charge in zip(
+            possible_nHs, original_nH_state, original_charge_state
+        ):
+            if nH > 0 and charge == 0:
+                # if we found a protonated nitrogen, we can fix the charge
+                ni.SetFormalCharge(nH)
+                # and check if the problem is resolved
+                check_problems = Chem.DetectChemistryProblems(
+                    mol, sanitizeOps=Chem.rdmolops.SanitizeFlags.SANITIZE_KEKULIZE
+                )
+                if not [p for p in check_problems if _is_same_problem(p, problem)]:
+                    # problem is resolved - no need to try other combinations
+                    return
+                else:
+                    # if the problem is not resolved - reset the charge to try other candidates
+                    ni.SetFormalCharge(charge)
+
+        # alternatively, attempt to fix by setting one or more ring nitrogens as "[nH1]"
         # if there is one or more candidates - iterate through all the possible
         # combinations of explicit Hs for the candidate nitrogens
         for combo in product([0, 1], repeat=len(possible_nHs)):
-            for nH, nH_explicit in zip(possible_nHs, combo):
-                nH.SetNumExplicitHs(nH_explicit)
+            for ni, nH_explicit in zip(possible_nHs, combo):
+                ni.SetNumExplicitHs(nH_explicit)
             # and check if the problem is resolved
             check_problems = Chem.DetectChemistryProblems(
                 mol, sanitizeOps=Chem.rdmolops.SanitizeFlags.SANITIZE_KEKULIZE
@@ -139,8 +170,8 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
                 # problem is resolved - no need to try other combinations
                 return
         # if all combos failed - reset explicit Hs back to the original values
-        for nH, nH_explicit in zip(possible_nHs, original_nH_state):
-            nH.SetNumExplicitHs(nH_explicit)
+        for ni, nH_explicit in zip(possible_nHs, original_nH_state):
+            ni.SetNumExplicitHs(nH_explicit)
 
 
 def _is_same_problem(problem1: Exception, problem2: Exception) -> bool:

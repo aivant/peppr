@@ -2,8 +2,10 @@ __all__ = [
     "ContactMeasurement",
     "find_atoms_by_pattern",
     "find_resonance_charges",
+    "get_interchangeable_tautomers",
 ]
 
+import copy
 from enum import IntEnum
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
@@ -11,6 +13,7 @@ import biotite.structure.info as info
 import numpy as np
 import rdkit.Chem.AllChem as Chem
 from numpy.typing import NDArray
+from rdkit.Chem.MolStandardize import rdMolStandardize
 from peppr.charge import estimate_formal_charges
 from peppr.sanitize import sanitize
 
@@ -54,6 +57,18 @@ class ContactMeasurement:
     ph : float, optional
         The pH of the environment.
         By default a physiological pH value is used [1]_.
+    use_tautomers : bool = True, optional
+        If ``use_tautomers`` is ``True``, the input receptor and ligand are
+        expanded to include their tautomeric forms.
+        This may yield a significant overhead for the binding site, as many
+        tautomers may be possible for a large molecule.
+
+    Warnings
+    --------
+    The specified ``cutoff`` parameter needs to be larger than the longest contact
+    threshold considered for the measurement of the binding site. Additionally,
+    to avoid edge effect, additional buffer of ~1.5 Å is recommended to avoid
+    artificial interactions with *ionized ends*.
 
     References
     ----------
@@ -64,8 +79,9 @@ class ContactMeasurement:
         self,
         receptor: struc.AtomArray,
         ligand: struc.AtomArray,
-        cutoff: float,
+        cutoff: float = 8.0,  # smaller not recommended for charged interactions
         ph: float = 7.4,
+        use_tautomers: bool = True,
     ):
         if np.any(receptor.element == "H") or np.any(ligand.element == "H"):
             raise ValueError("Structures must only contain heavy atoms")
@@ -113,6 +129,14 @@ class ContactMeasurement:
         # For matching some SMARTS strings a properly sanitized molecule is required
         sanitize(self._binding_site_mol)
         sanitize(self._ligand_mol)
+        self.use_tautomers = use_tautomers
+        if self.use_tautomers:
+            self._binding_site_tautomers = _get_interchangeable_tautomeric_fragments(
+                self._binding_site_mol
+            )
+            self._ligand_tautomers = _get_interchangeable_tautomeric_fragments(
+                self._ligand_mol
+            )
 
     def find_contacts_by_pattern(
         self,
@@ -171,10 +195,20 @@ class ContactMeasurement:
         For example the pattern ``CC`` would lead to an exception, as it would match
         a group of two carbon atoms.
         """
-        matched_receptor_indices = find_atoms_by_pattern(
-            self._binding_site_mol, receptor_pattern
-        )
-        matched_ligand_indices = find_atoms_by_pattern(self._ligand_mol, ligand_pattern)
+        if self.use_tautomers:
+            matched_receptor_indices = _find_atoms_in_tautomeric_fragments(
+                self._binding_site_tautomers, receptor_pattern
+            )
+            matched_ligand_indices = _find_atoms_in_tautomeric_fragments(
+                self._ligand_tautomers, ligand_pattern
+            )
+        else:
+            matched_receptor_indices = find_atoms_by_pattern(
+                self._binding_site_mol, receptor_pattern
+            )
+            matched_ligand_indices = find_atoms_by_pattern(
+                self._ligand_mol, ligand_pattern
+            )
 
         combined_vdw_radii = (
             np.array(
@@ -642,3 +676,108 @@ def find_resonance_charges(
         dtype=int,
     )
     return pos_mask, neg_mask, conjugated_groups
+
+
+def get_interchangeable_tautomers(mol: Chem.Mol) -> list[Chem.Mol]:
+    """
+    Find all tautomeric forms of the molecule that are on par (or better) forms
+    of the input form, explicitly checking for atom hybridizations.
+
+    Molecules can exist in multiple tautomeric forms, which can differ in the
+    position of protons and double bonds, yet retaining same atom hybridization.
+    As a result, with heavy atom only description, it is impossible to tell
+    these forms apart.
+
+    Parameters
+    ----------
+    mol : Chem.Mol
+        The molecule to find the tautomeric forms for each fragment.
+
+    Returns
+    -------
+    list[Chem.Mol]
+        Array of explicit primary tautomeric forms of the molecule.
+
+    Warnings
+    --------
+    This uses RDKit defaults for MaxTautomers=1000 and MaxTransforms=1000, that
+    limits the search exhaustiveness to reduce the runtime. Consider applying
+    this function on molecule fragments to improve efficiency.
+    """
+    tautomerator = rdMolStandardize.TautomerEnumerator()
+    # make copy of the original molecule to avoid modifying input
+    mol = copy.deepcopy(mol)
+    # keep original hybridization - this should not change!
+    orig_hybridization = np.array([at.GetHybridization() for at in mol.GetAtoms()])
+    # add labels to break symmetry to force consider symmetric tautomers as unique
+    [at.SetAtomMapNum(i + 1) for i, at in enumerate(mol.GetAtoms())]
+    tauts = np.array(tautomerator.Enumerate(mol))
+    # find the best tautomers according to the RDKit scoring function and only keep those
+    # that are on par or better than the input form
+    tautomer_scores = np.array([tautomerator.ScoreTautomer(taut) for taut in tauts])
+    good_tauts = np.where(tautomer_scores >= tautomerator.ScoreTautomer(mol))[0]
+    # get final tautomers
+    final_tautomers = []
+    for tmol in tauts[good_tauts]:
+        # keep only the ones that keep same atom hybridizations!
+        if (
+            np.array([at.GetHybridization() for at in tmol.GetAtoms()])
+            == orig_hybridization
+        ).all():
+            # remove labels for the returned tautomers
+            [at.SetAtomMapNum(0) for at in tmol.GetAtoms()]
+            final_tautomers.append(tmol)
+    return final_tautomers
+
+
+def _get_interchangeable_tautomeric_fragments(mol: Chem.Mol) -> list[list[Chem.Mol]]:
+    """
+    Wrapper of get_interchangeable_tautomers for getting tautomers for each
+    fragment found in the bigger molecule. Intended for protein cutouts.
+    Returns list of fragments in arrays of explicit tautomeric forms.
+
+    Parameters
+    ----------
+    mol : Chem.Mol
+        The molecule to find the tautomeric forms for each fragment
+
+    Returns
+    -------
+    list[list[Chem.Mol]]
+        List of fragments further listed into their tautomeric forms
+    """
+    mols_to_tautomers = []
+    for frag in Chem.rdmolops.GetMolFrags(mol, asMols=True):
+        mols_to_tautomers.append(get_interchangeable_tautomers(frag))
+    return mols_to_tautomers
+
+
+def _find_atoms_in_tautomeric_fragments(
+    frag_tautomers: list[list[Chem.Mol]], pattern: str
+) -> NDArray[np.int_]:
+    """
+    Wrapper of find_atoms_by_pattern that works on explicitly listed tautomeric
+    arrays for each fragment in the bigger. Intended to speed up pattern search
+    for proteins, making it more exhaustive.
+
+    Parameters
+    ----------
+    frag_tautomers : list[list[Chem.Mol]
+        List of molecular fragment's list of tautomeric forms
+    pattern : str
+        The SMARTS pattern to match against.
+
+    Returns
+    -------
+    np.ndarray, shape=(n,), dtype=int
+        The atom indices that fulfill the given SMARTS pattern.
+    """
+    matches: set[np.int_] = set()
+
+    frag_atom_offset = 0
+    for frag in frag_tautomers:
+        for tautomer in frag:
+            matches |= set(find_atoms_by_pattern(tautomer, pattern) + frag_atom_offset)
+        frag_atom_offset += tautomer.GetNumAtoms()
+    # match the output of ``find_atoms_by_pattern``
+    return np.array(np.sort(list(matches)), dtype=int).flatten()

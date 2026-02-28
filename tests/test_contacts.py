@@ -6,6 +6,7 @@ import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
 from biotite.interface import rdkit as rdkit_interface
+from rdkit import Chem
 import peppr
 from peppr.common import ACCEPTOR_PATTERN, DONOR_PATTERN, HBOND_DISTANCE_SCALING
 
@@ -40,7 +41,7 @@ def test_find_atoms_by_pattern():
     receptor_mask = struc.filter_amino_acids(atoms)
     ligand_mask = atoms.res_name == "BTN"
     contact_measurement = peppr.ContactMeasurement(
-        atoms[receptor_mask], atoms[ligand_mask], 10.0
+        atoms[receptor_mask], atoms[ligand_mask]
     )
 
     ligand = contact_measurement._ligand
@@ -62,8 +63,9 @@ def test_find_atoms_by_pattern():
         assert test_atoms.issuperset(ref_atoms), ref_atoms.difference(test_atoms)
 
 
+@pytest.mark.parametrize("use_tauts", [True, False])
 @pytest.mark.parametrize("ideal_angle", [None, np.deg2rad(180)])
-def test_hydrogen_bond_identification(ideal_angle):
+def test_hydrogen_bond_identification(ideal_angle, use_tauts):
     """
     Check for a PLI complex (biotin-streptavidin) whether hydrogen bonds,
     measured using explicit hydrogen atoms, are correctly recovered with heavy atoms
@@ -103,7 +105,9 @@ def test_hydrogen_bond_identification(ideal_angle):
     receptor_mask = struc.filter_amino_acids(atoms)
     ligand_mask = atoms.res_name == "BTN"
     contact_measurement = peppr.ContactMeasurement(
-        atoms[receptor_mask], atoms[ligand_mask], 10.0
+        atoms[receptor_mask],
+        atoms[ligand_mask],
+        use_tautomers=use_tauts,
     )
     # If a 'straight' hydrogen bond is assumed as ideal, increase the tolerance,
     # as hydrogen bonds are typically not perfectly straight
@@ -237,7 +241,7 @@ def test_find_stacking_interactions():
     receptor = atoms[~atoms.hetero]
     ligand = atoms[atoms.hetero]
 
-    contact_measurement = peppr.ContactMeasurement(receptor, ligand, 10.0)
+    contact_measurement = peppr.ContactMeasurement(receptor, ligand)
     interactions = contact_measurement.find_stacking_interactions()
     assert len(interactions) > 0
 
@@ -252,6 +256,7 @@ def test_find_stacking_interactions():
         )
 
 
+@pytest.mark.parametrize("use_tauts", [True, False])
 @pytest.mark.parametrize(
     "contact_method",
     [
@@ -265,7 +270,7 @@ def test_find_stacking_interactions():
     ],
     ids=["find_contacts_by_pattern", "find_salt_bridges"],
 )
-def test_no_contacts(contact_method):
+def test_no_contacts(contact_method, use_tauts):
     """
     Check if the output array shape is still correct if no contacts are found.
     To do this, place the receptor and ligand far apart from each other.
@@ -276,7 +281,9 @@ def test_no_contacts(contact_method):
     # Move the receptor far away from the ligand
     receptor.coord += 1000
 
-    contact_measurement = peppr.ContactMeasurement(receptor, ligand, 10.0)
+    contact_measurement = peppr.ContactMeasurement(
+        receptor, ligand, use_tautomers=use_tauts
+    )
     contacts = contact_method(contact_measurement)
     assert contacts.shape == (0, 2)
 
@@ -306,7 +313,7 @@ def test_no_bonds(contact_method):
     receptor = ligand.copy()
     receptor.coord[:, 0] += 5
 
-    contact_measurement = peppr.ContactMeasurement(receptor, ligand, 10.0)
+    contact_measurement = peppr.ContactMeasurement(receptor, ligand)
     contact_method(contact_measurement)
 
 
@@ -340,3 +347,160 @@ def test_find_resonance_charges():
         "Charged atoms do not match those found in resonance structures"
     )
     assert np.equal(ligand_charged_in_resonance_atoms, [0, 3, 6, 7, 8]).all()
+
+
+@pytest.mark.parametrize(
+    ["smiles", "expected_donors", "expected_acceptors"],
+    [
+        # specified imidazole nHs
+        ("c1c[nH]cn1", [2, 4], [2, 4]),
+        ("c1cnc[nH]1", [2, 4], [2, 4]),
+        # unspecified imidazole symmetric - both nitrogens can be donors and acceptors
+        ("c1c[nH]c[nH+]1", [2, 4], []),
+        ("c1c[nH+]c[nH]1", [2, 4], []),
+        ("c1c[nH]c[nH]1", [2, 4], []),
+        # unspecified imidazole asymmetric
+        ("Cc1cncn1", [3, 5], [3, 5]),
+        # unspecified imidazole symmetric - both nitrogens can be donors and acceptors
+        ("c1cncn1", [2, 4], [2, 4]),
+    ],
+    ids=[
+        "specified imidazole nHs 1",
+        "specified imidazole nHs 2",
+        "specified charged imidazole symmetric 1",
+        "specified charged imidazole symmetric 2",
+        "specified uncharged imidazole symmetric 1",
+        "unspecified imidazole asymmetric 1",
+        "unspecified imidazole symmetric 4",
+    ],
+)
+def test_find_tautomeric_hbond_patterns(smiles, expected_donors, expected_acceptors):
+    """
+    Test if you can find all hydrogen bond donor/acceptor candidates between
+    tautomeric forms of the same ligand.
+    """
+    mol = Chem.MolFromSmiles(smiles, sanitize=False)
+    peppr.sanitize(mol)
+    ligand_tautomers = peppr.get_interchangeable_tautomers(mol)
+
+    matched_ligand_donors: set[np.int_] = set()
+    for ligand_tautomer in ligand_tautomers:
+        matched_ligand_donors |= set(
+            peppr.find_atoms_by_pattern(ligand_tautomer, DONOR_PATTERN)
+        )
+    matched_ligand_donors = np.array(list(matched_ligand_donors))
+    assert (matched_ligand_donors == expected_donors).all()
+
+    matched_ligand_acceptors = set()
+    for ligand_tautomer in ligand_tautomers:
+        matched_ligand_acceptors |= set(
+            peppr.find_atoms_by_pattern(ligand_tautomer, ACCEPTOR_PATTERN)
+        )
+    matched_ligand_acceptors = np.array(list(matched_ligand_acceptors))
+    assert (matched_ligand_acceptors == expected_acceptors).all()
+
+
+@pytest.mark.parametrize("use_tauts", [True, False])
+@pytest.mark.parametrize(
+    ["pdbid", "chain", "lig", "hbs", "hbs_plus"],
+    [
+        [
+            "7gc7",
+            "A",
+            "L93",
+            [
+                # detected easily without tautomers
+                (True, 404, "N1", 140, "O"),
+                (True, 404, "N1", 166, "OE2"),
+                (False, 404, "O1", 166, "N"),
+            ],
+            # only detected if receptor His163 tautomers are considered
+            [(False, 404, "O2", 163, "NE2")],
+        ],
+    ],
+)
+def test_challenging_hbond_case(use_tauts, pdbid, chain, lig, hbs, hbs_plus):
+    """
+    Use a challenging case to demonstrate some edge cases of tautomer enumeration importance.
+    """
+    pdbx_file = pdbx.CIFFile.read(
+        Path(__file__).parent / "data" / "pdb" / f"{pdbid}.cif"
+    )
+    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    atoms = atoms[atoms.chain_id == chain]
+    atoms = peppr.standardize(atoms)
+
+    receptor_mask = ~atoms.hetero
+    ligand_mask = (atoms.hetero) & (atoms.res_name == lig)
+
+    inter_contact_measurement = peppr.ContactMeasurement(
+        receptor=atoms[receptor_mask],
+        ligand=atoms[ligand_mask],
+        use_tautomers=use_tauts,
+    )
+
+    test_contacts = []
+    for receptor_pattern, ligand_pattern in [
+        (ACCEPTOR_PATTERN, DONOR_PATTERN),
+        (DONOR_PATTERN, ACCEPTOR_PATTERN),
+    ]:
+        for receptor_i, ligand_i in inter_contact_measurement.find_contacts_by_pattern(
+            receptor_pattern,
+            ligand_pattern,
+            HBOND_DISTANCE_SCALING,
+        ):
+            lig_is_donor = ligand_pattern == DONOR_PATTERN
+            test_contacts.append(
+                (
+                    lig_is_donor,
+                    atoms.res_id[ligand_mask][ligand_i],
+                    atoms.atom_name[ligand_mask][ligand_i],
+                    atoms.res_id[receptor_mask][receptor_i],
+                    atoms.atom_name[receptor_mask][receptor_i],
+                )
+            )
+    if use_tauts:
+        hbs += hbs_plus
+    assert np.array(hb in test_contacts for hb in hbs).all()
+
+
+def test_full_vs_frag_tautomer_enumeration():
+    """
+    Test that fragmented tautomer enumeration provides consistent results with full enumeration
+    """
+    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "7gc7.cif")
+    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    atoms = atoms[atoms.chain_id == "A"]
+    atoms = peppr.standardize(atoms)
+
+    receptor_mask = ~atoms.hetero
+    ligand_mask = (atoms.hetero) & (atoms.res_name != "DMS")
+
+    contact_measure = peppr.ContactMeasurement(
+        receptor=atoms[receptor_mask],
+        ligand=atoms[ligand_mask],
+        cutoff=8.0,
+        use_tautomers=False,
+    )
+
+    for receptor_pattern in [DONOR_PATTERN, ACCEPTOR_PATTERN]:
+        # using explicit enumeration
+        full_tautomers = peppr.get_interchangeable_tautomers(
+            contact_measure._binding_site_mol
+        )
+        matched_indices_full = set()
+        for tautomer in full_tautomers:
+            matched_indices_full |= set(
+                peppr.find_atoms_by_pattern(tautomer, receptor_pattern)
+            )
+        matched_indices_full = np.array(sorted(matched_indices_full), dtype=int)
+        # using fragmented enumeration
+        binding_site_fragtautomers = (
+            peppr.contacts._get_interchangeable_tautomeric_fragments(
+                contact_measure._binding_site_mol
+            )
+        )
+        matched_indices_frags = peppr.contacts._find_atoms_in_tautomeric_fragments(
+            binding_site_fragtautomers, receptor_pattern
+        )
+        assert (matched_indices_full == matched_indices_frags).all()
