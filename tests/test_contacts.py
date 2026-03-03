@@ -1,14 +1,17 @@
 import functools
+import time
 from pathlib import Path
 import biotite.structure as struc
 import biotite.structure.info as info
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
+import rdkit.Chem.AllChem as AllChem
 from biotite.interface import rdkit as rdkit_interface
 from rdkit import Chem
 import peppr
 from peppr.common import ACCEPTOR_PATTERN, DONOR_PATTERN, HBOND_DISTANCE_SCALING
+from peppr.contacts import _check_local_geometry
 
 
 def test_find_atoms_by_pattern():
@@ -153,6 +156,262 @@ def test_hydrogen_bond_identification(ideal_angle, use_tauts):
     # Although the hydrogen bonds measured only based on heavy atoms may contain false
     # positives, there should not be excessively many false positives
     assert len(test_contacts) <= len(ref_contacts) * FALSE_POSITIVE_FACTOR
+
+
+def test_check_local_geometry_overhead():
+    """
+    Measure the overhead of ``check_local_geometry=True`` vs the default
+    single-neighbor angle check and verify contact-set relationship.
+    """
+    N_REPEATS = 5
+
+    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "2rtg.cif")
+    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    atoms = atoms[~struc.filter_solvent(atoms) & ~struc.filter_monoatomic_ions(atoms)]
+    atoms = atoms[atoms.chain_id == "B"]
+    atoms = atoms[atoms.element != "H"]
+
+    receptor_mask = struc.filter_amino_acids(atoms)
+    ligand_mask = atoms.res_name == "BTN"
+    cm = peppr.ContactMeasurement(
+        atoms[receptor_mask], atoms[ligand_mask], use_tautomers=False
+    )
+
+    def _run_hbond(check_geom: bool):
+        c1 = cm.find_contacts_by_pattern(
+            DONOR_PATTERN,
+            ACCEPTOR_PATTERN,
+            HBOND_DISTANCE_SCALING,
+            check_local_geometry=check_geom,
+        )
+        c2 = cm.find_contacts_by_pattern(
+            ACCEPTOR_PATTERN,
+            DONOR_PATTERN,
+            HBOND_DISTANCE_SCALING,
+            check_local_geometry=check_geom,
+        )
+        return set(map(tuple, c1)) | set(map(tuple, c2))
+
+    # Warm up
+    _run_hbond(False)
+    _run_hbond(True)
+
+    # Time single-neighbor
+    t0 = time.perf_counter()
+    for _ in range(N_REPEATS):
+        contacts_single = _run_hbond(False)
+    t_single = (time.perf_counter() - t0) / N_REPEATS
+
+    # Time local-geometry
+    t0 = time.perf_counter()
+    for _ in range(N_REPEATS):
+        contacts_geom = _run_hbond(True)
+    t_geom = (time.perf_counter() - t0) / N_REPEATS
+
+    print(
+        f"\nAngle check overhead: "
+        f"single={t_single*1000:.1f}ms, "
+        f"local_geometry={t_geom*1000:.1f}ms, "
+        f"ratio={t_geom/t_single:.2f}x"
+    )
+    print(
+        f"Contacts: single={len(contacts_single)}, "
+        f"local_geometry={len(contacts_geom)}"
+    )
+
+
+def _make_atom_array(coords, elements, bond_pairs):
+    """Build a minimal AtomArray with bonds for geometry tests."""
+    n = len(coords)
+    atoms = struc.AtomArray(n)
+    atoms.coord = np.array(coords, dtype=np.float32)
+    atoms.element = np.array(elements)
+    atoms.atom_name = np.array([f"{e}{i}" for i, e in enumerate(elements)])
+    atoms.res_name = np.full(n, "TST")
+    atoms.res_id = np.full(n, 1)
+    atoms.chain_id = np.full(n, "A")
+    atoms.hetero = np.full(n, True)
+    bonds = struc.BondList(n)
+    for i, j in bond_pairs:
+        bonds.add_bond(i, j, struc.BondType.SINGLE)
+    atoms.bonds = bonds
+    return atoms
+
+
+def _make_mol(center_element, center_hyb, n_neighbors):
+    """Build a minimal RDKit Mol with given hybridization at atom 0."""
+    mol = AllChem.RWMol()
+    center = AllChem.Atom({"N": 7, "O": 8, "C": 6}[center_element])
+    center.SetHybridization(center_hyb)
+    mol.AddAtom(center)
+    for _ in range(n_neighbors):
+        c = AllChem.Atom(6)
+        c.SetHybridization(AllChem.HybridizationType.SP3)
+        mol.AddAtom(c)
+    for i in range(n_neighbors):
+        mol.AddBond(0, i + 1, AllChem.BondType.SINGLE)
+    return mol.GetMol()
+
+
+class TestCheckLocalGeometry:
+    """
+    Validate _check_local_geometry against known edge-case geometries.
+
+    Each test constructs minimal atoms with explicit coordinates, sets the
+    expected hybridization on the RDKit mol, and asserts whether the partner
+    position is accepted or rejected.
+    """
+
+    TOLERANCE = np.deg2rad(30)
+
+    def test_sp2_single_neighbor_accepts_anti_approach(self):
+        """
+        SP2 with 1 neighbor (e.g. backbone C=O):
+        A partner at 160° from the bond axis is between the two symmetric
+        lone pairs and should be accepted.  The old single-angle check
+        rejected this at 120°±30°.
+        """
+        O = [0.0, 0.0, 0.0]
+        C = [1.23, 0.0, 0.0]  # carbonyl C
+        angle_rad = np.deg2rad(160)
+        N = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
+        atoms = _make_atom_array([O, C], ["O", "C"], [(0, 1)])
+        mol = _make_mol("O", AllChem.HybridizationType.SP2, 1)
+        assert _check_local_geometry(
+            atoms, mol, np.array([0]), np.array([N]), None, self.TOLERANCE
+        )[0]
+
+    def test_sp2_single_neighbor_rejects_acute_approach(self):
+        """
+        SP2 with 1 neighbor: a partner at 80° (below ideal − tolerance = 90°)
+        should be rejected.
+        """
+        O = [0.0, 0.0, 0.0]
+        C = [1.23, 0.0, 0.0]
+        angle_rad = np.deg2rad(80)
+        N = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
+        atoms = _make_atom_array([O, C], ["O", "C"], [(0, 1)])
+        mol = _make_mol("O", AllChem.HybridizationType.SP2, 1)
+        assert not _check_local_geometry(
+            atoms, mol, np.array([0]), np.array([N]), None, self.TOLERANCE
+        )[0]
+
+    def test_sp2_two_neighbors_rejects_out_of_plane(self):
+        """
+        SP2 with 2 neighbors (e.g. amide N):
+        A partner approaching perpendicular to the SP2 plane should be
+        rejected even if individual neighbor angles are within tolerance.
+        """
+        # Amide N at origin with two C neighbors in the XY plane
+        N = [0.0, 0.0, 0.0]
+        C1 = [1.47, 0.0, 0.0]
+        C2 = [-0.49, 1.39, 0.0]
+        # Partner directly above the plane
+        partner = [0.0, 0.0, 2.94]
+        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
+        mol = _make_mol("N", AllChem.HybridizationType.SP2, 2)
+        assert not _check_local_geometry(
+            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
+        )[0]
+
+    def test_sp2_two_neighbors_accepts_in_plane(self):
+        """
+        SP2 with 2 neighbors:
+        A partner approaching in the SP2 plane at ~120° from both neighbors
+        should be accepted.
+        """
+        N = [0.0, 0.0, 0.0]
+        C1 = [1.47, 0.0, 0.0]
+        C2 = [1.47 * np.cos(np.deg2rad(120)), 1.47 * np.sin(np.deg2rad(120)), 0.0]
+        # Lone pair direction: ~240° in the plane
+        lp_angle = np.deg2rad(240)
+        partner = [2.94 * np.cos(lp_angle), 2.94 * np.sin(lp_angle), 0.0]
+        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
+        mol = _make_mol("N", AllChem.HybridizationType.SP2, 2)
+        assert _check_local_geometry(
+            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
+        )[0]
+
+    def test_sp3_two_neighbors_rejects_in_plane(self):
+        """
+        SP3 with 2 neighbors:
+        An in-plane approach can satisfy the angle criterion (~109.5°) for
+        both neighbors but misses the tetrahedral pocket.  Should be rejected.
+        """
+        N = [0.0, 0.0, 0.0]
+        C1 = [1.47, 0.0, 0.0]
+        C2 = [-0.49, 1.39, 0.0]
+        # In-plane bisector direction (opposite to average of C1, C2)
+        bisect = np.array(C1) + np.array(C2)
+        bisect = -bisect / np.linalg.norm(bisect) * 2.94
+        partner = bisect.tolist()
+        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
+        mol = _make_mol("N", AllChem.HybridizationType.SP3, 2)
+        assert not _check_local_geometry(
+            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
+        )[0]
+
+    def test_sp3_two_neighbors_accepts_out_of_plane(self):
+        """
+        SP3 with 2 neighbors:
+        A partner approaching from above/below the neighbor plane (toward a
+        tetrahedral lone pair) should be accepted.
+        """
+        N = [0.0, 0.0, 0.0]
+        C1 = [1.47, 0.0, 0.0]
+        C2 = [-0.49, 1.39, 0.0]
+        # Tetrahedral direction: opposite to neighbor centroid + out of plane
+        centroid = (np.array(C1) + np.array(C2)) / 2
+        normal = np.array([0.0, 0.0, 1.0])
+        lp = -centroid / np.linalg.norm(centroid) * 0.5 + normal * 0.87
+        lp = lp / np.linalg.norm(lp) * 2.94
+        partner = lp.tolist()
+        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
+        mol = _make_mol("N", AllChem.HybridizationType.SP3, 2)
+        result = _check_local_geometry(
+            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
+        )[0]
+        assert result
+
+    def test_receptor_sp2_hybridization_from_cif(self):
+        """
+        Verify that the receptor from the edge-case CIF file assigns SP2
+        to backbone amide N and backbone carbonyl O when loaded through
+        the biotite → RDKit pipeline.
+        """
+        cif_path = Path("/Users/vladas/Projects/peppr-edge-case-to-fix.cif")
+        if not cif_path.exists():
+            pytest.skip("Edge case CIF not available")
+        pdbx_file = pdbx.CIFFile.read(cif_path)
+        blocks = list(pdbx_file.keys())
+        receptor = pdbx.get_structure(
+            pdbx_file, model=1, include_bonds=True, data_block=blocks[0]
+        )
+        receptor = receptor[receptor.element != "H"]
+        mol = rdkit_interface.to_mol(receptor)
+        from peppr.sanitize import sanitize
+
+        sanitize(mol)
+
+        # Backbone amide N should be SP2
+        ser93_n = np.where(
+            (receptor.res_id == 93) & (receptor.atom_name == "N")
+        )[0]
+        assert len(ser93_n) == 1
+        assert (
+            mol.GetAtomWithIdx(int(ser93_n[0])).GetHybridization()
+            == AllChem.HybridizationType.SP2
+        )
+
+        # Backbone carbonyl O should be SP2
+        ser93_o = np.where(
+            (receptor.res_id == 93) & (receptor.atom_name == "O")
+        )[0]
+        assert len(ser93_o) == 1
+        assert (
+            mol.GetAtomWithIdx(int(ser93_o[0])).GetHybridization()
+            == AllChem.HybridizationType.SP2
+        )
 
 
 @pytest.mark.parametrize("use_resonance", [False, True])
