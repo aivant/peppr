@@ -11,7 +11,7 @@ from biotite.interface import rdkit as rdkit_interface
 from rdkit import Chem
 import peppr
 from peppr.common import ACCEPTOR_PATTERN, DONOR_PATTERN, HBOND_DISTANCE_SCALING
-from peppr.contacts import _check_local_geometry
+from peppr.contacts import _check_local_geometry, _out_of_plane_angle
 
 
 def test_find_atoms_by_pattern():
@@ -210,13 +210,12 @@ def test_check_local_geometry_overhead():
 
     print(
         f"\nAngle check overhead: "
-        f"single={t_single*1000:.1f}ms, "
-        f"local_geometry={t_geom*1000:.1f}ms, "
-        f"ratio={t_geom/t_single:.2f}x"
+        f"single={t_single * 1000:.1f}ms, "
+        f"local_geometry={t_geom * 1000:.1f}ms, "
+        f"ratio={t_geom / t_single:.2f}x"
     )
     print(
-        f"Contacts: single={len(contacts_single)}, "
-        f"local_geometry={len(contacts_geom)}"
+        f"Contacts: single={len(contacts_single)}, local_geometry={len(contacts_geom)}"
     )
 
 
@@ -373,45 +372,78 @@ class TestCheckLocalGeometry:
         )[0]
         assert result
 
-    def test_receptor_sp2_hybridization_from_cif(self):
+
+class TestOutOfPlaneAngle:
+    """
+    Validate _out_of_plane_angle returns the correct angle (in radians)
+    for partners placed at known out-of-plane positions.
+    """
+
+    @staticmethod
+    def _setup_plane():
         """
-        Verify that the receptor from the edge-case CIF file assigns SP2
-        to backbone amide N and backbone carbonyl O when loaded through
-        the biotite → RDKit pipeline.
+        Create a plane: atom at origin, two neighbors along x and y axes.
+        The plane normal is along z.
         """
-        cif_path = Path("/Users/vladas/Projects/peppr-edge-case-to-fix.cif")
-        if not cif_path.exists():
-            pytest.skip("Edge case CIF not available")
-        pdbx_file = pdbx.CIFFile.read(cif_path)
-        blocks = list(pdbx_file.keys())
-        receptor = pdbx.get_structure(
-            pdbx_file, model=1, include_bonds=True, data_block=blocks[0]
-        )
-        receptor = receptor[receptor.element != "H"]
-        mol = rdkit_interface.to_mol(receptor)
-        from peppr.sanitize import sanitize
+        atom = np.array([[0.0, 0.0, 0.0]])
+        # neighbor_coords shape: (1, 2, 3) — two neighbors
+        neighbors = np.array([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]])
+        return atom, neighbors
 
-        sanitize(mol)
+    @staticmethod
+    def _partner_at_angle(angle_deg):
+        """Place a partner at the given out-of-plane angle (degrees) from the xy-plane."""
+        angle_rad = np.deg2rad(angle_deg)
+        # In the xz-plane: cos(angle) along x, sin(angle) along z
+        return np.array([[np.cos(angle_rad), 0.0, np.sin(angle_rad)]]) * 2.0
 
-        # Backbone amide N should be SP2
-        ser93_n = np.where(
-            (receptor.res_id == 93) & (receptor.atom_name == "N")
-        )[0]
-        assert len(ser93_n) == 1
-        assert (
-            mol.GetAtomWithIdx(int(ser93_n[0])).GetHybridization()
-            == AllChem.HybridizationType.SP2
-        )
+    @pytest.mark.parametrize("angle_deg", [0, 35, 70, 90])
+    def test_known_angles(self, angle_deg):
+        atom, neighbors = self._setup_plane()
+        partner = self._partner_at_angle(angle_deg)
+        result = _out_of_plane_angle(atom, neighbors, partner)
+        np.testing.assert_allclose(result[0], np.deg2rad(angle_deg), atol=1e-6)
 
-        # Backbone carbonyl O should be SP2
-        ser93_o = np.where(
-            (receptor.res_id == 93) & (receptor.atom_name == "O")
-        )[0]
-        assert len(ser93_o) == 1
-        assert (
-            mol.GetAtomWithIdx(int(ser93_o[0])).GetHybridization()
-            == AllChem.HybridizationType.SP2
+    def test_in_plane_is_zero(self):
+        """A partner lying exactly in the plane should give 0."""
+        atom, neighbors = self._setup_plane()
+        partner = np.array([[3.0, 2.0, 0.0]])  # arbitrary in-plane point
+        result = _out_of_plane_angle(atom, neighbors, partner)
+        np.testing.assert_allclose(result[0], 0.0, atol=1e-6)
+
+    def test_perpendicular_is_pi_over_2(self):
+        """A partner directly along the plane normal should give π/2."""
+        atom, neighbors = self._setup_plane()
+        partner = np.array([[0.0, 0.0, 5.0]])
+        result = _out_of_plane_angle(atom, neighbors, partner)
+        np.testing.assert_allclose(result[0], np.pi / 2, atol=1e-6)
+
+    def test_negative_z_same_as_positive(self):
+        """Out-of-plane angle is unsigned — below the plane equals above."""
+        atom, neighbors = self._setup_plane()
+        above = self._partner_at_angle(35)
+        below = np.array([[above[0, 0], above[0, 1], -above[0, 2]]])
+        result_above = _out_of_plane_angle(atom, neighbors, above)
+        result_below = _out_of_plane_angle(atom, neighbors, below)
+        np.testing.assert_allclose(result_above, result_below, atol=1e-6)
+
+    def test_batch(self):
+        """Multiple atoms in a single call."""
+        atom = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        neighbors = np.array(
+            [
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            ]
         )
+        partner = np.array(
+            [
+                self._partner_at_angle(0)[0],
+                self._partner_at_angle(90)[0],
+            ]
+        )
+        result = _out_of_plane_angle(atom, neighbors, partner)
+        np.testing.assert_allclose(result, [0.0, np.pi / 2], atol=1e-6)
 
 
 @pytest.mark.parametrize("use_resonance", [False, True])

@@ -630,16 +630,14 @@ def _get_neighbor_pos(
     return neighbor_coord
 
 
-def _out_of_plane_sin(
+def _out_of_plane_angle(
     atom_coords: NDArray[np.floating],
     neighbor_coords: NDArray[np.floating],
     partner_coords: NDArray[np.floating],
 ) -> NDArray[np.floating]:
     """
-    Compute sin(out-of-plane angle) of the partner w.r.t. the plane defined by an atom
-    and its first two neighbors.
-
-    Returns 0 when the partner lies exactly in the plane and 1 when perpendicular.
+    Compute the out-of-plane angle (in radians) of the partner w.r.t. the plane
+    defined by an atom and its first two neighbors.
 
     Parameters
     ----------
@@ -647,6 +645,12 @@ def _out_of_plane_sin(
     neighbor_coords : ndarray, shape=(n, max_bonds, 3)
         At least 2 valid neighbors per row are required.
     partner_coords : ndarray, shape=(n, 3)
+
+    Returns
+    -------
+    angles : ndarray, shape=(n,), dtype=float
+        The out-of-plane angle in radians for each atom.
+        Ranges from 0 (partner in the plane) to π/2 (partner perpendicular).
     """
     v1 = neighbor_coords[:, 0] - atom_coords
     v2 = neighbor_coords[:, 1] - atom_coords
@@ -658,7 +662,8 @@ def _out_of_plane_sin(
     vp_len = np.linalg.norm(vp, axis=1, keepdims=True)
     vp = vp / np.where(vp_len > 1e-8, vp_len, 1.0)
 
-    return np.abs(np.sum(vp * normal, axis=1))
+    sin_angle = np.abs(np.sum(vp * normal, axis=1))
+    return np.arcsin(np.clip(sin_angle, 0.0, 1.0))
 
 
 def _check_local_geometry(
@@ -690,11 +695,14 @@ def _check_local_geometry(
       perpendicular to the SP2 plane even if individual angles happen to
       pass.
 
-    * *1 neighbor* (e.g. backbone C=O):
+    * *1 neighbor* (e.g. backbone C=O, aniline N):
       The two SP2 lone pairs are symmetric about the bond axis, so the
       partner may approach from *either* lone-pair direction.  Instead of
       the strict ±tolerance window around 120°, the accepted range is
-      widened to [ideal − tolerance, 180°].
+      widened to [ideal − tolerance, 180°].  When the single neighbor is
+      also SP2 (e.g. carbonyl C), its bonds define the SP2 plane and an
+      additional in-plane check is applied.  This is skipped when the
+      neighbor is non-planar (e.g. sulfonyl S=O where S is SP3).
 
     **SP3 (tetrahedral):**
 
@@ -780,23 +788,53 @@ def _check_local_geometry(
     )
 
     # ---- Step 2a: SP2, 1 neighbor — accept both lone-pair directions ----
-    # E.g. backbone C=O: lone pairs at ±120° from C=O axis.  With one
-    # neighbor the unsigned angle cannot distinguish the two sides, so we
-    # accept anything in [ideal − tol, 180°] (overrides the strict angle
-    # check from step 1).
+    # E.g. backbone C=O acceptor or aniline N donor (implicit H's):
+    # lone pairs / implicit H's at ±120° from the bond axis.  With one
+    # heavy neighbor the unsigned angle cannot distinguish the two sides,
+    # so we accept anything in [ideal − tol, 180°] (overrides the strict
+    # angle check from step 1).
+    # When the single neighbor is also SP2 (e.g. carbonyl C, aromatic C),
+    # its bonds define the SP2 plane and we additionally require in-plane
+    # approach.
+    # This does not apply when the neighbor is non-planar (e.g. sulfonyl
+    # S=O where S is SP3).
     sp2 = hybridizations == HybridizationType.SP2  # type: ignore[attr-defined]
     sp2_single = sp2 & (n_neighbors == 1)
     if np.any(sp2_single):
         idx = np.where(sp2_single)[0]
         angles = struc.angle(
-            neighbor_coords[idx, 0], atom_coords[idx], partner_coords[idx],
+            neighbor_coords[idx, 0],
+            atom_coords[idx],
+            partner_coords[idx],
         )
-        ref = (
-            ideal_angle[idx]
-            if isinstance(ideal_angle, np.ndarray)
-            else ideal_angle
-        )
+        ref = ideal_angle[idx] if isinstance(ideal_angle, np.ndarray) else ideal_angle
         is_ok[sp2_single] = angles >= (ref - tolerance)
+
+        # Planarity check via the neighbor's bonding environment, only
+        # when the neighbor is SP2 (planar) so its bonds define the plane.
+        nbr_atom_idx = neighbor_indices[idx, 0]
+        nbr_is_sp2 = np.array([
+            mol.GetAtomWithIdx(int(i)).GetHybridization()
+            == HybridizationType.SP2  # type: ignore[attr-defined]
+            for i in nbr_atom_idx
+        ])
+        nbr_bonds = all_bonds[nbr_atom_idx]
+        atom_self_idx = atom_indices[idx]
+        valid = (nbr_bonds != -1) & (nbr_bonds != atom_self_idx[:, None])
+        has_plane_ref = nbr_is_sp2 & valid.any(axis=1)
+        if np.any(has_plane_ref):
+            hp = np.where(has_plane_ref)[0]
+            first_col = np.argmax(valid[hp], axis=1)
+            nbr2 = nbr_bonds[hp][np.arange(len(hp)), first_col]
+            plane_nb = np.stack(
+                [atoms.coord[nbr_atom_idx[hp]], atoms.coord[nbr2]], axis=1
+            )
+            oop = _out_of_plane_angle(
+                atom_coords[idx[hp]], plane_nb, partner_coords[idx[hp]]
+            )
+            sp2_single_plane = np.zeros(n_contacts, dtype=bool)
+            sp2_single_plane[idx[hp]] = True
+            is_ok[sp2_single_plane] &= oop <= tolerance
 
     # ---- Step 2b: SP2, ≥ 2 neighbors — require in-plane approach ----
     # The lone pairs of an SP2 atom lie in the plane of its neighbors.
@@ -805,8 +843,10 @@ def _check_local_geometry(
     sp2_multi = sp2 & (n_neighbors >= 2)
     if np.any(sp2_multi):
         idx = np.where(sp2_multi)[0]
-        oop = _out_of_plane_sin(atom_coords[idx], neighbor_coords[idx], partner_coords[idx])
-        is_ok[sp2_multi] &= oop <= np.sin(tolerance)
+        oop = _out_of_plane_angle(
+            atom_coords[idx], neighbor_coords[idx], partner_coords[idx]
+        )
+        is_ok[sp2_multi] &= oop <= tolerance
 
     # ---- Step 3: SP3, 2 neighbors — require out-of-plane approach ----
     # Two neighbors define a plane through the atom.  The two lone pairs
@@ -817,8 +857,12 @@ def _check_local_geometry(
     sp3_two = sp3 & (n_neighbors == 2)
     if np.any(sp3_two):
         idx = np.where(sp3_two)[0]
-        oop = _out_of_plane_sin(atom_coords[idx], neighbor_coords[idx], partner_coords[idx])
-        is_ok[sp3_two] &= oop >= np.sin(np.deg2rad(30))
+        oop = _out_of_plane_angle(
+            atom_coords[idx], neighbor_coords[idx], partner_coords[idx]
+        )
+        # Ideal out-of-plane angle for SP3 with 2 neighbors is ~54.7°
+        ideal_oop_sp3 = np.arcsin(np.sqrt(2 / 3))
+        is_ok[sp3_two] &= oop >= (ideal_oop_sp3 - tolerance)
 
     return is_ok
 
