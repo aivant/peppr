@@ -270,11 +270,11 @@ class TestCheckLocalGeometry:
         lone pairs and should be accepted.  The old single-angle check
         rejected this at 120°±30°.
         """
-        O = [0.0, 0.0, 0.0]
+        acceptor = [0.0, 0.0, 0.0]
         C = [1.23, 0.0, 0.0]  # carbonyl C
         angle_rad = np.deg2rad(160)
         N = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
-        atoms = _make_atom_array([O, C], ["O", "C"], [(0, 1)])
+        atoms = _make_atom_array([acceptor, C], ["O", "C"], [(0, 1)])
         mol = _make_mol("O", AllChem.HybridizationType.SP2, 1)
         assert _check_local_geometry(
             atoms, mol, np.array([0]), np.array([N]), None, self.TOLERANCE
@@ -285,11 +285,11 @@ class TestCheckLocalGeometry:
         SP2 with 1 neighbor: a partner at 80° (below ideal − tolerance = 90°)
         should be rejected.
         """
-        O = [0.0, 0.0, 0.0]
+        acceptor = [0.0, 0.0, 0.0]
         C = [1.23, 0.0, 0.0]
         angle_rad = np.deg2rad(80)
         N = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
-        atoms = _make_atom_array([O, C], ["O", "C"], [(0, 1)])
+        atoms = _make_atom_array([acceptor, C], ["O", "C"], [(0, 1)])
         mol = _make_mol("O", AllChem.HybridizationType.SP2, 1)
         assert not _check_local_geometry(
             atoms, mol, np.array([0]), np.array([N]), None, self.TOLERANCE

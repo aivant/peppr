@@ -813,11 +813,12 @@ def _check_local_geometry(
         # Planarity check via the neighbor's bonding environment, only
         # when the neighbor is SP2 (planar) so its bonds define the plane.
         nbr_atom_idx = neighbor_indices[idx, 0]
-        nbr_is_sp2 = np.array([
-            mol.GetAtomWithIdx(int(i)).GetHybridization()
-            == HybridizationType.SP2  # type: ignore[attr-defined]
-            for i in nbr_atom_idx
-        ])
+        nbr_is_sp2 = np.array(
+            [
+                mol.GetAtomWithIdx(int(i)).GetHybridization() == HybridizationType.SP2  # type: ignore[attr-defined]
+                for i in nbr_atom_idx
+            ]
+        )
         nbr_bonds = all_bonds[nbr_atom_idx]
         atom_self_idx = atom_indices[idx]
         valid = (nbr_bonds != -1) & (nbr_bonds != atom_self_idx[:, None])
