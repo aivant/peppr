@@ -181,9 +181,6 @@ def _superimpose_binding_site(
         )
     else:
         # Use all interface backbone atoms as superimposition anchor
-        # Note: receptor_contacts contains residue start indices (atom indices),
-        # not residue IDs (see get_contact_residues docstring), so we must use
-        # get_residue_masks() rather than comparing against res_id
         interface_mask = struc.get_residue_masks(
             reference_receptor, receptor_contacts
         ).any(axis=0) & np.isin(reference_receptor.atom_name, _BACKBONE_ATOMS)
