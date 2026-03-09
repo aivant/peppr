@@ -9,8 +9,8 @@ import biotite.structure.info as info
 DONOR_PATTERN = (
     "["
     "$([Nv3!H0,Nv4!H0+1,nH1]),"
-    # Guanidine can be tautomeric - e.g. Arginine
-    "$([NX3,NX2]([!O,!S])!@C(!@[NX3,NX2]([!O,!S]))!@[NX3,NX2]([!O,!S])),"
+    # Guanidine can be tautomeric - e.g. Arginine; redundant if use_tautomer=True
+    "$([Nv3,Nv4;!$(N~[!#6;!#1])]!@C(!@[Nv3,Nv4;!$(N~[!#6;!#1])])!@[Nv3,Nv4;!$(N~[!#6;!#1])]),"
     "$([O,S;!H0])"
     "]"
 )
@@ -25,11 +25,11 @@ ACCEPTOR_PATTERN = (
     # also include neutral aromatic oxygen and sulfur
     "$([s,o;+0]),"
     # Nitrogens
-    # aromatic unprotonated nitrogens (not trivalent connectivity?)
+    # aromatic unprotonated nitrogens (not trigonal connectivity)
     "$([nH0+0;!X3]),"
     # nitrile
-    "$([ND1H0;$(N#[Cv4])]),"
-    # unprotonated nitrogen next to aromatic ring
+    "$([Nd1H0;$(N#[Cv4])]),"
+    # unprotonated nitrogen next to aromatic ring; note: ideal_angle 90 deg; not 120!
     "$([Nv3H0;$(N-c)]),"
     # Fluorine on aromatic ring, only
     "$([F;$(F-[#6]);!$(FC[F,Cl,Br,I])])"

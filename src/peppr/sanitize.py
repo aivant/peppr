@@ -127,7 +127,8 @@ def _fix_problem(mol: Chem.Mol, problem: Exception) -> None:
         possible_nHs = []
         for atidx in problem_indices:
             at = mol.GetAtomWithIdx(atidx)
-            if at.GetSymbol() == "N" and at.GetDegree() == 2:
+            num_heavy_neighbors = at.GetTotalDegree() - at.GetTotalNumHs()
+            if at.GetSymbol() == "N" and num_heavy_neighbors == 2:
                 original_nH_state.append(at.GetNumExplicitHs())
                 original_charge_state.append(at.GetFormalCharge())
                 possible_nHs.append(at)
