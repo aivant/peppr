@@ -5,7 +5,6 @@ __all__ = [
     "get_interchangeable_tautomers",
 ]
 
-import copy
 from enum import IntEnum
 import biotite.interface.rdkit as rdkit_interface
 import biotite.structure as struc
@@ -22,6 +21,9 @@ HybridizationType = IntEnum(  # type: ignore[misc]
     "HybridizationType",
     [(member.name, value) for value, member in Chem.HybridizationType.values.items()],
 )
+
+_ORIG_IDX = "_origIdx"
+_ORIG_NUM_HEAVY_NEIGHS = "_origNumHeavyNeighs"
 
 _ANGLES_FOR_HYBRIDIZATION = np.zeros(len(HybridizationType), dtype=float)
 _ANGLES_FOR_HYBRIDIZATION[HybridizationType.UNSPECIFIED] = np.nan  # type: ignore[attr-defined]
@@ -42,7 +44,7 @@ class ContactMeasurement:
     This class allows measurements of receptor-ligand contacts of specific types
     (e.g. hydrogen bonds) by using *SMARTS* patterns.
 
-    The actual measurement is performed by calling :func:`find_contacts_by_pattern()`.
+    The actual measurement is performed by calling :meth:`find_contacts_by_pattern()`.
 
     Parameters
     ----------
@@ -57,6 +59,10 @@ class ContactMeasurement:
     ph : float, optional
         The pH of the environment.
         By default a physiological pH value is used [1]_.
+    use_resonance : bool, optional
+        If ``True``, not only explicitly charged atoms in the input receptor and
+        ligand are checked, but also charged atoms that appear in their resonance
+        structures.
     use_tautomers : bool = True, optional
         If ``use_tautomers`` is ``True``, the input receptor and ligand are
         expanded to include their tautomeric forms.
@@ -70,6 +76,19 @@ class ContactMeasurement:
     to avoid edge effect, additional buffer of ~1.5 Å is recommended to avoid
     artificial interactions with *ionized ends*.
 
+    Notes
+    -----
+    Checking resonance structures is desirable in most cases. For example, in
+    a carboxyl group the charged oxygen atom might not be within the threshold
+    distance of another positively charged atom, but the other oxygen atom in
+    the group might be. When ``use_resonance=True``, both oxygen atoms are checked.
+
+    Similarly, tautomer enumeration is desirable for heavy-atom-only structures,
+    where the proton position is unknown. For example, a histidine side chain
+    can donate or accept a hydrogen bond at either nitrogen, depending on its
+    tautomeric form. When ``use_tautomers=True``, all interchangeable tautomeric
+    forms are considered when matching SMARTS patterns.
+
     References
     ----------
     .. [1] https://www.ncbi.nlm.nih.gov/books/NBK507807/
@@ -81,6 +100,7 @@ class ContactMeasurement:
         ligand: struc.AtomArray,
         cutoff: float = 8.0,  # smaller not recommended for charged interactions
         ph: float = 7.4,
+        use_resonance: bool = True,
         use_tautomers: bool = True,
     ):
         if np.any(receptor.element == "H") or np.any(ligand.element == "H"):
@@ -118,10 +138,10 @@ class ContactMeasurement:
             self._ligand.set_annotation(
                 "charge", estimate_formal_charges(self._ligand, ph)
             )
-        except Exception:
+        except Exception as e:
             raise struc.BadStructureError(
                 "A valid molecule is required for charge estimation"
-            )
+            ) from e
 
         # Convert to 'Mol' object to allow for matching SMARTS patterns
         self._binding_site_mol = rdkit_interface.to_mol(self._binding_site)
@@ -129,14 +149,22 @@ class ContactMeasurement:
         # For matching some SMARTS strings a properly sanitized molecule is required
         sanitize(self._binding_site_mol)
         sanitize(self._ligand_mol)
+        self.use_resonance = use_resonance
         self.use_tautomers = use_tautomers
-        if self.use_tautomers:
-            self._binding_site_tautomers = _get_interchangeable_tautomeric_fragments(
-                self._binding_site_mol
-            )
-            self._ligand_tautomers = _get_interchangeable_tautomeric_fragments(
-                self._ligand_mol
-            )
+        if self.use_resonance or self.use_tautomers:
+            self._binding_site_residue_map = ResidueMap(self._binding_site_mol)
+            self._ligand_residue_map = ResidueMap(self._ligand_mol)
+        if self.use_resonance:
+            (
+                self._binding_site_pos_mask,
+                self._binding_site_neg_mask,
+                self._binding_site_conjugated_groups,
+            ) = self._binding_site_residue_map.get_resonance_charges()
+            (
+                self._ligand_pos_mask,
+                self._ligand_neg_mask,
+                self._ligand_conjugated_groups,
+            ) = self._ligand_residue_map.get_resonance_charges()
 
     def find_contacts_by_pattern(
         self,
@@ -196,11 +224,13 @@ class ContactMeasurement:
         a group of two carbon atoms.
         """
         if self.use_tautomers:
-            matched_receptor_indices = _find_atoms_in_tautomeric_fragments(
-                self._binding_site_tautomers, receptor_pattern
+            matched_receptor_indices = (
+                self._binding_site_residue_map.find_tautomer_atoms_by_pattern(
+                    receptor_pattern
+                )
             )
-            matched_ligand_indices = _find_atoms_in_tautomeric_fragments(
-                self._ligand_tautomers, ligand_pattern
+            matched_ligand_indices = (
+                self._ligand_residue_map.find_tautomer_atoms_by_pattern(ligand_pattern)
             )
         else:
             matched_receptor_indices = find_atoms_by_pattern(
@@ -281,7 +311,6 @@ class ContactMeasurement:
     def find_salt_bridges(
         self,
         threshold: float = 4.0,
-        use_resonance: bool = True,
     ) -> NDArray[np.int_]:
         """
         Find salt bridges between the receptor and ligand atoms.
@@ -295,12 +324,6 @@ class ContactMeasurement:
             The maximum distance between two charged atoms to consider them as a salt
             bridge.
             Note that this is also constrained by the given `cutoff` in the constructor.
-        use_resonance : bool, optional
-            If ``True``, not only explicitly charged atoms in the input receptor and
-            ligand are checked, but also charged atoms that appear in their resonance
-            structures.
-            However, if multiple atoms from the same conjugated group form the same
-            salt bridge, only one of them is kept.
 
         Returns
         -------
@@ -315,19 +338,13 @@ class ContactMeasurement:
         For example in a carboxyl group the charged oxygen atom might not be within the
         threshold distance of another positively charged atom, but the other oxygen atom
         in the group might be.
-        When ``use_resonance=True``, Both oxygen atoms would be checked.
+        When ``ContactMeasurement.use_resonance=True``, both oxygen atoms are checked.
         """
-        if use_resonance:
-            pos_mask, neg_mask, binding_site_conjugated_groups = find_resonance_charges(
-                self._binding_site_mol
-            )
-            binding_site_pos_indices = np.where(pos_mask)[0]
-            binding_site_neg_indices = np.where(neg_mask)[0]
-            pos_mask, neg_mask, ligand_conjugated_groups = find_resonance_charges(
-                self._ligand_mol
-            )
-            ligand_pos_indices = np.where(pos_mask)[0]
-            ligand_neg_indices = np.where(neg_mask)[0]
+        if self.use_resonance:
+            binding_site_pos_indices = np.where(self._binding_site_pos_mask)[0]
+            binding_site_neg_indices = np.where(self._binding_site_neg_mask)[0]
+            ligand_pos_indices = np.where(self._ligand_pos_mask)[0]
+            ligand_neg_indices = np.where(self._ligand_neg_mask)[0]
         else:
             ligand_pos_indices = np.where(self._ligand.charge > 0)[0]
             ligand_neg_indices = np.where(self._ligand.charge < 0)[0]
@@ -359,10 +376,12 @@ class ContactMeasurement:
         # Combine the indices of both cases
         bridge_indices = np.concatenate(bridge_indices, axis=-1).T
 
-        if use_resonance:
+        if self.use_resonance:
             # Remove duplicate bridges that originate from the same conjugated group
-            binding_site_groups = binding_site_conjugated_groups[bridge_indices[:, 0]]
-            ligand_groups = ligand_conjugated_groups[bridge_indices[:, 1]]
+            binding_site_groups = self._binding_site_conjugated_groups[
+                bridge_indices[:, 0]
+            ]
+            ligand_groups = self._ligand_conjugated_groups[bridge_indices[:, 1]]
             _, unique_indices = np.unique(
                 np.stack((binding_site_groups, ligand_groups), axis=1),
                 axis=0,
@@ -408,16 +427,15 @@ class ContactMeasurement:
         )
 
         return [
-            self._map_stacking_indices(combined_atoms, indices_1, indices_2, kind)
+            self._map_stacking_indices(indices_1, indices_2, kind)
             for indices_1, indices_2, kind in all_interactions
             # filter out intra polymer and intra ligand interactions
-            if combined_atoms.hetero[indices_1[0]]
-            != combined_atoms.hetero[indices_2[0]]
+            if (indices_1[0] >= len(self._binding_site))
+            != (indices_2[0] >= len(self._binding_site))
         ]
 
     def _map_stacking_indices(
         self,
-        combined_atoms: struc.AtomArray,
         indices_1: NDArray[np.int_],
         indices_2: NDArray[np.int_],
         kind: struc.PiStacking,
@@ -425,7 +443,7 @@ class ContactMeasurement:
         """Map combined structure indices back to original receptor and ligand."""
         # Sort to ensure polymer indices comes first then ligand
         polymer_idx, ligand_idx = sorted(
-            [indices_1, indices_2], key=lambda idx: combined_atoms.hetero[idx[0]]
+            [indices_1, indices_2], key=lambda idx: idx[0] >= len(self._binding_site)
         )
 
         return (
@@ -465,17 +483,47 @@ class ContactMeasurement:
             receptor molecules and ``False`` otherwise.
         """
         combined_atoms = self._binding_site + self._ligand
+        if self.use_resonance:
+            # consider all positively charged atoms in resonance
+            pos_mask = np.concatenate(
+                [self._binding_site_pos_mask, self._ligand_pos_mask], axis=0
+            )
+            # for this function is enough to consider just positive atoms
+            combined_atoms.charge = pos_mask.astype(int)
         binding_site_size = len(self._binding_site)
         all_interactions = struc.find_pi_cation_interactions(
             combined_atoms, distance_cutoff, angle_tol
         )
+        cross_interactions = [
+            (ring_indices, cation_index)
+            for ring_indices, cation_index in all_interactions
+            # filter out intra polymer and intra ligand interactions
+            if (ring_indices[0] >= binding_site_size)
+            != (cation_index >= binding_site_size)
+        ]
+
+        if self.use_resonance and cross_interactions:
+            # Remove duplicate interactions where cations from the same
+            # conjugated group interact with the same ring
+            conjugated_groups = np.concatenate(
+                [
+                    self._binding_site_conjugated_groups,
+                    self._ligand_conjugated_groups,
+                ]
+            )
+            # use the first ring atom index in place of unique ring id
+            ring_starts = np.array([ri[0] for ri, _ in cross_interactions])
+            cation_groups = conjugated_groups[[ci for _, ci in cross_interactions]]
+            _, unique_indices = np.unique(
+                np.stack((ring_starts, cation_groups), axis=1),
+                axis=0,
+                return_index=True,
+            )
+            cross_interactions = [cross_interactions[i] for i in unique_indices]
 
         return [
             self._map_pi_cation_indices(ring_indices, cation_index)
-            for ring_indices, cation_index in all_interactions
-            #  filter out intra polymer and intra ligand interactions
-            if (ring_indices[0] >= binding_site_size)
-            != (cation_index >= binding_site_size)
+            for ring_indices, cation_index in cross_interactions
         ]
 
     def _map_pi_cation_indices(
@@ -593,10 +641,10 @@ def _get_angle_to_lone_electron_pair(
 
 
 def _acceptable_angle(
-    angle: float,
-    ref_angle: float,
+    angle: NDArray[np.floating] | float,
+    ref_angle: NDArray[np.floating] | float,
     tolerance: float,
-) -> bool:
+) -> NDArray[np.bool_] | bool:
     """
     Check if a given angle is within a certain tolerance of the ideal angle.
     The angle is given in radians.
@@ -615,7 +663,165 @@ def _acceptable_angle(
     is_acceptable : bool
         If the angle is within the tolerance of the ideal angle.
     """
-    return abs(angle - ref_angle) <= tolerance
+    return abs(angle - ref_angle) <= tolerance  # type: ignore[operator]
+
+
+class ResidueMap:
+    """
+    Per-residue split of a molecule with methods for resonance and
+    tautomer analysis.
+
+    For performance reasons the input `Mol` is split into individual
+    residues.
+    Therefore no cross-residue resonance or tautomeric interaction
+    can be detected, i.e. conjugation and proton transfer do not cross
+    peptide bonds.
+
+    Parameters
+    ----------
+    mol : Chem.Mol
+        The molecule to split by PDB/mmCIF residue names.
+
+    Notes
+    -----
+    Splitting a molecule at inter-residue bonds creates artificial
+    fragment termini. The lost heavy-atom neighbors get perceived as
+    phantom implicit hydrogens to satisfy valence (e.g. PRO backbone N
+    goes from three heavy-atom bonds to two, picking up an implicit H
+    that was never present in the intact molecule).
+
+    To detect these artifacts, the original heavy-atom neighbor count
+    (``_origNumHeavyNeighs = totalDegree - totalHs``) is recorded on
+    every atom *before* splitting. In
+    :meth:`find_tautomer_atoms_by_pattern`, any match on an atom whose
+    current heavy-neighbor count is below the recorded value *and* that
+    carries exactly one hydrogen is discarded as a false positive.
+    """
+
+    def __init__(self, mol: Chem.Mol) -> None:
+        self._n_atoms = mol.GetNumAtoms()
+        mol = Chem.RWMol(mol)  # avoid mutating the caller's molecule
+
+        # Record original index and heavy-atom neighbor count before
+        # splitting, so downstream code can detect phantom Hs.
+        for i in range(self._n_atoms):
+            atom = mol.GetAtomWithIdx(i)
+            atom.SetIntProp(_ORIG_IDX, i)
+            atom.SetIntProp(
+                _ORIG_NUM_HEAVY_NEIGHS,
+                atom.GetTotalDegree() - atom.GetTotalNumHs(),
+            )
+
+        # Two-level split: by res name, then into individual instances
+        residues = Chem.rdmolops.SplitMolByPDBResidues(mol)
+
+        self._instances: list[Chem.Mol] = []
+        self._index_maps: list[NDArray[np.int_]] = []
+        for group in residues.values():
+            for instance in Chem.rdmolops.GetMolFrags(group, asMols=True):
+                idx_map = np.array(
+                    [
+                        instance.GetAtomWithIdx(i).GetIntProp(_ORIG_IDX)
+                        for i in range(instance.GetNumAtoms())
+                    ],
+                    dtype=int,
+                )
+                self._index_maps.append(idx_map)
+                sanitize(instance)
+                self._instances.append(instance)
+
+        # define a placeholder for tautomers
+        self._tautomers: list[list[Chem.Mol]] | None = None
+
+    def get_resonance_charges(
+        self,
+    ) -> tuple[NDArray[np.bool_], NDArray[np.bool_], NDArray[np.int_]]:
+        """
+        Compute resonance charges per residue and assemble into
+        molecule-wide arrays.
+
+        Returns
+        -------
+        pos_mask : ndarray, shape=(n,), dtype=bool
+            Mask of positively charged atoms across all resonance
+            forms.
+        neg_mask : ndarray, shape=(n,), dtype=bool
+            Mask of negatively charged atoms across all resonance
+            forms.
+        conjugated_groups : ndarray, shape=(n,), dtype=int
+            Conjugated group id for each atom. Atoms in the same
+            group share a single delocalised charge.
+        """
+        pos_mask = np.zeros(self._n_atoms, dtype=bool)
+        neg_mask = np.zeros(self._n_atoms, dtype=bool)
+        conjugated_groups = np.full(self._n_atoms, -1, dtype=int)
+        group_offset = 0
+
+        for instance, idx_map in zip(self._instances, self._index_maps):
+            pos, neg, groups = find_resonance_charges(instance)
+            pos_mask[idx_map] |= pos
+            neg_mask[idx_map] |= neg
+            conjugated_groups[idx_map] = groups + group_offset
+            group_offset = conjugated_groups.max() + 1
+
+        return pos_mask, neg_mask, conjugated_groups
+
+    def _ensure_tautomers(self) -> None:
+        """Lazily enumerate tautomers (once per unique SMILES)."""
+        if self._tautomers is not None:
+            # do not repeat if done already
+            return
+
+        # cache is local to this function
+        cache: dict[str, list[Chem.Mol]] = {}
+        self._tautomers = []
+        for instance in self._instances:
+            key = Chem.MolToSmiles(instance)  # type: ignore[attr-defined]
+            if key not in cache:
+                cache[key] = get_interchangeable_tautomers(instance)
+            self._tautomers.append(cache[key])
+
+    def find_tautomer_atoms_by_pattern(self, pattern: str) -> NDArray[np.int_]:
+        """
+        Find atoms matching a SMARTS pattern across all tautomeric
+        forms of each residue instance, mapped back to the original
+        molecule's atom indices.
+
+        Atoms that lost a heavy-atom neighbor during splitting and
+        carry exactly one hydrogen are excluded, as that hydrogen is
+        a phantom artifact of the lost bond (e.g. PRO backbone N
+        gaining an implicit H after losing the peptide bond).
+
+        Parameters
+        ----------
+        pattern : str
+            The SMARTS pattern to match against.
+
+        Returns
+        -------
+        np.ndarray, shape=(n,), dtype=int
+            Sorted atom indices (in the original molecule) that match
+            the pattern in any tautomeric form.
+        """
+        self._ensure_tautomers()
+        matches: set[np.int_] = set()
+        for tautomers, idx_map in zip(self._tautomers, self._index_maps):
+            for tautomer in tautomers:
+                local_hits = find_atoms_by_pattern(tautomer, pattern)
+                for hit in local_hits:
+                    atom = tautomer.GetAtomWithIdx(int(hit))
+                    # Skip false-positive donors: atoms that lost a
+                    # heavy neighbor during splitting and have exactly
+                    # 1 H (the phantom H replacing the lost bond).
+                    if (
+                        atom.HasProp(_ORIG_NUM_HEAVY_NEIGHS)
+                        and atom.GetTotalNumHs() == 1
+                        and (atom.GetTotalDegree() - atom.GetTotalNumHs())
+                        < atom.GetIntProp(_ORIG_NUM_HEAVY_NEIGHS)
+                    ):
+                        continue
+                    matches.add(idx_map[hit])
+        return np.array(np.sort(list(matches)), dtype=int).flatten()
 
 
 def find_resonance_charges(
@@ -641,9 +847,20 @@ def find_resonance_charges(
         Atoms from the same group are denoted by the same integer.
         This means that a single charge may appear multiple times in `pos_mask` or
         `neg_mask`, as the corresponding atoms are part of the same conjugated group.
+
+    Warnings
+    --------
+    RDKit's ResonanceMolSupplier only shuffles existing formal charges through
+    conjugated systems. It does not generate zwitterionic/charge-separated
+    resonance forms from neutral species.
     """
     pos_mask = np.zeros(mol.GetNumAtoms(), dtype=bool)
     neg_mask = np.zeros(mol.GetNumAtoms(), dtype=bool)
+    if not any(atom.GetFormalCharge() != 0 for atom in mol.GetAtoms()):
+        # if no charges present - no need to look for resonance
+        conjugated_groups = np.full(mol.GetNumAtoms(), -1, dtype=int)
+        return pos_mask, neg_mask, conjugated_groups
+
     resonance_supplier = Chem.ResonanceMolSupplier(mol)
     for resonance_mol in resonance_supplier:
         if resonance_mol is None:
@@ -654,18 +871,10 @@ def find_resonance_charges(
                 pos_mask[i] = True
             elif charge < 0:
                 neg_mask[i] = True
-    try:
-        conjugated_groups = np.array(
-            [resonance_supplier.GetAtomConjGrpIdx(i) for i in range(mol.GetNumAtoms())],
-            dtype=int,
-        )
-    except RuntimeError:
-        # This is a bug in RDKit, that happens if the molecule has no bonds at all
-        # (https://github.com/rdkit/rdkit/issues/8638)
-        conjugated_groups = np.full(mol.GetNumAtoms(), -1, dtype=int)
-    # Fix the 'integer underflow issue' for -1 values
-    # (https://github.com/rdkit/rdkit/issues/7112)
-    conjugated_groups[conjugated_groups == 2**32 - 1] = -1
+    conjugated_groups = np.array(
+        [resonance_supplier.GetAtomConjGrpIdx(i) for i in range(mol.GetNumAtoms())],
+        dtype=int,
+    )
     # Assign each non-conjugated atom to a unique group
     non_conjugated_mask = conjugated_groups == -1
     # Handle edge case that the given molecule has no atoms
@@ -705,12 +914,13 @@ def get_interchangeable_tautomers(mol: Chem.Mol) -> list[Chem.Mol]:
     this function on molecule fragments to improve efficiency.
     """
     tautomerator = rdMolStandardize.TautomerEnumerator()
-    # make copy of the original molecule to avoid modifying input
-    mol = copy.deepcopy(mol)
+    # make an editable copy of the original molecule to avoid modifying input
+    mol = Chem.RWMol(mol)
     # keep original hybridization - this should not change!
     orig_hybridization = np.array([at.GetHybridization() for at in mol.GetAtoms()])
     # add labels to break symmetry to force consider symmetric tautomers as unique
-    [at.SetAtomMapNum(i + 1) for i, at in enumerate(mol.GetAtoms())]
+    for i, at in enumerate(mol.GetAtoms()):
+        at.SetAtomMapNum(i + 1)
     tauts = np.array(tautomerator.Enumerate(mol))
     # find the best tautomers according to the RDKit scoring function and only keep those
     # that are on par or better than the input form
@@ -725,59 +935,7 @@ def get_interchangeable_tautomers(mol: Chem.Mol) -> list[Chem.Mol]:
             == orig_hybridization
         ).all():
             # remove labels for the returned tautomers
-            [at.SetAtomMapNum(0) for at in tmol.GetAtoms()]
+            for at in tmol.GetAtoms():
+                at.SetAtomMapNum(0)
             final_tautomers.append(tmol)
     return final_tautomers
-
-
-def _get_interchangeable_tautomeric_fragments(mol: Chem.Mol) -> list[list[Chem.Mol]]:
-    """
-    Wrapper of get_interchangeable_tautomers for getting tautomers for each
-    fragment found in the bigger molecule. Intended for protein cutouts.
-    Returns list of fragments in arrays of explicit tautomeric forms.
-
-    Parameters
-    ----------
-    mol : Chem.Mol
-        The molecule to find the tautomeric forms for each fragment
-
-    Returns
-    -------
-    list[list[Chem.Mol]]
-        List of fragments further listed into their tautomeric forms
-    """
-    mols_to_tautomers = []
-    for frag in Chem.rdmolops.GetMolFrags(mol, asMols=True):
-        mols_to_tautomers.append(get_interchangeable_tautomers(frag))
-    return mols_to_tautomers
-
-
-def _find_atoms_in_tautomeric_fragments(
-    frag_tautomers: list[list[Chem.Mol]], pattern: str
-) -> NDArray[np.int_]:
-    """
-    Wrapper of find_atoms_by_pattern that works on explicitly listed tautomeric
-    arrays for each fragment in the bigger. Intended to speed up pattern search
-    for proteins, making it more exhaustive.
-
-    Parameters
-    ----------
-    frag_tautomers : list[list[Chem.Mol]
-        List of molecular fragment's list of tautomeric forms
-    pattern : str
-        The SMARTS pattern to match against.
-
-    Returns
-    -------
-    np.ndarray, shape=(n,), dtype=int
-        The atom indices that fulfill the given SMARTS pattern.
-    """
-    matches: set[np.int_] = set()
-
-    frag_atom_offset = 0
-    for frag in frag_tautomers:
-        for tautomer in frag:
-            matches |= set(find_atoms_by_pattern(tautomer, pattern) + frag_atom_offset)
-        frag_atom_offset += tautomer.GetNumAtoms()
-    # match the output of ``find_atoms_by_pattern``
-    return np.array(np.sort(list(matches)), dtype=int).flatten()

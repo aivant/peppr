@@ -213,8 +213,10 @@ def test_salt_bridge_identification(
                 )
 
     # Use a slightly lower pH value to force protonation of the histidine side chain
-    contact_measurement = peppr.ContactMeasurement(receptor, ligand, cutoff=4.0, ph=6.0)
-    test_contacts = contact_measurement.find_salt_bridges(use_resonance=use_resonance)
+    contact_measurement = peppr.ContactMeasurement(
+        receptor, ligand, cutoff=4.0, ph=6.0, use_resonance=use_resonance
+    )
+    test_contacts = contact_measurement.find_salt_bridges()
 
     if use_resonance:
         # the expected use should recover all expected contacts
@@ -232,28 +234,144 @@ def test_salt_bridge_identification(
         assert contact in possible_ref_contacts
 
 
-def test_find_stacking_interactions():
-    """Test π-stacking interaction detection between protein and ligand.
-    It uses pdb 1acj known to have stacking interactions between the protein and ligand."""
-
-    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "1acj.cif")
+@pytest.mark.parametrize("use_resonance", [True, False])
+@pytest.mark.parametrize("use_tautomers", [True, False])
+@pytest.mark.parametrize(
+    ["pdb_id", "valid_residues", "valid_ligands", "expected_kinds"],
+    [
+        ("1acj", {"TRP", "PHE"}, {"THA"}, {struc.PiStacking.PARALLEL}),
+        ("7gc7", {"HIS"}, {"L93"}, {struc.PiStacking.PERPENDICULAR}),
+    ],
+)
+def test_find_stacking_interactions(
+    pdb_id,
+    valid_residues,
+    valid_ligands,
+    expected_kinds,
+    use_resonance,
+    use_tautomers,
+):
+    """Test π-stacking interaction detection between protein and ligand."""
+    pdbx_file = pdbx.CIFFile.read(
+        Path(__file__).parent / "data" / "pdb" / f"{pdb_id}.cif"
+    )
     atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
     receptor = atoms[~atoms.hetero]
     ligand = atoms[atoms.hetero]
 
-    contact_measurement = peppr.ContactMeasurement(receptor, ligand)
+    contact_measurement = peppr.ContactMeasurement(
+        receptor,
+        ligand,
+        # skip resonance and tautomer enumeration when it is not needed
+        use_resonance=use_resonance,
+        use_tautomers=use_tautomers,
+    )
     interactions = contact_measurement.find_stacking_interactions()
     assert len(interactions) > 0
 
-    # assert interactions are between rings of Tryptophan and Phenylalanine residues with ligand THA
-    valid_residues = {"TRP", "PHE"}
-    for protein_indices, ligand_indices, _ in interactions:
+    for protein_indices, ligand_indices, kind in interactions:
         assert all(
             atom.res_name in valid_residues for atom in receptor[protein_indices]
         ), "Found interaction with unexpected residue"
-        assert all(atom.res_name == "THA" for atom in ligand[ligand_indices]), (
+        assert all(atom.res_name in valid_ligands for atom in ligand[ligand_indices]), (
             "Found interaction with unexpected ligand"
         )
+        assert kind in expected_kinds, (
+            f"Expected stacking kind in {expected_kinds}, got {kind}"
+        )
+
+
+@pytest.mark.parametrize("use_resonance", [True, False])
+def test_find_pi_cation_interactions(use_resonance):
+    """Test cation-π interaction detection between protein and ligand.
+
+    Uses PDB 2ack (acetylcholinesterase with edrophonium), which has known
+    cation-π interactions between the TRP 84 indole rings and the positively
+    charged EDR ligand.
+    """
+    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "2ack.cif")
+    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    atoms = peppr.standardize(atoms)
+    atoms = atoms[atoms.chain_id == struc.get_chains(atoms)[0]]
+    receptor = atoms[struc.filter_amino_acids(atoms) & ~atoms.hetero]
+    ligand = atoms[(atoms.res_name == "EDR") & atoms.hetero]
+
+    contact_measurement = peppr.ContactMeasurement(
+        receptor, ligand, use_resonance=use_resonance
+    )
+    interactions = contact_measurement.find_pi_cation_interactions()
+    assert len(interactions) == 2
+
+    # Both interactions are the 5- and 6-membered TRP 84 rings with the EDR cation
+    for receptor_indices, ligand_indices, cation_in_receptor in interactions:
+        assert set(receptor[receptor_indices].res_name) == {"TRP"}
+        assert set(receptor[receptor_indices].res_id) == {84}
+        assert set(ligand[ligand_indices].res_name) == {"EDR"}
+        # The cation is in the ligand (EDR), not the receptor
+        assert not cation_in_receptor
+
+
+def test_find_pi_cation_interactions_resonance():
+    """Test cation-π interaction detection in SLC19A3 with metformin.
+
+    Uses PDB 8Z7W (SLC19A3-Metformin outward structure). Metformin (MF8)
+    has a biguanide group with formal +1 charges on N08 and N05, but
+    neither is geometrically positioned above an aromatic ring. With
+    resonance, the positive charge delocalizes across all five nitrogens
+    in the conjugated system, including N02 which sits above the TYR 113
+    ring — enabling detection of one cation-π interaction.
+    """
+    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "8z7w.cif")
+    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    atoms = peppr.standardize(atoms)
+    atoms = atoms[atoms.chain_id == struc.get_chains(atoms)[0]]
+    receptor = atoms[struc.filter_amino_acids(atoms) & ~atoms.hetero]
+    ligand = atoms[(atoms.res_name == "MF8") & atoms.hetero]
+
+    # Without resonance: N08/N05 have formal charges but aren't above any ring
+    cm_no_res = peppr.ContactMeasurement(receptor, ligand, use_resonance=False)
+    assert len(cm_no_res.find_pi_cation_interactions()) == 0
+
+    # With resonance: cation-π interaction found
+    cm_res = peppr.ContactMeasurement(receptor, ligand, use_resonance=True)
+    interactions = cm_res.find_pi_cation_interactions()
+    assert len(interactions) == 1
+
+    receptor_indices, ligand_indices, cation_in_receptor = interactions[0]
+    assert set(receptor[receptor_indices].res_name) == {"TYR"}
+    assert set(receptor[receptor_indices].res_id) == {113}
+    assert set(ligand[ligand_indices].res_name) == {"MF8"}
+    assert not cation_in_receptor
+
+
+def test_find_salt_bridges_resonance():
+    """Test that resonance enables salt bridge detection in metformin (MF8).
+
+    Uses PDB 8Z7W (SLC19A3-Metformin). At a tight threshold of 3.0 Å,
+    without resonance no salt bridge is found: the formally charged OE2 of
+    GLU 110 is 3.48 Å from N08. With resonance the other carboxyl oxygen
+    OE1 (2.65 Å from N08) is also considered negatively charged, bringing
+    the bridge within threshold.
+    """
+    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "8z7w.cif")
+    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    atoms = peppr.standardize(atoms)
+    atoms = atoms[atoms.chain_id == struc.get_chains(atoms)[0]]
+    receptor = atoms[struc.filter_amino_acids(atoms) & ~atoms.hetero]
+    ligand = atoms[(atoms.res_name == "MF8") & atoms.hetero]
+
+    # Without resonance: no salt bridge at tight threshold
+    cm_no_res = peppr.ContactMeasurement(receptor, ligand, use_resonance=False)
+    assert len(cm_no_res.find_salt_bridges(threshold=3.0)) == 0
+
+    # With resonance: OE1 of GLU 110 is now also negative -> bridge found
+    cm_res = peppr.ContactMeasurement(receptor, ligand, use_resonance=True)
+    bridges = cm_res.find_salt_bridges(threshold=3.0)
+    assert len(bridges) == 1
+    receptor_i, ligand_i = bridges[0]
+    assert receptor.res_name[receptor_i] == "GLU"
+    assert int(receptor.res_id[receptor_i]) == 110
+    assert ligand.res_name[ligand_i] == "MF8"
 
 
 @pytest.mark.parametrize("use_tauts", [True, False])
@@ -464,9 +582,9 @@ def test_challenging_hbond_case(use_tauts, pdbid, chain, lig, hbs, hbs_plus):
     assert np.array(hb in test_contacts for hb in hbs).all()
 
 
-def test_full_vs_frag_tautomer_enumeration():
+def test_full_vs_residue_tautomer_enumeration():
     """
-    Test that fragmented tautomer enumeration provides consistent results with full enumeration
+    Test that residue-wise tautomer enumeration provides consistent results with full enumeration
     """
     pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "7gc7.cif")
     atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
@@ -494,13 +612,9 @@ def test_full_vs_frag_tautomer_enumeration():
                 peppr.find_atoms_by_pattern(tautomer, receptor_pattern)
             )
         matched_indices_full = np.array(sorted(matched_indices_full), dtype=int)
-        # using fragmented enumeration
-        binding_site_fragtautomers = (
-            peppr.contacts._get_interchangeable_tautomeric_fragments(
-                contact_measure._binding_site_mol
-            )
-        )
-        matched_indices_frags = peppr.contacts._find_atoms_in_tautomeric_fragments(
-            binding_site_fragtautomers, receptor_pattern
+        # Per-residue-instance enumeration with SMILES-based dedup
+        residue_map = peppr.contacts.ResidueMap(contact_measure._binding_site_mol)
+        matched_indices_frags = residue_map.find_tautomer_atoms_by_pattern(
+            receptor_pattern
         )
         assert (matched_indices_full == matched_indices_frags).all()

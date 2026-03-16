@@ -23,7 +23,7 @@ dependencies = [
   "biotite >= 1.2",
   "numpy >= 1.25",
   "pandas >= 2.0.0",
-  "rdkit >= 2024.09.1",
+  "rdkit >= 2025.03.5",
   "click >= 8.0.0",
 ]
 dynamic = ["version"]
