@@ -309,9 +309,10 @@ class ContactMeasurement:
                 receptor_ideal_angle = _get_angle_to_lone_electron_pair(
                     self._binding_site_mol, receptor_indices
                 )  # type: ignore[assignment]
-            is_contact = _acceptable_angle(
-                ligand_angles, ligand_ideal_angle, tolerance
-            ) & _acceptable_angle(receptor_angles, receptor_ideal_angle, tolerance)
+            is_contact = np.asarray(
+                _acceptable_angle(ligand_angles, ligand_ideal_angle, tolerance)
+                & _acceptable_angle(receptor_angles, receptor_ideal_angle, tolerance)
+            )
         ligand_indices = ligand_indices[is_contact]
         receptor_indices = receptor_indices[is_contact]
 
