@@ -154,7 +154,6 @@ def test_hydrogen_bond_identification(ideal_angle, use_tauts):
     assert len(unique_pairs) <= len(unique_ref_pairs) * FALSE_POSITIVE_FACTOR
 
 
-
 def _make_atom_array(coords, elements, bond_pairs):
     """Build a minimal AtomArray with bonds for geometry tests."""
     n = len(coords)
