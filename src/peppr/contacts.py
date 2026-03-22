@@ -174,7 +174,6 @@ class ContactMeasurement:
         receptor_ideal_angle: float | None = None,
         ligand_ideal_angle: float | None = None,
         tolerance: float = np.deg2rad(30),
-        check_local_geometry: bool = False,
     ) -> NDArray[np.int_]:
         """
         Find contacts between the receptor and ligand atoms that fulfill the given
@@ -192,22 +191,14 @@ class ContactMeasurement:
             multiplied by the lower and upper bound scaling factor given by this
             parameter.
         receptor_ideal_angle, ligand_ideal_angle : float, optional
-            If an angle (in radians) is given, this angle is used as the ideal contact
-            angle.
-            By default, ideal contact angle is based on hybridization state of the
-            receptor and ligand atoms in contact, respectively.
+            The ideal neighbor-atom-partner angle (in radians).
+            By default, the ideal angle is determined from the hybridization
+            state of each atom.
         tolerance : float
-            The maximum allowed deviation from an ideal contact angle, that is based
-            on hybridization state.
-            The angle is given in radians.
-        check_local_geometry : bool
-            If ``True``, uses a hybridization-aware geometry check that validates
-            the partner position against the full local 3D environment: all
-            neighbor angles must satisfy the hybridization angle, SP2 atoms
-            require in-plane approach (or accept both lone-pair directions for
-            single-neighbor cases like backbone C=O), and SP3 atoms with 2
-            heavy-atom neighbors require out-of-plane approach.
-            The default (``False``) checks only one arbitrarily chosen neighbor.
+            Maximum allowed deviation from the ideal angle (radians).
+            The angle is checked against all heavy-atom neighbors; for SP2
+            atoms with a single neighbor the range is widened to
+            [ideal - tolerance, 180 degrees].
 
         Returns
         -------
@@ -273,46 +264,22 @@ class ContactMeasurement:
         receptor_indices = matched_receptor_indices[receptor_indices]
         ligand_indices = matched_ligand_indices[ligand_indices]
 
-        # Perform the angle check
-        if check_local_geometry:
-            is_contact = _check_local_geometry(
-                self._ligand,
-                self._ligand_mol,
-                ligand_indices,
-                self._binding_site.coord[receptor_indices],
-                ligand_ideal_angle,
-                tolerance,
-            ) & _check_local_geometry(
-                self._binding_site,
-                self._binding_site_mol,
-                receptor_indices,
-                self._ligand.coord[ligand_indices],
-                receptor_ideal_angle,
-                tolerance,
-            )
-        else:
-            ligand_angles = struc.angle(
-                _get_neighbor_pos(self._ligand, ligand_indices),
-                self._ligand.coord[ligand_indices],
-                self._binding_site.coord[receptor_indices],
-            )
-            receptor_angles = struc.angle(
-                _get_neighbor_pos(self._binding_site, receptor_indices),
-                self._binding_site.coord[receptor_indices],
-                self._ligand.coord[ligand_indices],
-            )
-            if ligand_ideal_angle is None:
-                ligand_ideal_angle = _get_angle_to_lone_electron_pair(
-                    self._ligand_mol, ligand_indices
-                )  # type: ignore[assignment]
-            if receptor_ideal_angle is None:
-                receptor_ideal_angle = _get_angle_to_lone_electron_pair(
-                    self._binding_site_mol, receptor_indices
-                )  # type: ignore[assignment]
-            is_contact = np.asarray(
-                _acceptable_angle(ligand_angles, ligand_ideal_angle, tolerance)
-                & _acceptable_angle(receptor_angles, receptor_ideal_angle, tolerance)
-            )
+        # Perform the angle check against all neighbors
+        is_contact = _check_local_geometry(
+            self._ligand,
+            self._ligand_mol,
+            ligand_indices,
+            self._binding_site.coord[receptor_indices],
+            ligand_ideal_angle,
+            tolerance,
+        ) & _check_local_geometry(
+            self._binding_site,
+            self._binding_site_mol,
+            receptor_indices,
+            self._ligand.coord[ligand_indices],
+            receptor_ideal_angle,
+            tolerance,
+        )
         ligand_indices = ligand_indices[is_contact]
         receptor_indices = receptor_indices[is_contact]
 
@@ -599,74 +566,6 @@ def find_atoms_by_pattern(
     return np.array(matches, dtype=int).flatten()
 
 
-def _get_neighbor_pos(
-    atoms: struc.AtomArray, indices: NDArray[np.int_]
-) -> NDArray[np.floating]:
-    """
-    Get the coordinates of the respective neighbors of the given atoms.
-    If an atom has multiple neighbors, one of them is arbitrarily chosen.
-
-    Parameters
-    ----------
-    atoms : AtomArray
-        The structure containing all atoms.
-    indices : ndarray, shape=(n,), dtype=int
-        The indices of the atoms to get the neighbor positions for.
-
-    Returns
-    -------
-    vectors : ndarray, shape=(n,3), dtype=float
-        The coordinates of the respective neighbors of the given atoms.
-    """
-    all_bonds, _ = atoms.bonds.get_all_bonds()
-    if all_bonds.shape[1] == 0:
-        # No atom has any neighbor (i.e. an empty BondList)
-        # -> getting the first neighbor below would lead to an IndexError
-        return np.full((len(indices), 3), np.nan)
-    neighbor_indices = all_bonds[indices]
-    # Arbitrarily choose the first neighbor
-    neighbor_coord = atoms.coord[neighbor_indices[:, 0]]
-    # Handle the case where an atom has no neighbor
-    neighbor_coord[neighbor_indices[:, 0] == -1] = np.nan
-    return neighbor_coord
-
-
-def _out_of_plane_angle(
-    atom_coords: NDArray[np.floating],
-    neighbor_coords: NDArray[np.floating],
-    partner_coords: NDArray[np.floating],
-) -> NDArray[np.floating]:
-    """
-    Compute the out-of-plane angle (in radians) of the partner w.r.t. the plane
-    defined by an atom and its first two neighbors.
-
-    Parameters
-    ----------
-    atom_coords : ndarray, shape=(n, 3)
-    neighbor_coords : ndarray, shape=(n, max_bonds, 3)
-        At least 2 valid neighbors per row are required.
-    partner_coords : ndarray, shape=(n, 3)
-
-    Returns
-    -------
-    angles : ndarray, shape=(n,), dtype=float
-        The out-of-plane angle in radians for each atom.
-        Ranges from 0 (partner in the plane) to π/2 (partner perpendicular).
-    """
-    v1 = neighbor_coords[:, 0] - atom_coords
-    v2 = neighbor_coords[:, 1] - atom_coords
-    normal = np.cross(v1, v2)
-    norm_len = np.linalg.norm(normal, axis=1, keepdims=True)
-    normal = normal / np.where(norm_len > 1e-8, norm_len, 1.0)
-
-    vp = partner_coords - atom_coords
-    vp_len = np.linalg.norm(vp, axis=1, keepdims=True)
-    vp = vp / np.where(vp_len > 1e-8, vp_len, 1.0)
-
-    sin_angle = np.abs(np.sum(vp * normal, axis=1))
-    return np.arcsin(np.clip(sin_angle, 0.0, 1.0))
-
-
 def _check_local_geometry(
     atoms: struc.AtomArray,
     mol: Chem.Mol,
@@ -679,47 +578,17 @@ def _check_local_geometry(
     Check whether each partner position is geometrically consistent with the
     local hybridization of the corresponding atom.
 
-    When ``ideal_angle`` is ``None`` (the default), the ideal angle is
-    determined from the RDKit hybridization of each atom and additional
-    geometry checks are applied per hybridization type:
+    Every neighbor-atom-partner angle must be within ``tolerance`` of the
+    ideal angle. When ``ideal_angle`` is ``None``, the ideal is determined
+    from RDKit hybridization (SP=180, SP2=120, SP3=109.5 degrees).
 
-    **SP (linear):**
-    Every neighbor–atom–partner angle must be ≈ 180°.  No extra geometry
-    check — colinearity is fully constrained by the angle alone.
-
-    **SP2 (trigonal planar):**
-
-    * *≥ 2 neighbors* (e.g. amide N, aromatic C):
-      Every neighbor–atom–partner angle must be ≈ 120°, **and** the partner
-      must lie in the plane of the atom and its neighbors (out-of-plane
-      deviation ≤ ``tolerance``).  This rejects partners that approach
-      perpendicular to the SP2 plane even if individual angles happen to
-      pass.
-
-    * *1 neighbor* (e.g. backbone C=O, aniline N):
-      The two SP2 lone pairs are symmetric about the bond axis, so the
-      partner may approach from *either* lone-pair direction.  Instead of
-      the strict ±tolerance window around 120°, the accepted range is
-      widened to [ideal − tolerance, 180°].  When the single neighbor is
-      also SP2 (e.g. carbonyl C), its bonds define the SP2 plane and an
-      additional in-plane check is applied.  This is skipped when the
-      neighbor is non-planar (e.g. sulfonyl S=O where S is SP3).
-
-    **SP3 (tetrahedral):**
-
-    * *≥ 3 neighbors*:
-      Every neighbor–atom–partner angle must be ≈ 109.5°.  Three neighbors
-      fully constrain the lone-pair direction, so no extra check is needed.
-
-    * *2 neighbors* (common in heavy-atom-only structures):
-      Angles alone leave an ambiguous ring of valid positions around the
-      neighbor–atom–neighbor plane.  An additional check requires the
-      partner to be *out of* that plane (out-of-plane angle ≥ 30°),
-      rejecting in-plane approaches that satisfy angles but miss the
-      tetrahedral pocket.
-
-    **Other / unspecified hybridization:**
-    Only the angle check is applied (no planarity constraints).
+    For SP2 atoms with a single heavy-atom neighbor (e.g. backbone O=C,
+    aniline/amide NH2), the angle range is widened to [ideal - tolerance, 180
+    degrees] to accept both lone-pair directions. CSD surveys show the
+    C=O...D acceptor angle distribution is broad, peaking at 120-140
+    degrees but with significant density up to 180 degrees [1]_. QM
+    calculations confirm that ~85% of optimal H-bond energy is retained
+    at 175 degrees [2]_.
 
     Parameters
     ----------
@@ -732,17 +601,24 @@ def _check_local_geometry(
     partner_coords : ndarray, shape=(n, 3), dtype=float
         Coordinates of the interaction partners.
     ideal_angle : float or ndarray or None
-        The ideal contact angle.  If None, determined from hybridization and
-        the full hybridization-aware geometry checks are enabled.  When a
-        scalar/array is supplied explicitly, only the angle criterion is used.
+        The ideal contact angle. If None, determined from hybridization and
+        the SP2 single-neighbor widening is enabled. When a scalar/array is
+        supplied explicitly, only the strict angle criterion is used.
     tolerance : float
-        Maximum allowed deviation from the ideal angle (radians).  Also used
-        as the planarity tolerance for SP2 and the minimum out-of-plane angle
-        for SP3.
+        Maximum allowed deviation from the ideal angle (radians).
 
     Returns
     -------
     is_acceptable : ndarray, shape=(n,), dtype=bool
+
+    References
+    ----------
+    .. [1] Taylor, R. & Kennard, O. "Hydrogen-bond geometry in organic
+       crystals." *Acc. Chem. Res.* **17**, 320-326 (1984).
+    .. [2] Morozov, A. V., Kortemme, T., Tsemekhman, K. & Baker, D.
+       "Close agreement between the orientation dependence of hydrogen
+       bonds observed in protein structures and quantum mechanical
+       calculations." *PNAS* **101**, 6946-6951 (2004).
     """
     all_bonds, _ = atoms.bonds.get_all_bonds()
     n_contacts = len(atom_indices)
@@ -788,19 +664,12 @@ def _check_local_geometry(
         [mol.GetAtomWithIdx(i.item()).GetHybridization() for i in atom_indices]
     )
 
-    # ---- Step 2a: SP2, 1 neighbor — accept both lone-pair directions ----
-    # E.g. backbone C=O acceptor or aniline N donor (implicit H's):
-    # lone pairs / implicit H's at ±120° from the bond axis.  With one
-    # heavy neighbor the unsigned angle cannot distinguish the two sides,
-    # so we accept anything in [ideal − tol, 180°] (overrides the strict
-    # angle check from step 1).
-    # When the single neighbor is also SP2 (e.g. carbonyl C, aromatic C),
-    # its bonds define the SP2 plane and we additionally require in-plane
-    # approach.
-    # This does not apply when the neighbor is non-planar (e.g. sulfonyl
-    # S=O where S is SP3).
-    sp2 = hybridizations == HybridizationType.SP2  # type: ignore[attr-defined]
-    sp2_single = sp2 & (n_neighbors == 1)
+    # ---- Step 2: SP2, 1 neighbor — widen angle range ----
+    # With one heavy neighbor a partner at +120° or -120° from the bond
+    # gives the same unsigned angle, so we accept [ideal - tolerance, 180°].
+    sp2_single = (
+        hybridizations == HybridizationType.SP2  # type: ignore[attr-defined]
+    ) & (n_neighbors == 1)
     if np.any(sp2_single):
         idx = np.where(sp2_single)[0]
         angles = struc.angle(
@@ -810,61 +679,6 @@ def _check_local_geometry(
         )
         ref = ideal_angle[idx] if isinstance(ideal_angle, np.ndarray) else ideal_angle
         is_ok[sp2_single] = angles >= (ref - tolerance)
-
-        # Planarity check via the neighbor's bonding environment, only
-        # when the neighbor is SP2 (planar) so its bonds define the plane.
-        nbr_atom_idx = neighbor_indices[idx, 0]
-        nbr_is_sp2 = np.array(
-            [
-                mol.GetAtomWithIdx(int(i)).GetHybridization() == HybridizationType.SP2  # type: ignore[attr-defined]
-                for i in nbr_atom_idx
-            ]
-        )
-        nbr_bonds = all_bonds[nbr_atom_idx]
-        atom_self_idx = atom_indices[idx]
-        valid = (nbr_bonds != -1) & (nbr_bonds != atom_self_idx[:, None])
-        has_plane_ref = nbr_is_sp2 & valid.any(axis=1)
-        if np.any(has_plane_ref):
-            hp = np.where(has_plane_ref)[0]
-            first_col = np.argmax(valid[hp], axis=1)
-            nbr2 = nbr_bonds[hp][np.arange(len(hp)), first_col]
-            plane_nb = np.stack(
-                [atoms.coord[nbr_atom_idx[hp]], atoms.coord[nbr2]], axis=1
-            )
-            oop = _out_of_plane_angle(
-                atom_coords[idx[hp]], plane_nb, partner_coords[idx[hp]]
-            )
-            sp2_single_plane = np.zeros(n_contacts, dtype=bool)
-            sp2_single_plane[idx[hp]] = True
-            is_ok[sp2_single_plane] &= oop <= tolerance
-
-    # ---- Step 2b: SP2, ≥ 2 neighbors — require in-plane approach ----
-    # The lone pairs of an SP2 atom lie in the plane of its neighbors.
-    # A partner approaching out of that plane cannot interact with a lone
-    # pair, even if the individual angles look acceptable.
-    sp2_multi = sp2 & (n_neighbors >= 2)
-    if np.any(sp2_multi):
-        idx = np.where(sp2_multi)[0]
-        oop = _out_of_plane_angle(
-            atom_coords[idx], neighbor_coords[idx], partner_coords[idx]
-        )
-        is_ok[sp2_multi] &= oop <= tolerance
-
-    # ---- Step 3: SP3, 2 neighbors — require out-of-plane approach ----
-    # Two neighbors define a plane through the atom.  The two lone pairs
-    # of an SP3 atom point above and below that plane.  An in-plane
-    # approach can satisfy both neighbor angles yet miss the tetrahedral
-    # pocket entirely.
-    sp3 = hybridizations == HybridizationType.SP3  # type: ignore[attr-defined]
-    sp3_two = sp3 & (n_neighbors == 2)
-    if np.any(sp3_two):
-        idx = np.where(sp3_two)[0]
-        oop = _out_of_plane_angle(
-            atom_coords[idx], neighbor_coords[idx], partner_coords[idx]
-        )
-        # Ideal out-of-plane angle for SP3 with 2 neighbors is ~54.7°
-        ideal_oop_sp3 = np.arcsin(np.sqrt(2 / 3))
-        is_ok[sp3_two] &= oop >= (ideal_oop_sp3 - tolerance)
 
     return is_ok
 

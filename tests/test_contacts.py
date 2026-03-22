@@ -1,5 +1,4 @@
 import functools
-import time
 from pathlib import Path
 import biotite.structure as struc
 import biotite.structure.info as info
@@ -11,7 +10,7 @@ from biotite.interface import rdkit as rdkit_interface
 from rdkit import Chem
 import peppr
 from peppr.common import ACCEPTOR_PATTERN, DONOR_PATTERN, HBOND_DISTANCE_SCALING
-from peppr.contacts import _check_local_geometry, _out_of_plane_angle
+from peppr.contacts import _check_local_geometry
 
 
 def test_find_atoms_by_pattern():
@@ -74,7 +73,7 @@ def test_hydrogen_bond_identification(ideal_angle, use_tauts):
     measured using explicit hydrogen atoms, are correctly recovered with heavy atoms
     only using :meth:`ContactMeasurement.find_contacts_by_pattern()`.
     """
-    FALSE_POSITIVE_FACTOR = 2.0
+    FALSE_POSITIVE_FACTOR = 1.5
 
     pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "2rtg.cif")
     atoms = pdbx.get_structure(
@@ -90,17 +89,17 @@ def test_hydrogen_bond_identification(ideal_angle, use_tauts):
     receptor_mask = struc.filter_amino_acids(atoms)
     ligand_mask = atoms.res_name == "BTN"
     ref_contact_indices = struc.hbond(atoms, receptor_mask, ligand_mask)
-    # Keep the residue ID and atom name for easier comparison to test values
-    # and better visual inspection
+    # Each reference H-bond is stored as
+    # (lig_is_donor, lig_res_id, lig_atom_name, rec_res_id, rec_atom_name)
     ref_contacts = []
     for donor_i, _, acceptor_i in ref_contact_indices:
+        lig_is_donor = ligand_mask[donor_i]
+        donor_atom = (atoms.res_id[donor_i], atoms.atom_name[donor_i])
+        acceptor_atom = (atoms.res_id[acceptor_i], atoms.atom_name[acceptor_i])
+        lig_atom = donor_atom if lig_is_donor else acceptor_atom
+        rec_atom = acceptor_atom if lig_is_donor else donor_atom
         ref_contacts.append(
-            (
-                atoms.res_id[donor_i],
-                atoms.atom_name[donor_i],
-                atoms.res_id[acceptor_i],
-                atoms.atom_name[acceptor_i],
-            )
+            (lig_is_donor, lig_atom[0], lig_atom[1], rec_atom[0], rec_atom[1])
         )
 
     # Use only heavy atoms
@@ -116,107 +115,44 @@ def test_hydrogen_bond_identification(ideal_angle, use_tauts):
     # as hydrogen bonds are typically not perfectly straight
     tolerance = np.deg2rad(30) if ideal_angle is None else np.deg2rad(90)
     test_contacts = []
-    # Measure cases where the receptor is the donor and the ligand the acceptor
-    for receptor_i, ligand_i in contact_measurement.find_contacts_by_pattern(
-        DONOR_PATTERN,
-        ACCEPTOR_PATTERN,
-        HBOND_DISTANCE_SCALING,
-        ideal_angle,
-        ideal_angle,
-        tolerance,
-    ):
-        test_contacts.append(
-            (
-                atoms.res_id[receptor_mask][receptor_i],
-                atoms.atom_name[receptor_mask][receptor_i],
-                atoms.res_id[ligand_mask][ligand_i],
-                atoms.atom_name[ligand_mask][ligand_i],
+    for receptor_pattern, ligand_pattern in [
+        (DONOR_PATTERN, ACCEPTOR_PATTERN),
+        (ACCEPTOR_PATTERN, DONOR_PATTERN),
+    ]:
+        for receptor_i, ligand_i in contact_measurement.find_contacts_by_pattern(
+            receptor_pattern,
+            ligand_pattern,
+            HBOND_DISTANCE_SCALING,
+            ideal_angle,
+            ideal_angle,
+            tolerance,
+        ):
+            lig_is_donor = ligand_pattern == DONOR_PATTERN
+            test_contacts.append(
+                (
+                    lig_is_donor,
+                    atoms.res_id[ligand_mask][ligand_i],
+                    atoms.atom_name[ligand_mask][ligand_i],
+                    atoms.res_id[receptor_mask][receptor_i],
+                    atoms.atom_name[receptor_mask][receptor_i],
+                )
             )
+    # Each reference H-bond must be detected in at least one direction
+    for ref in ref_contacts:
+        lig_is_donor, lig_res, lig_name, rec_res, rec_name = ref
+        same_dir = ref in test_contacts
+        # Also accept the same atom pair detected with swapped donor/acceptor,
+        # since the heavy-atom method cannot reliably assign these roles
+        swap_dir = (not lig_is_donor, lig_res, lig_name, rec_res, rec_name) in (
+            test_contacts
         )
-    # Measure cases where the receptor is the acceptor and the ligand the donor
-    for receptor_i, ligand_i in contact_measurement.find_contacts_by_pattern(
-        ACCEPTOR_PATTERN,
-        DONOR_PATTERN,
-        HBOND_DISTANCE_SCALING,
-        ideal_angle,
-        ideal_angle,
-        tolerance,
-    ):
-        test_contacts.append(
-            (
-                atoms.res_id[ligand_mask][ligand_i],
-                atoms.atom_name[ligand_mask][ligand_i],
-                atoms.res_id[receptor_mask][receptor_i],
-                atoms.atom_name[receptor_mask][receptor_i],
-            )
-        )
-    assert set(ref_contacts).issubset(test_contacts), set(ref_contacts).difference(
-        test_contacts
-    )
+        assert same_dir or swap_dir, f"Missing H-bond: {ref}"
     # Although the hydrogen bonds measured only based on heavy atoms may contain false
     # positives, there should not be excessively many false positives
-    assert len(test_contacts) <= len(ref_contacts) * FALSE_POSITIVE_FACTOR
+    unique_pairs = {(c[1], c[2], c[3], c[4]) for c in test_contacts}
+    unique_ref_pairs = {(c[1], c[2], c[3], c[4]) for c in ref_contacts}
+    assert len(unique_pairs) <= len(unique_ref_pairs) * FALSE_POSITIVE_FACTOR
 
-
-def test_check_local_geometry_overhead():
-    """
-    Measure the overhead of ``check_local_geometry=True`` vs the default
-    single-neighbor angle check and verify contact-set relationship.
-    """
-    N_REPEATS = 5
-
-    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "2rtg.cif")
-    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
-    atoms = atoms[~struc.filter_solvent(atoms) & ~struc.filter_monoatomic_ions(atoms)]
-    atoms = atoms[atoms.chain_id == "B"]
-    atoms = atoms[atoms.element != "H"]
-
-    receptor_mask = struc.filter_amino_acids(atoms)
-    ligand_mask = atoms.res_name == "BTN"
-    cm = peppr.ContactMeasurement(
-        atoms[receptor_mask], atoms[ligand_mask], use_tautomers=False
-    )
-
-    def _run_hbond(check_geom: bool):
-        c1 = cm.find_contacts_by_pattern(
-            DONOR_PATTERN,
-            ACCEPTOR_PATTERN,
-            HBOND_DISTANCE_SCALING,
-            check_local_geometry=check_geom,
-        )
-        c2 = cm.find_contacts_by_pattern(
-            ACCEPTOR_PATTERN,
-            DONOR_PATTERN,
-            HBOND_DISTANCE_SCALING,
-            check_local_geometry=check_geom,
-        )
-        return set(map(tuple, c1)) | set(map(tuple, c2))
-
-    # Warm up
-    _run_hbond(False)
-    _run_hbond(True)
-
-    # Time single-neighbor
-    t0 = time.perf_counter()
-    for _ in range(N_REPEATS):
-        contacts_single = _run_hbond(False)
-    t_single = (time.perf_counter() - t0) / N_REPEATS
-
-    # Time local-geometry
-    t0 = time.perf_counter()
-    for _ in range(N_REPEATS):
-        contacts_geom = _run_hbond(True)
-    t_geom = (time.perf_counter() - t0) / N_REPEATS
-
-    print(
-        f"\nAngle check overhead: "
-        f"single={t_single * 1000:.1f}ms, "
-        f"local_geometry={t_geom * 1000:.1f}ms, "
-        f"ratio={t_geom / t_single:.2f}x"
-    )
-    print(
-        f"Contacts: single={len(contacts_single)}, local_geometry={len(contacts_geom)}"
-    )
 
 
 def _make_atom_array(coords, elements, bond_pairs):
@@ -253,76 +189,39 @@ def _make_mol(center_element, center_hyb, n_neighbors):
 
 
 class TestCheckLocalGeometry:
-    """
-    Validate _check_local_geometry against known edge-case geometries.
-
-    Each test constructs minimal atoms with explicit coordinates, sets the
-    expected hybridization on the RDKit mol, and asserts whether the partner
-    position is accepted or rejected.
-    """
+    """Validate _check_local_geometry for SP2 and SP3 edge cases."""
 
     TOLERANCE = np.deg2rad(30)
 
-    def test_sp2_single_neighbor_accepts_anti_approach(self):
-        """
-        SP2 with 1 neighbor (e.g. backbone C=O):
-        A partner at 160° from the bond axis is between the two symmetric
-        lone pairs and should be accepted.  The old single-angle check
-        rejected this at 120°±30°.
-        """
+    def test_sp2_single_neighbor_accepts_wide_angle(self):
+        """SP2 with 1 neighbor: 160° approach accepted (widened range)."""
         acceptor = [0.0, 0.0, 0.0]
-        C = [1.23, 0.0, 0.0]  # carbonyl C
+        C = [1.23, 0.0, 0.0]
         angle_rad = np.deg2rad(160)
-        N = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
+        partner = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
         atoms = _make_atom_array([acceptor, C], ["O", "C"], [(0, 1)])
         mol = _make_mol("O", AllChem.HybridizationType.SP2, 1)
         assert _check_local_geometry(
-            atoms, mol, np.array([0]), np.array([N]), None, self.TOLERANCE
+            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
         )[0]
 
-    def test_sp2_single_neighbor_rejects_acute_approach(self):
-        """
-        SP2 with 1 neighbor: a partner at 80° (below ideal − tolerance = 90°)
-        should be rejected.
-        """
+    def test_sp2_single_neighbor_rejects_acute_angle(self):
+        """SP2 with 1 neighbor: 80° approach rejected (below ideal - tol)."""
         acceptor = [0.0, 0.0, 0.0]
         C = [1.23, 0.0, 0.0]
         angle_rad = np.deg2rad(80)
-        N = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
+        partner = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
         atoms = _make_atom_array([acceptor, C], ["O", "C"], [(0, 1)])
         mol = _make_mol("O", AllChem.HybridizationType.SP2, 1)
-        assert not _check_local_geometry(
-            atoms, mol, np.array([0]), np.array([N]), None, self.TOLERANCE
-        )[0]
-
-    def test_sp2_two_neighbors_rejects_out_of_plane(self):
-        """
-        SP2 with 2 neighbors (e.g. amide N):
-        A partner approaching perpendicular to the SP2 plane should be
-        rejected even if individual neighbor angles are within tolerance.
-        """
-        # Amide N at origin with two C neighbors in the XY plane
-        N = [0.0, 0.0, 0.0]
-        C1 = [1.47, 0.0, 0.0]
-        C2 = [-0.49, 1.39, 0.0]
-        # Partner directly above the plane
-        partner = [0.0, 0.0, 2.94]
-        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
-        mol = _make_mol("N", AllChem.HybridizationType.SP2, 2)
         assert not _check_local_geometry(
             atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
         )[0]
 
-    def test_sp2_two_neighbors_accepts_in_plane(self):
-        """
-        SP2 with 2 neighbors:
-        A partner approaching in the SP2 plane at ~120° from both neighbors
-        should be accepted.
-        """
+    def test_sp2_two_neighbors_accepts_lone_pair_direction(self):
+        """SP2 with 2 neighbors: ~120° from both neighbors accepted."""
         N = [0.0, 0.0, 0.0]
         C1 = [1.47, 0.0, 0.0]
         C2 = [1.47 * np.cos(np.deg2rad(120)), 1.47 * np.sin(np.deg2rad(120)), 0.0]
-        # Lone pair direction: ~240° in the plane
         lp_angle = np.deg2rad(240)
         partner = [2.94 * np.cos(lp_angle), 2.94 * np.sin(lp_angle), 0.0]
         atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
@@ -331,119 +230,28 @@ class TestCheckLocalGeometry:
             atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
         )[0]
 
-    def test_sp3_two_neighbors_rejects_in_plane(self):
-        """
-        SP3 with 2 neighbors:
-        An in-plane approach can satisfy the angle criterion (~109.5°) for
-        both neighbors but misses the tetrahedral pocket.  Should be rejected.
-        """
+    def test_sp3_accepts_in_plane_and_out_of_plane(self):
+        """SP3 with 2 neighbors: both in-plane and out-of-plane accepted."""
         N = [0.0, 0.0, 0.0]
         C1 = [1.47, 0.0, 0.0]
         C2 = [-0.49, 1.39, 0.0]
-        # In-plane bisector direction (opposite to average of C1, C2)
+        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
+        mol = _make_mol("N", AllChem.HybridizationType.SP3, 2)
+
+        # In-plane: bisector opposite to neighbors
         bisect = np.array(C1) + np.array(C2)
         bisect = -bisect / np.linalg.norm(bisect) * 2.94
-        partner = bisect.tolist()
-        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
-        mol = _make_mol("N", AllChem.HybridizationType.SP3, 2)
-        assert not _check_local_geometry(
-            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
+        assert _check_local_geometry(
+            atoms, mol, np.array([0]), np.array([bisect]), None, self.TOLERANCE
         )[0]
 
-    def test_sp3_two_neighbors_accepts_out_of_plane(self):
-        """
-        SP3 with 2 neighbors:
-        A partner approaching from above/below the neighbor plane (toward a
-        tetrahedral lone pair) should be accepted.
-        """
-        N = [0.0, 0.0, 0.0]
-        C1 = [1.47, 0.0, 0.0]
-        C2 = [-0.49, 1.39, 0.0]
-        # Tetrahedral direction: opposite to neighbor centroid + out of plane
+        # Out-of-plane: toward tetrahedral lone pair
         centroid = (np.array(C1) + np.array(C2)) / 2
-        normal = np.array([0.0, 0.0, 1.0])
-        lp = -centroid / np.linalg.norm(centroid) * 0.5 + normal * 0.87
+        lp = -centroid / np.linalg.norm(centroid) * 0.5 + np.array([0, 0, 0.87])
         lp = lp / np.linalg.norm(lp) * 2.94
-        partner = lp.tolist()
-        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
-        mol = _make_mol("N", AllChem.HybridizationType.SP3, 2)
-        result = _check_local_geometry(
-            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
+        assert _check_local_geometry(
+            atoms, mol, np.array([0]), np.array([lp]), None, self.TOLERANCE
         )[0]
-        assert result
-
-
-class TestOutOfPlaneAngle:
-    """
-    Validate _out_of_plane_angle returns the correct angle (in radians)
-    for partners placed at known out-of-plane positions.
-    """
-
-    @staticmethod
-    def _setup_plane():
-        """
-        Create a plane: atom at origin, two neighbors along x and y axes.
-        The plane normal is along z.
-        """
-        atom = np.array([[0.0, 0.0, 0.0]])
-        # neighbor_coords shape: (1, 2, 3) — two neighbors
-        neighbors = np.array([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]])
-        return atom, neighbors
-
-    @staticmethod
-    def _partner_at_angle(angle_deg):
-        """Place a partner at the given out-of-plane angle (degrees) from the xy-plane."""
-        angle_rad = np.deg2rad(angle_deg)
-        # In the xz-plane: cos(angle) along x, sin(angle) along z
-        return np.array([[np.cos(angle_rad), 0.0, np.sin(angle_rad)]]) * 2.0
-
-    @pytest.mark.parametrize("angle_deg", [0, 35, 70, 90])
-    def test_known_angles(self, angle_deg):
-        atom, neighbors = self._setup_plane()
-        partner = self._partner_at_angle(angle_deg)
-        result = _out_of_plane_angle(atom, neighbors, partner)
-        np.testing.assert_allclose(result[0], np.deg2rad(angle_deg), atol=1e-6)
-
-    def test_in_plane_is_zero(self):
-        """A partner lying exactly in the plane should give 0."""
-        atom, neighbors = self._setup_plane()
-        partner = np.array([[3.0, 2.0, 0.0]])  # arbitrary in-plane point
-        result = _out_of_plane_angle(atom, neighbors, partner)
-        np.testing.assert_allclose(result[0], 0.0, atol=1e-6)
-
-    def test_perpendicular_is_pi_over_2(self):
-        """A partner directly along the plane normal should give π/2."""
-        atom, neighbors = self._setup_plane()
-        partner = np.array([[0.0, 0.0, 5.0]])
-        result = _out_of_plane_angle(atom, neighbors, partner)
-        np.testing.assert_allclose(result[0], np.pi / 2, atol=1e-6)
-
-    def test_negative_z_same_as_positive(self):
-        """Out-of-plane angle is unsigned — below the plane equals above."""
-        atom, neighbors = self._setup_plane()
-        above = self._partner_at_angle(35)
-        below = np.array([[above[0, 0], above[0, 1], -above[0, 2]]])
-        result_above = _out_of_plane_angle(atom, neighbors, above)
-        result_below = _out_of_plane_angle(atom, neighbors, below)
-        np.testing.assert_allclose(result_above, result_below, atol=1e-6)
-
-    def test_batch(self):
-        """Multiple atoms in a single call."""
-        atom = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
-        neighbors = np.array(
-            [
-                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
-            ]
-        )
-        partner = np.array(
-            [
-                self._partner_at_angle(0)[0],
-                self._partner_at_angle(90)[0],
-            ]
-        )
-        result = _out_of_plane_angle(atom, neighbors, partner)
-        np.testing.assert_allclose(result, [0.0, np.pi / 2], atol=1e-6)
 
 
 @pytest.mark.parametrize("use_resonance", [False, True])
