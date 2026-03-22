@@ -31,8 +31,8 @@ ACCEPTOR_PATTERN = (
     "$([Nd1H0;$(N#[Cv4])]),"
     # unprotonated nitrogen next to aromatic ring; note: ideal_angle 90 deg; not 120!
     "$([Nv3H0;$(N-c)]),"
-    # Fluorine on aromatic ring, only
-    "$([F;$(F-[#6]);!$(FC[F,Cl,Br,I])])"
+    # Fluorine, except trihalogens
+    "$([F;$(F-[#6]);!$(FC([F,Cl,Br,I])[F,Cl,Br,I])])"
     "]"
 )
 HALOGEN_PATTERN = "[F,Cl,Br,I;+0]"
