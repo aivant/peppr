@@ -152,7 +152,6 @@ def test_hydrogen_bond_identification(ideal_angle, use_tauts):
     assert len(unique_pairs) <= len(unique_ref_pairs) * FALSE_POSITIVE_FACTOR
 
 
-
 @pytest.mark.parametrize("use_resonance", [False, True])
 @pytest.mark.parametrize(
     ["pdb_id", "ligand_res_name", "expected_contacts"],
