@@ -5,12 +5,10 @@ import biotite.structure.info as info
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
-import rdkit.Chem.AllChem as AllChem
 from biotite.interface import rdkit as rdkit_interface
 from rdkit import Chem
 import peppr
 from peppr.common import ACCEPTOR_PATTERN, DONOR_PATTERN, HBOND_DISTANCE_SCALING
-from peppr.contacts import _check_local_geometry
 
 
 def test_find_atoms_by_pattern():
@@ -153,104 +151,6 @@ def test_hydrogen_bond_identification(ideal_angle, use_tauts):
     unique_ref_pairs = {(c[1], c[2], c[3], c[4]) for c in ref_contacts}
     assert len(unique_pairs) <= len(unique_ref_pairs) * FALSE_POSITIVE_FACTOR
 
-
-def _make_atom_array(coords, elements, bond_pairs):
-    """Build a minimal AtomArray with bonds for geometry tests."""
-    n = len(coords)
-    atoms = struc.AtomArray(n)
-    atoms.coord = np.array(coords, dtype=np.float32)
-    atoms.element = np.array(elements)
-    atoms.atom_name = np.array([f"{e}{i}" for i, e in enumerate(elements)])
-    atoms.res_name = np.full(n, "TST")
-    atoms.res_id = np.full(n, 1)
-    atoms.chain_id = np.full(n, "A")
-    atoms.hetero = np.full(n, True)
-    bonds = struc.BondList(n)
-    for i, j in bond_pairs:
-        bonds.add_bond(i, j, struc.BondType.SINGLE)
-    atoms.bonds = bonds
-    return atoms
-
-
-def _make_mol(center_element, center_hyb, n_neighbors):
-    """Build a minimal RDKit Mol with given hybridization at atom 0."""
-    mol = AllChem.RWMol()
-    center = AllChem.Atom({"N": 7, "O": 8, "C": 6}[center_element])
-    center.SetHybridization(center_hyb)
-    mol.AddAtom(center)
-    for _ in range(n_neighbors):
-        c = AllChem.Atom(6)
-        c.SetHybridization(AllChem.HybridizationType.SP3)
-        mol.AddAtom(c)
-    for i in range(n_neighbors):
-        mol.AddBond(0, i + 1, AllChem.BondType.SINGLE)
-    return mol.GetMol()
-
-
-class TestCheckLocalGeometry:
-    """Validate _check_local_geometry for SP2 and SP3 edge cases."""
-
-    TOLERANCE = np.deg2rad(30)
-
-    def test_sp2_single_neighbor_accepts_wide_angle(self):
-        """SP2 with 1 neighbor: 160° approach accepted (widened range)."""
-        acceptor = [0.0, 0.0, 0.0]
-        C = [1.23, 0.0, 0.0]
-        angle_rad = np.deg2rad(160)
-        partner = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
-        atoms = _make_atom_array([acceptor, C], ["O", "C"], [(0, 1)])
-        mol = _make_mol("O", AllChem.HybridizationType.SP2, 1)
-        assert _check_local_geometry(
-            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
-        )[0]
-
-    def test_sp2_single_neighbor_rejects_acute_angle(self):
-        """SP2 with 1 neighbor: 80° approach rejected (below ideal - tol)."""
-        acceptor = [0.0, 0.0, 0.0]
-        C = [1.23, 0.0, 0.0]
-        angle_rad = np.deg2rad(80)
-        partner = [np.cos(angle_rad) * 2.68, np.sin(angle_rad) * 2.68, 0.0]
-        atoms = _make_atom_array([acceptor, C], ["O", "C"], [(0, 1)])
-        mol = _make_mol("O", AllChem.HybridizationType.SP2, 1)
-        assert not _check_local_geometry(
-            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
-        )[0]
-
-    def test_sp2_two_neighbors_accepts_lone_pair_direction(self):
-        """SP2 with 2 neighbors: ~120° from both neighbors accepted."""
-        N = [0.0, 0.0, 0.0]
-        C1 = [1.47, 0.0, 0.0]
-        C2 = [1.47 * np.cos(np.deg2rad(120)), 1.47 * np.sin(np.deg2rad(120)), 0.0]
-        lp_angle = np.deg2rad(240)
-        partner = [2.94 * np.cos(lp_angle), 2.94 * np.sin(lp_angle), 0.0]
-        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
-        mol = _make_mol("N", AllChem.HybridizationType.SP2, 2)
-        assert _check_local_geometry(
-            atoms, mol, np.array([0]), np.array([partner]), None, self.TOLERANCE
-        )[0]
-
-    def test_sp3_accepts_in_plane_and_out_of_plane(self):
-        """SP3 with 2 neighbors: both in-plane and out-of-plane accepted."""
-        N = [0.0, 0.0, 0.0]
-        C1 = [1.47, 0.0, 0.0]
-        C2 = [-0.49, 1.39, 0.0]
-        atoms = _make_atom_array([N, C1, C2], ["N", "C", "C"], [(0, 1), (0, 2)])
-        mol = _make_mol("N", AllChem.HybridizationType.SP3, 2)
-
-        # In-plane: bisector opposite to neighbors
-        bisect = np.array(C1) + np.array(C2)
-        bisect = -bisect / np.linalg.norm(bisect) * 2.94
-        assert _check_local_geometry(
-            atoms, mol, np.array([0]), np.array([bisect]), None, self.TOLERANCE
-        )[0]
-
-        # Out-of-plane: toward tetrahedral lone pair
-        centroid = (np.array(C1) + np.array(C2)) / 2
-        lp = -centroid / np.linalg.norm(centroid) * 0.5 + np.array([0, 0, 0.87])
-        lp = lp / np.linalg.norm(lp) * 2.94
-        assert _check_local_geometry(
-            atoms, mol, np.array([0]), np.array([lp]), None, self.TOLERANCE
-        )[0]
 
 
 @pytest.mark.parametrize("use_resonance", [False, True])

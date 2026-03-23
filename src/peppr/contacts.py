@@ -208,6 +208,12 @@ class ContactMeasurement:
             The first column points to the receptor atom and the second column to the
             ligand atom.
 
+        Warnings
+        --------
+        When the ideal angle is determined from hybridization (default),
+        d-orbital hybridizations (SP2D, SP3D, SP3D2) are approximated as
+        90 degrees. This may miss contacts involving metal atoms.
+
         Notes
         -----
         The pattern must target a single atom, not a group of atoms.
