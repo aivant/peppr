@@ -14,6 +14,7 @@ import rdkit.Chem.AllChem as Chem
 from numpy.typing import NDArray
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from peppr.charge import estimate_formal_charges
+from peppr.common import ACCEPTOR_PATTERN, DONOR_PATTERN
 from peppr.sanitize import sanitize
 
 # Create a proper Python Enum for the RDKit HybridizationType
@@ -196,9 +197,9 @@ class ContactMeasurement:
             state of each atom.
         tolerance : float
             Maximum allowed deviation from the ideal angle (radians).
-            The angle is checked against all heavy-atom neighbors; for SP2
-            atoms with a single neighbor the range is widened to
-            [ideal - tolerance, 180 degrees].
+            The angle is checked against all heavy-atom neighbors. For SP2
+            acceptors with a single neighbor in H-bond context, the range
+            is widened to [ideal - tolerance, 180 degrees] (see Warnings).
 
         Returns
         -------
@@ -213,6 +214,11 @@ class ContactMeasurement:
         When the ideal angle is determined from hybridization (default),
         d-orbital hybridizations (SP2D, SP3D, SP3D2) are approximated as
         90 degrees. This may miss contacts involving metal atoms.
+
+        The SP2 single-neighbor angle widening for acceptors is activated
+        by comparing ``receptor_pattern`` and ``ligand_pattern`` against
+        ``ACCEPTOR_PATTERN`` and ``DONOR_PATTERN`` from ``peppr.common``.
+        Custom SMARTS patterns will not trigger the widening.
 
         Notes
         -----
@@ -278,6 +284,9 @@ class ContactMeasurement:
             self._binding_site.coord[receptor_indices],
             ligand_ideal_angle,
             tolerance,
+            widen_sp2_single=(
+                ligand_pattern == ACCEPTOR_PATTERN and receptor_pattern == DONOR_PATTERN
+            ),
         ) & _check_local_geometry(
             self._binding_site,
             self._binding_site_mol,
@@ -285,6 +294,9 @@ class ContactMeasurement:
             self._ligand.coord[ligand_indices],
             receptor_ideal_angle,
             tolerance,
+            widen_sp2_single=(
+                receptor_pattern == ACCEPTOR_PATTERN and ligand_pattern == DONOR_PATTERN
+            ),
         )
         ligand_indices = ligand_indices[is_contact]
         receptor_indices = receptor_indices[is_contact]
@@ -579,6 +591,7 @@ def _check_local_geometry(
     partner_coords: NDArray[np.floating],
     ideal_angle: float | NDArray[np.floating] | None,
     tolerance: float,
+    widen_sp2_single: bool = False,
 ) -> NDArray[np.bool_]:
     """
     Check whether each partner position is geometrically consistent with the
@@ -587,14 +600,6 @@ def _check_local_geometry(
     Every neighbor-atom-partner angle must be within ``tolerance`` of the
     ideal angle. When ``ideal_angle`` is ``None``, the ideal is determined
     from RDKit hybridization (SP=180, SP2=120, SP3=109.5 degrees).
-
-    For SP2 atoms with a single heavy-atom neighbor (e.g. backbone O=C,
-    aniline/amide NH2), the angle range is widened to [ideal - tolerance, 180
-    degrees] to accept both lone-pair directions. CSD surveys show the
-    C=O...D acceptor angle distribution is broad, peaking at 120-140
-    degrees but with significant density up to 180 degrees [1]_. QM
-    calculations confirm that ~85% of optimal H-bond energy is retained
-    at 175 degrees [2]_.
 
     Parameters
     ----------
@@ -608,14 +613,37 @@ def _check_local_geometry(
         Coordinates of the interaction partners.
     ideal_angle : float or ndarray or None
         The ideal contact angle. If None, determined from hybridization and
-        the SP2 single-neighbor widening is enabled. When a scalar/array is
-        supplied explicitly, only the strict angle criterion is used.
+        the SP2 single-neighbor widening may be applied (see
+        *widen_sp2_single*). When a scalar/array is supplied explicitly,
+        only the strict angle criterion is used.
     tolerance : float
         Maximum allowed deviation from the ideal angle (radians).
+    widen_sp2_single : bool
+        If True, SP2 atoms with a single heavy-atom neighbor use the
+        widened range [ideal - tolerance, 180 degrees]. Should only be
+        enabled when the atom acts as a H-bond acceptor.
 
     Returns
     -------
     is_acceptable : ndarray, shape=(n,), dtype=bool
+
+    Notes
+    -----
+    When ``widen_sp2_single`` is True and ``ideal_angle`` is None, SP2 atoms
+    with a single heavy-atom neighbor (e.g. carbonyl O=C) use the widened
+    range [ideal - tolerance, 180 degrees]. Both lone-pair directions
+    produce the same unsigned neighbor-atom-partner angle, so the wider
+    range avoids rejecting valid approaches. CSD surveys show the C=O...D
+    acceptor angle distribution is broad, peaking at 120-140 degrees but
+    with significant density up to 180 degrees [1]_. QM calculations
+    confirm that ~85% of optimal H-bond energy is retained at 175
+    degrees [2]_.
+
+    The widening is not appropriate for SP2 donors (e.g. amide NH2): the
+    N-H bonds point at ~120 degrees from the C-N axis, so a partner at
+    180 degrees cannot achieve a favorable N-H...A angle. It is also not
+    appropriate for halogen bond acceptors, where the preferred C=O...X
+    angle is ~120 degrees with little density above 150 degrees.
 
     References
     ----------
@@ -670,13 +698,15 @@ def _check_local_geometry(
         [mol.GetAtomWithIdx(i.item()).GetHybridization() for i in atom_indices]
     )
 
-    # ---- Step 2: SP2, 1 neighbor — widen angle range ----
+    # ---- Step 2: SP2 acceptor, 1 neighbor — widen angle range ----
     # With one heavy neighbor a partner at +120° or -120° from the bond
     # gives the same unsigned angle, so we accept [ideal - tolerance, 180°].
+    # Only applied for acceptors (widen_sp2_single=True); for donors
+    # (e.g. NH2) the standard ±tolerance range is correct.
     sp2_single = (
         hybridizations == HybridizationType.SP2  # type: ignore[attr-defined]
     ) & (n_neighbors == 1)
-    if np.any(sp2_single):
+    if widen_sp2_single and np.any(sp2_single):
         idx = np.where(sp2_single)[0]
         angles = struc.angle(
             neighbor_coords[idx, 0],

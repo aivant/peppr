@@ -532,6 +532,22 @@ def test_find_tautomeric_hbond_patterns(smiles, expected_donors, expected_accept
             # only detected if receptor His163 tautomers are considered
             [(False, 404, "O2", 163, "NE2")],
         ],
+        [
+            "3eca",
+            "A",
+            "ASP",
+            [
+                (True, 401, "N", 59, "OE1"),
+                (True, 401, "N", 90, "OD2"),
+                (False, 401, "OD2", 12, "N"),
+                (False, 401, "OXT", 58, "N"),
+                (False, 401, "OD2", 89, "N"),
+                # Wide-angle acceptor (C-O...N = 158 deg): only detected
+                # because SP2 single-neighbor acceptors use widened range
+                (False, 401, "O", 90, "N"),
+            ],
+            [],
+        ],
     ],
 )
 def test_challenging_hbond_case(use_tauts, pdbid, chain, lig, hbs, hbs_plus):
