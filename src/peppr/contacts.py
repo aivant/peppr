@@ -176,7 +176,8 @@ class ContactMeasurement:
         receptor_ideal_angle: float | None = None,
         ligand_ideal_angle: float | None = None,
         tolerance: float = np.deg2rad(30),
-        widen_sp2_acceptor: bool = False,
+        widen_sp2_receptor: bool = False,
+        widen_sp2_ligand: bool = False,
     ) -> NDArray[np.int_]:
         """
         Find contacts between the receptor and ligand atoms that fulfill the given
@@ -200,14 +201,14 @@ class ContactMeasurement:
         tolerance : float
             Maximum allowed deviation from the ideal angle (radians).
             The angle is checked against all heavy-atom neighbors.
-        widen_sp2_acceptor : bool
+        widen_sp2_receptor, widen_sp2_ligand : bool
             If True, SP2 atoms with a single heavy-atom neighbor (e.g.
-            carbonyl O=C) use the widened angle range
-            [ideal - tolerance, 180 degrees] instead of the symmetric
-            [ideal - tolerance, ideal + tolerance]. Appropriate for
-            H-bond detection but not for halogen bonds.
+            carbonyl O=C) on the respective side use the widened angle
+            range [ideal - tolerance, 180 degrees] instead of the
+            symmetric [ideal - tolerance, ideal + tolerance]. Should
+            only be enabled for the acceptor side in H-bond detection.
             See :meth:`find_hbonds` for a convenience method that sets
-            this automatically.
+            these automatically.
 
         Returns
         -------
@@ -287,7 +288,7 @@ class ContactMeasurement:
             self._binding_site.coord[receptor_indices],
             ligand_ideal_angle,
             tolerance,
-            widen_sp2_single=widen_sp2_acceptor,
+            widen_sp2_single=widen_sp2_ligand,
         ) & _check_local_geometry(
             self._binding_site,
             self._binding_site_mol,
@@ -295,7 +296,7 @@ class ContactMeasurement:
             self._ligand.coord[ligand_indices],
             receptor_ideal_angle,
             tolerance,
-            widen_sp2_single=widen_sp2_acceptor,
+            widen_sp2_single=widen_sp2_receptor,
         )
         ligand_indices = ligand_indices[is_contact]
         receptor_indices = receptor_indices[is_contact]
@@ -332,13 +333,13 @@ class ContactMeasurement:
             DONOR_PATTERN,
             ACCEPTOR_PATTERN,
             HBOND_DISTANCE_SCALING,
-            widen_sp2_acceptor=True,
+            widen_sp2_ligand=True,
         )
         ligand_donates = self.find_contacts_by_pattern(
             ACCEPTOR_PATTERN,
             DONOR_PATTERN,
             HBOND_DISTANCE_SCALING,
-            widen_sp2_acceptor=True,
+            widen_sp2_receptor=True,
         )
         return receptor_donates, ligand_donates
 

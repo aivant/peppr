@@ -603,8 +603,10 @@ def test_sp2_acceptor_widening():
     """Test that SP2 single-neighbor acceptor widening recovers a wide-angle
     H-bond in 3ECA (ASP401:O as acceptor, C-O...N = 158 degrees).
 
-    Without ``widen_sp2_acceptor``, this contact would be rejected by the
-    standard [ideal - tolerance, ideal + tolerance] = [90, 150] degree range.
+    :meth:`find_hbonds` enables SP2 acceptor widening automatically.
+    Without it (i.e. ``find_contacts_by_pattern`` with default parameters),
+    the standard [ideal - tolerance, ideal + tolerance] = [90, 150] degree
+    range rejects this contact.
     """
     pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "3eca.cif")
     atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
@@ -655,7 +657,6 @@ def test_sp2_acceptor_widening():
             rp,
             lp,
             HBOND_DISTANCE_SCALING,
-            widen_sp2_acceptor=False,
         ):
             narrow_contacts.append(
                 (
