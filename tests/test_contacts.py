@@ -403,6 +403,22 @@ def test_no_contacts(contact_method, use_tauts):
     assert contacts.shape == (0, 2)
 
 
+@pytest.mark.parametrize("use_tauts", [True, False])
+def test_no_contacts_hbonds(use_tauts):
+    """Check that find_hbonds returns empty arrays when no contacts exist."""
+    ligand = info.residue("ALA")
+    ligand = ligand[ligand.element != "H"]
+    receptor = ligand.copy()
+    receptor.coord += 1000
+
+    contact_measurement = peppr.ContactMeasurement(
+        receptor, ligand, use_tautomers=use_tauts
+    )
+    rec_donates, lig_donates = contact_measurement.find_hbonds()
+    assert rec_donates.shape == (0, 2)
+    assert lig_donates.shape == (0, 2)
+
+
 @pytest.mark.parametrize(
     "contact_method",
     [
@@ -430,6 +446,18 @@ def test_no_bonds(contact_method):
 
     contact_measurement = peppr.ContactMeasurement(receptor, ligand)
     contact_method(contact_measurement)
+
+
+def test_no_bonds_hbonds():
+    """Check that find_hbonds works when atoms have no bonds."""
+    ligand = info.residue("ALA")
+    ligand = ligand[ligand.element != "H"]
+    ligand.bonds = struc.BondList(ligand.array_length())
+    receptor = ligand.copy()
+    receptor.coord[:, 0] += 5
+
+    contact_measurement = peppr.ContactMeasurement(receptor, ligand)
+    contact_measurement.find_hbonds()
 
 
 def test_find_resonance_charges():
@@ -532,28 +560,10 @@ def test_find_tautomeric_hbond_patterns(smiles, expected_donors, expected_accept
             # only detected if receptor His163 tautomers are considered
             [(False, 404, "O2", 163, "NE2")],
         ],
-        [
-            "3eca",
-            "A",
-            "ASP",
-            [
-                (True, 401, "N", 59, "OE1"),
-                (True, 401, "N", 90, "OD2"),
-                (False, 401, "OD2", 12, "N"),
-                (False, 401, "OXT", 58, "N"),
-                (False, 401, "OD2", 89, "N"),
-                # Wide-angle acceptor (C-O...N = 158 deg): only detected
-                # because SP2 single-neighbor acceptors use widened range
-                (False, 401, "O", 90, "N"),
-            ],
-            [],
-        ],
     ],
 )
-def test_challenging_hbond_case(use_tauts, pdbid, chain, lig, hbs, hbs_plus):
-    """
-    Use a challenging case to demonstrate some edge cases of tautomer enumeration importance.
-    """
+def test_tautomer_hbond_detection(use_tauts, pdbid, chain, lig, hbs, hbs_plus):
+    """Test that tautomer enumeration recovers additional H-bonds."""
     pdbx_file = pdbx.CIFFile.read(
         Path(__file__).parent / "data" / "pdb" / f"{pdbid}.cif"
     )
@@ -562,25 +572,18 @@ def test_challenging_hbond_case(use_tauts, pdbid, chain, lig, hbs, hbs_plus):
     atoms = peppr.standardize(atoms)
 
     receptor_mask = ~atoms.hetero
-    ligand_mask = (atoms.hetero) & (atoms.res_name == lig)
+    ligand_mask = atoms.hetero & (atoms.res_name == lig)
 
-    inter_contact_measurement = peppr.ContactMeasurement(
+    cm = peppr.ContactMeasurement(
         receptor=atoms[receptor_mask],
         ligand=atoms[ligand_mask],
         use_tautomers=use_tauts,
     )
 
+    rec_donates, lig_donates = cm.find_hbonds()
     test_contacts = []
-    for receptor_pattern, ligand_pattern in [
-        (ACCEPTOR_PATTERN, DONOR_PATTERN),
-        (DONOR_PATTERN, ACCEPTOR_PATTERN),
-    ]:
-        for receptor_i, ligand_i in inter_contact_measurement.find_contacts_by_pattern(
-            receptor_pattern,
-            ligand_pattern,
-            HBOND_DISTANCE_SCALING,
-        ):
-            lig_is_donor = ligand_pattern == DONOR_PATTERN
+    for lig_is_donor, contacts in [(False, rec_donates), (True, lig_donates)]:
+        for receptor_i, ligand_i in contacts:
             test_contacts.append(
                 (
                     lig_is_donor,
@@ -590,9 +593,81 @@ def test_challenging_hbond_case(use_tauts, pdbid, chain, lig, hbs, hbs_plus):
                     atoms.atom_name[receptor_mask][receptor_i],
                 )
             )
+
     if use_tauts:
         hbs += hbs_plus
     assert np.array(hb in test_contacts for hb in hbs).all()
+
+
+def test_sp2_acceptor_widening():
+    """Test that SP2 single-neighbor acceptor widening recovers a wide-angle
+    H-bond in 3ECA (ASP401:O as acceptor, C-O...N = 158 degrees).
+
+    Without ``widen_sp2_acceptor``, this contact would be rejected by the
+    standard [ideal - tolerance, ideal + tolerance] = [90, 150] degree range.
+    """
+    pdbx_file = pdbx.CIFFile.read(Path(__file__).parent / "data" / "pdb" / "3eca.cif")
+    atoms = pdbx.get_structure(pdbx_file, model=1, include_bonds=True)
+    atoms = atoms[atoms.chain_id == "A"]
+    atoms = peppr.standardize(atoms)
+
+    receptor_mask = ~atoms.hetero
+    ligand_mask = atoms.hetero & (atoms.res_name == "ASP")
+
+    cm = peppr.ContactMeasurement(
+        receptor=atoms[receptor_mask],
+        ligand=atoms[ligand_mask],
+    )
+
+    # With widening (via find_hbonds): the wide-angle contact is detected
+    rec_donates, lig_donates = cm.find_hbonds()
+    test_contacts = []
+    for lig_is_donor, contacts in [(False, rec_donates), (True, lig_donates)]:
+        for receptor_i, ligand_i in contacts:
+            test_contacts.append(
+                (
+                    lig_is_donor,
+                    atoms.res_id[ligand_mask][ligand_i],
+                    atoms.atom_name[ligand_mask][ligand_i],
+                    atoms.res_id[receptor_mask][receptor_i],
+                    atoms.atom_name[receptor_mask][receptor_i],
+                )
+            )
+
+    expected = [
+        (True, 401, "N", 59, "OE1"),
+        (True, 401, "N", 90, "OD2"),
+        (False, 401, "OD2", 12, "N"),
+        (False, 401, "OXT", 58, "N"),
+        (False, 401, "OD2", 89, "N"),
+        # Wide-angle acceptor (C-O...N = 158 deg)
+        (False, 401, "O", 90, "N"),
+    ]
+    assert np.array(hb in test_contacts for hb in expected).all()
+
+    # Without widening: the wide-angle contact is rejected
+    narrow_contacts = []
+    for rp, lp in [
+        (ACCEPTOR_PATTERN, DONOR_PATTERN),
+        (DONOR_PATTERN, ACCEPTOR_PATTERN),
+    ]:
+        for ri, li in cm.find_contacts_by_pattern(
+            rp,
+            lp,
+            HBOND_DISTANCE_SCALING,
+            widen_sp2_acceptor=False,
+        ):
+            narrow_contacts.append(
+                (
+                    lp == DONOR_PATTERN,
+                    atoms.res_id[ligand_mask][li],
+                    atoms.atom_name[ligand_mask][li],
+                    atoms.res_id[receptor_mask][ri],
+                    atoms.atom_name[receptor_mask][ri],
+                )
+            )
+    wide_angle_hb = (False, 401, "O", 90, "N")
+    assert wide_angle_hb not in narrow_contacts
 
 
 def test_full_vs_residue_tautomer_enumeration():

@@ -14,7 +14,7 @@ import rdkit.Chem.AllChem as Chem
 from numpy.typing import NDArray
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from peppr.charge import estimate_formal_charges
-from peppr.common import ACCEPTOR_PATTERN, DONOR_PATTERN
+from peppr.common import ACCEPTOR_PATTERN, DONOR_PATTERN, HBOND_DISTANCE_SCALING
 from peppr.sanitize import sanitize
 
 # Create a proper Python Enum for the RDKit HybridizationType
@@ -45,7 +45,8 @@ class ContactMeasurement:
     This class allows measurements of receptor-ligand contacts of specific types
     (e.g. hydrogen bonds) by using *SMARTS* patterns.
 
-    The actual measurement is performed by calling :meth:`find_contacts_by_pattern()`.
+    The actual measurement is performed by calling :meth:`find_hbonds` or
+    :meth:`find_contacts_by_pattern`.
 
     Parameters
     ----------
@@ -175,6 +176,7 @@ class ContactMeasurement:
         receptor_ideal_angle: float | None = None,
         ligand_ideal_angle: float | None = None,
         tolerance: float = np.deg2rad(30),
+        widen_sp2_acceptor: bool = False,
     ) -> NDArray[np.int_]:
         """
         Find contacts between the receptor and ligand atoms that fulfill the given
@@ -197,9 +199,15 @@ class ContactMeasurement:
             state of each atom.
         tolerance : float
             Maximum allowed deviation from the ideal angle (radians).
-            The angle is checked against all heavy-atom neighbors. For SP2
-            acceptors with a single neighbor in H-bond context, the range
-            is widened to [ideal - tolerance, 180 degrees] (see Warnings).
+            The angle is checked against all heavy-atom neighbors.
+        widen_sp2_acceptor : bool
+            If True, SP2 atoms with a single heavy-atom neighbor (e.g.
+            carbonyl O=C) use the widened angle range
+            [ideal - tolerance, 180 degrees] instead of the symmetric
+            [ideal - tolerance, ideal + tolerance]. Appropriate for
+            H-bond detection but not for halogen bonds.
+            See :meth:`find_hbonds` for a convenience method that sets
+            this automatically.
 
         Returns
         -------
@@ -214,11 +222,6 @@ class ContactMeasurement:
         When the ideal angle is determined from hybridization (default),
         d-orbital hybridizations (SP2D, SP3D, SP3D2) are approximated as
         90 degrees. This may miss contacts involving metal atoms.
-
-        The SP2 single-neighbor angle widening for acceptors is activated
-        by comparing ``receptor_pattern`` and ``ligand_pattern`` against
-        ``ACCEPTOR_PATTERN`` and ``DONOR_PATTERN`` from ``peppr.common``.
-        Custom SMARTS patterns will not trigger the widening.
 
         Notes
         -----
@@ -284,9 +287,7 @@ class ContactMeasurement:
             self._binding_site.coord[receptor_indices],
             ligand_ideal_angle,
             tolerance,
-            widen_sp2_single=(
-                ligand_pattern == ACCEPTOR_PATTERN and receptor_pattern == DONOR_PATTERN
-            ),
+            widen_sp2_single=widen_sp2_acceptor,
         ) & _check_local_geometry(
             self._binding_site,
             self._binding_site_mol,
@@ -294,9 +295,7 @@ class ContactMeasurement:
             self._ligand.coord[ligand_indices],
             receptor_ideal_angle,
             tolerance,
-            widen_sp2_single=(
-                receptor_pattern == ACCEPTOR_PATTERN and ligand_pattern == DONOR_PATTERN
-            ),
+            widen_sp2_single=widen_sp2_acceptor,
         )
         ligand_indices = ligand_indices[is_contact]
         receptor_indices = receptor_indices[is_contact]
@@ -310,6 +309,38 @@ class ContactMeasurement:
             ),
             axis=1,
         )
+
+    def find_hbonds(self) -> tuple[NDArray[np.int_], NDArray[np.int_]]:
+        """
+        Find hydrogen bonds between the receptor and ligand.
+
+        Convenience method that calls :meth:`find_contacts_by_pattern` twice
+        (once per donor/acceptor direction) with ``DONOR_PATTERN``,
+        ``ACCEPTOR_PATTERN`` and ``HBOND_DISTANCE_SCALING`` from
+        :mod:`peppr.common`, and enables ``widen_sp2_acceptor`` for SP2
+        single-neighbor acceptors.
+
+        Returns
+        -------
+        receptor_donates, ligand_donates : tuple of ndarray, shape=(n, 2)
+            Each array has receptor indices in column 0 and ligand indices
+            in column 1. ``receptor_donates`` contains contacts where the
+            receptor is the donor; ``ligand_donates`` where the ligand is
+            the donor.
+        """
+        receptor_donates = self.find_contacts_by_pattern(
+            DONOR_PATTERN,
+            ACCEPTOR_PATTERN,
+            HBOND_DISTANCE_SCALING,
+            widen_sp2_acceptor=True,
+        )
+        ligand_donates = self.find_contacts_by_pattern(
+            ACCEPTOR_PATTERN,
+            DONOR_PATTERN,
+            HBOND_DISTANCE_SCALING,
+            widen_sp2_acceptor=True,
+        )
+        return receptor_donates, ligand_donates
 
     def find_salt_bridges(
         self,
@@ -698,11 +729,8 @@ def _check_local_geometry(
         [mol.GetAtomWithIdx(i.item()).GetHybridization() for i in atom_indices]
     )
 
-    # ---- Step 2: SP2 acceptor, 1 neighbor — widen angle range ----
-    # With one heavy neighbor a partner at +120° or -120° from the bond
-    # gives the same unsigned angle, so we accept [ideal - tolerance, 180°].
-    # Only applied for acceptors (widen_sp2_single=True); for donors
-    # (e.g. NH2) the standard ±tolerance range is correct.
+    # ---- Step 2: SP2 acceptor, 1 neighbor — widen to [ideal - tol, 180°] ----
+    # See Notes for rationale.
     sp2_single = (
         hybridizations == HybridizationType.SP2  # type: ignore[attr-defined]
     ) & (n_neighbors == 1)
