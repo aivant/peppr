@@ -65,11 +65,9 @@ class ContactMeasurement:
         If ``True``, not only explicitly charged atoms in the input receptor and
         ligand are checked, but also charged atoms that appear in their resonance
         structures.
-    use_tautomers : bool = True, optional
-        If ``use_tautomers`` is ``True``, the input receptor and ligand are
-        expanded to include their tautomeric forms.
-        This may yield a significant overhead for the binding site, as many
-        tautomers may be possible for a large molecule.
+    use_tautomers : bool, optional
+        If ``True``, the input receptor and ligand are expanded to include their
+        tautomeric forms.
 
     Warnings
     --------
@@ -77,6 +75,9 @@ class ContactMeasurement:
     threshold considered for the measurement of the binding site. Additionally,
     to avoid edge effect, additional buffer of ~1.5 Å is recommended to avoid
     artificial interactions with *ionized ends*.
+
+    Selecting ``use_resonance=True`` and/or ``use_resonance=True`` may yield
+    some overhead for large molecules (eg. binding site) if many forms available.
 
     Notes
     -----
