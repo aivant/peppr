@@ -114,6 +114,7 @@ Miscellaneous
     find_atoms_by_pattern
     estimate_formal_charges
     find_resonance_charges
+    get_interchangeable_tautomers
     MatchWarning
     EvaluationWarning
     NoContactError

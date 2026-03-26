@@ -181,9 +181,9 @@ def _superimpose_binding_site(
         )
     else:
         # Use all interface backbone atoms as superimposition anchor
-        interface_mask = np.isin(
-            reference_receptor.res_id, receptor_contacts
-        ) & np.isin(reference_receptor.atom_name, _BACKBONE_ATOMS)
+        interface_mask = struc.get_residue_masks(
+            reference_receptor, receptor_contacts
+        ).any(axis=0) & np.isin(reference_receptor.atom_name, _BACKBONE_ATOMS)
         if not np.any(interface_mask):
             raise struc.BadStructureError(
                 "No interface atoms found in reference receptor"

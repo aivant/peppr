@@ -41,10 +41,8 @@ from peppr.bounds import get_distance_bounds
 from peppr.clashes import find_clashes
 from peppr.common import (
     ACCEPTOR_PATTERN,
-    DONOR_PATTERN,
     HALOGEN_DISTANCE_SCALING,
     HALOGEN_PATTERN,
-    HBOND_DISTANCE_SCALING,
     is_small_molecule,
 )
 from peppr.contacts import ContactMeasurement
@@ -1149,16 +1147,7 @@ class PLIFRecovery(Metric):
         }
 
         # --- Find All Interaction Types ---
-        hbonds_rec_donor = contact_measurement.find_contacts_by_pattern(
-            receptor_pattern=DONOR_PATTERN,
-            ligand_pattern=ACCEPTOR_PATTERN,
-            distance_scaling=HBOND_DISTANCE_SCALING,
-        )
-        hbonds_lig_donor = contact_measurement.find_contacts_by_pattern(
-            receptor_pattern=ACCEPTOR_PATTERN,
-            ligand_pattern=DONOR_PATTERN,
-            distance_scaling=HBOND_DISTANCE_SCALING,
-        )
+        hbonds_rec_donor, hbonds_lig_donor = contact_measurement.find_hbonds()
         halogen_bonds = contact_measurement.find_contacts_by_pattern(
             receptor_pattern=ACCEPTOR_PATTERN,
             ligand_pattern=HALOGEN_PATTERN,

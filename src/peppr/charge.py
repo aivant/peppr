@@ -38,7 +38,7 @@ def estimate_formal_charges(
     atoms: struc.AtomArray, ph: float = 7.4
 ) -> NDArray[np.int_]:
     """
-    Determine the formal charge of each atom in the structure.
+    Determine the formal charge of each heavy atom in the structure.
 
     Parameters
     ----------
@@ -71,8 +71,6 @@ def estimate_formal_charges(
     sanitize(mol)
     # Initialize with the original charges
     charges = rdkit_interface.from_mol(mol, add_hydrogen=False).charge
-    # Remove hydrogen atoms to correctly match SMARTS atoms with the '[D<n>]' property
-    mol = Chem.RemoveAllHs(mol, sanitize=False)  # type: ignore[attr-defined]
 
     for pattern, charge in patterns:
         matches = mol.GetSubstructMatches(pattern)
