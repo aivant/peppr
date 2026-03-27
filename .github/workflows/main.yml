@@ -11,10 +11,6 @@ on:
     types:
     - published
 
-permissions:
-  contents: write
-  id-token: write
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
@@ -107,55 +103,59 @@ jobs:
         with:
           path: build/docs/
 
-  publish:
-    name: Upload to internal package index
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+  publish-dist:
+    name: Publish distribution to GitHub Releases and PyPI
+    if: github.event_name == 'release' && github.event.action == 'published'
     needs:
       - lint
       - build
       - test
       - docs
+    environment:
+      name: publish
+      url: https://pypi.org/p/peppr
+    permissions:
+      contents: write
+      id-token: write
+    runs-on: ubuntu-latest
     steps:
-    - name: Checkout actions
-      uses: actions/checkout@v4
-      with:
-        repository: aivant/actions
-        token: ${{ secrets.COMPOSITE_ACTIONS_TOKEN }}
-        ref: v4
-        path: actions
     - uses: actions/download-artifact@v4
       with:
         name: distribution
-        # Cannot use 'dist' as it would indicate to py/publish
-        # that it should build the wheels itself
-        path: wheelhouse
-    - name: List distributions to be uploaded
-      run: ls wheelhouse
-    - name: Upload to internal package index
-      uses: ./actions/py/publish
+        path: dist
+    - name: Upload to GitHub Releases
+      uses: softprops/action-gh-release@v2.2.1
       with:
-        sa-name: default-gha
-        wheel-directory: wheelhouse
+        files: dist/*
+    - name: Upload to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
 
-  tag:
-    name: Save updated git tag
-    if: github.ref == 'refs/heads/main'
-    needs: publish
+  publish-docs:
+    name: Publish documentation to GitHub Releases and documentation website
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs:
+      - lint
+      - build
+      - test
+      - docs
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-    - name: Checkout actions
-      uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
       with:
-        repository: aivant/actions
-        token: ${{ secrets.COMPOSITE_ACTIONS_TOKEN }}
-        ref: v4
-        path: actions
-    - name: Create tag for new internal release
-      uses: ./actions/git/tag
-      id: get-tag
-    - name: Save git tag
-      if: steps.get-tag.outputs.tag-name != ''
-      run: git push origin ${{ steps.get-tag.outputs.tag-name }}
+        name: github-pages
+        path: dist
+    - name: Rename packaged docs
+      run: mv dist/artifact.tar dist/docs.tar
+    - name: Upload to GitHub Releases
+      uses: softprops/action-gh-release@v2.2.1
+      with:
+        files: dist/docs.tar
+    - name: Upload to GitHub Pages
+      uses: actions/deploy-pages@v4
