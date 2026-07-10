@@ -271,13 +271,18 @@ If on the other hand correctness is prioritized, use
 :class:`Evaluator.MatchMethod.EXHAUSTIVE` or :class:`Evaluator.MatchMethod.INDIVIDUAL`
 instead, but try to avoid structures with many symmetries, as this may quickly lead
 to a combinatorial explosion.
+The ``max_matches`` parameter can bound the cost of ``INDIVIDUAL`` matching.
+In this case, pepp'r also considers the heuristic match for every metric, so a capped
+search cannot return a worse value than :class:`Evaluator.MatchMethod.HEURISTIC`.
 
 .. jupyter-execute::
 
     evaluator = peppr.Evaluator(
         [peppr.InterfaceRMSD()],
-        # Guarantees optimal atom mapping at potentially high computation costs
+        # Optimizes the atom mapping separately for each metric
         match_method=peppr.Evaluator.MatchMethod.INDIVIDUAL,
+        # Optional: bound the search while retaining the heuristic as a fallback
+        max_matches=384,
     )
 
 A note on multiprocessing

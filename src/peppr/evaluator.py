@@ -52,6 +52,9 @@ class Evaluator(Mapping):
     max_matches : int, optional
         The maximum number of atom matches to try, if the `match_method` is set to
         ``EXHAUSTIVE`` or ``INDIVIDUAL``.
+        For ``INDIVIDUAL``, the heuristic match is additionally considered as a
+        fallback, so limiting the number of matches cannot produce a worse metric value
+        than ``HEURISTIC`` matching.
     tolerate_exceptions : bool, optional
         If set to true, exceptions during :class:`Metric.evaluate()` are not propagated.
         Instead a warning is raised and the result is set to ``None``.
@@ -100,9 +103,12 @@ class Evaluator(Mapping):
           better matches in edge cases.
         - ``INDIVIDUAL``: Like ``EXHAUSTIVE``, but instead of using the RMSD as
           criterion for optimization, each individual :class:`Metric` is used.
-          As this requires exhaustive iteration over all mappings and computing the
-          each metric for all of them, this method is slower than ``EXHAUSTIVE``.
-          However, it guarantees to find the optimal match for each metric.
+          Each atom mapping is reused across all metrics, but computing every metric
+          for every mapping still makes this method slower than ``EXHAUSTIVE``.
+          Without a match limit, it guarantees to find the optimal match for each
+          metric. If ``max_matches`` limits the search, the heuristic match is also
+          considered to ensure that truncation cannot make a metric worse than
+          ``HEURISTIC``.
         - ``NONE``: Skip atom matching entirely and evaluate metrics on the
           structures as provided. This is useful when the reference and pose are
           already properly aligned, or when using metrics that don't require
@@ -519,23 +525,53 @@ class Evaluator(Mapping):
             except Exception as e:
                 raise _FindAllMatchesError(e)
 
-        results = np.full(len(self._metrics), np.nan)
+        results = np.array(
+            [
+                np.inf if metric.smaller_is_better() else -np.inf
+                for metric in self._metrics
+            ]
+        )
+        failed_metrics = np.zeros(len(self._metrics), dtype=bool)
 
-        for i, metric in enumerate(self._metrics):
+        # A truncated search must not return a worse mapping than the fast heuristic.
+        if self._max_matches is not None:
             try:
-                best_result = np.inf if metric.smaller_is_better() else -np.inf
-                for it, (matched_reference, matched_pose) in enumerate(
-                    _find_all_matches(
-                        reference,
-                        pose,
-                        min_sequence_identity=self._min_sequence_identity,
-                        allow_unmatched_entities=self._allow_unmatched_entities,
-                        use_entity_annotation=self._use_entity_annotation,
-                        use_structure_match=self._use_structure_match,
-                    )
-                ):
-                    if self._max_matches is not None and it >= self._max_matches:
-                        break
+                heuristic_reference, heuristic_pose = find_optimal_match(
+                    reference,
+                    pose,
+                    min_sequence_identity=self._min_sequence_identity,
+                    use_heuristic=True,
+                    allow_unmatched_entities=self._allow_unmatched_entities,
+                    use_entity_annotation=self._use_entity_annotation,
+                    use_structure_match=self._use_structure_match,
+                )
+            except Exception:
+                pass
+            else:
+                for i, metric in enumerate(self._metrics):
+                    try:
+                        result = metric.evaluate(heuristic_reference, heuristic_pose)
+                    except Exception:
+                        continue
+                    if np.isfinite(result):
+                        results[i] = result
+
+        try:
+            for it, (matched_reference, matched_pose) in enumerate(
+                _find_all_matches(
+                    reference,
+                    pose,
+                    min_sequence_identity=self._min_sequence_identity,
+                    allow_unmatched_entities=self._allow_unmatched_entities,
+                    use_entity_annotation=self._use_entity_annotation,
+                    use_structure_match=self._use_structure_match,
+                )
+            ):
+                if self._max_matches is not None and it >= self._max_matches:
+                    break
+                for i, metric in enumerate(self._metrics):
+                    if failed_metrics[i]:
+                        continue
                     try:
                         result = metric.evaluate(matched_reference, matched_pose)
                     except Exception as e:
@@ -546,28 +582,25 @@ class Evaluator(Mapping):
                                 f"on '{system_id}': {e}"
                             ),
                         )
-                        best_result = np.nan
-                        break
+                        results[i] = np.nan
+                        failed_metrics[i] = True
+                        continue
                     if metric.smaller_is_better():
-                        if result < best_result:
-                            best_result = result
+                        if result < results[i]:
+                            results[i] = result
                     else:
-                        if result > best_result:
-                            best_result = result
+                        if result > results[i]:
+                            results[i] = result
+        except _FindAllMatchesError as e:
+            self._raise_or_warn(
+                e.wrapped_exception,
+                MatchWarning(
+                    f"Failed to match reference and pose in system '{system_id}': {e}"
+                ),
+            )
+            results[:] = np.nan
 
-            except _FindAllMatchesError as e:
-                self._raise_or_warn(
-                    e.wrapped_exception,
-                    MatchWarning(
-                        f"Failed to match reference and pose "
-                        f"in system '{system_id}': {e}"
-                    ),
-                )
-                best_result = np.nan
-
-            if np.isfinite(best_result):
-                results[i] = best_result
-
+        results[~np.isfinite(results)] = np.nan
         return results
 
     def _tabulate_metrics(

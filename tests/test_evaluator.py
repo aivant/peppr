@@ -2,10 +2,12 @@ import copy
 import itertools
 from collections import OrderedDict
 from pathlib import Path
+import biotite.structure as struc
 import biotite.structure.io.pdbx as pdbx
 import numpy as np
 import pytest
 import peppr
+import peppr.evaluator as evaluator_module
 from tests.common import assemble_predictions, list_test_predictions
 
 
@@ -332,3 +334,101 @@ def test_individual_match_method(model_num, optimal_bisy_rmsd):
     assert exhaustive_bisy_rmsd > optimal_bisy_rmsd + TOLERANCE
     # The individual method should be able to find the optimal value
     assert individual_bisy_rmsd <= optimal_bisy_rmsd + TOLERANCE
+
+
+def test_bounded_individual_matching_keeps_heuristic_result(monkeypatch):
+    """A mapping cap must not make individual matching worse than the heuristic."""
+
+    class CoordinateMetric(peppr.Metric):
+        def __init__(self, name, multiplier, smaller_is_better):
+            self._name = name
+            self._multiplier = multiplier
+            self._smaller_is_better = smaller_is_better
+            super().__init__()
+
+        @property
+        def name(self):
+            return self._name
+
+        def evaluate(self, reference, pose):
+            return self._multiplier * float(pose.coord[0, 0])
+
+        def smaller_is_better(self):
+            return self._smaller_is_better
+
+    reference = struc.AtomArray(1)
+    reference.coord = np.zeros((1, 3))
+    heuristic_pose = reference.copy()
+    heuristic_pose.coord[0, 0] = 1.0
+    enumerated_pose = reference.copy()
+    enumerated_pose.coord[0, 0] = 5.0
+
+    monkeypatch.setattr(
+        evaluator_module,
+        "find_optimal_match",
+        lambda *args, **kwargs: (reference, heuristic_pose),
+    )
+    monkeypatch.setattr(
+        evaluator_module,
+        "find_all_matches",
+        lambda *args, **kwargs: iter([(reference, enumerated_pose)]),
+    )
+
+    evaluator = peppr.Evaluator(
+        [
+            CoordinateMetric("minimum", 1.0, True),
+            CoordinateMetric("maximum", -1.0, False),
+        ],
+        peppr.Evaluator.MatchMethod.INDIVIDUAL,
+        max_matches=1,
+    )
+    result = evaluator._evaluate_using_each_metric(
+        "bounded", reference, enumerated_pose
+    )
+
+    assert result.tolist() == [1.0, -1.0]
+
+
+def test_individual_matching_enumerates_mappings_once_for_all_metrics(monkeypatch):
+    """Metric-specific matching should reuse each atom mapping across metrics."""
+
+    class CoordinateMetric(peppr.Metric):
+        def __init__(self, name, smaller_is_better):
+            self._name = name
+            self._smaller_is_better = smaller_is_better
+            super().__init__()
+
+        @property
+        def name(self):
+            return self._name
+
+        def evaluate(self, reference, pose):
+            return float(pose.coord[0, 0])
+
+        def smaller_is_better(self):
+            return self._smaller_is_better
+
+    reference = struc.AtomArray(1)
+    reference.coord = np.zeros((1, 3))
+    low_pose = reference.copy()
+    low_pose.coord[0, 0] = 2.0
+    high_pose = reference.copy()
+    high_pose.coord[0, 0] = 8.0
+    call_count = 0
+
+    def find_all_matches_once(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        yield reference, low_pose
+        yield reference, high_pose
+
+    monkeypatch.setattr(evaluator_module, "find_all_matches", find_all_matches_once)
+
+    evaluator = peppr.Evaluator(
+        [CoordinateMetric("minimum", True), CoordinateMetric("maximum", False)],
+        peppr.Evaluator.MatchMethod.INDIVIDUAL,
+    )
+    result = evaluator._evaluate_using_each_metric("shared", reference, low_pose)
+
+    assert call_count == 1
+    assert result.tolist() == [2.0, 8.0]
