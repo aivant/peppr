@@ -1049,7 +1049,9 @@ def _molecule_mappings(
     if len(mappings) == 0:
         # If still no match is found, conformation is not the problem
         # -> Check if bond graph is the problem
-        if np.array_equal(reference.element, pose.element):
+        if np.array_equal(
+            np.char.upper(reference.element), np.char.upper(pose.element)
+        ):
             # If the elements are the same, probably some simple
             # incompatible bonds are the problem
             # -> Assume that the atom order is the same in reference and pose
@@ -1432,7 +1434,8 @@ def _equal_composition(molecules: list[struc.AtomArray]) -> bool:
     element_counters: list[Counter[str]] = [Counter() for _ in molecules]
     for i, molecule in enumerate(molecules):
         for element in molecule.element:
-            element_counters[i][element] += 1
+            # Element names are not case sensitive, e.g. 'CL' and 'Cl' are the same
+            element_counters[i][element.upper()] += 1
     return all(element_counters[0] == counter for counter in element_counters[1:])
 
 

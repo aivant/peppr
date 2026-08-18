@@ -417,6 +417,60 @@ def test_match_kekulized_to_aromatic(use_heuristic):
     _check_match(matched_reference, matched_pose, reference, pose)
 
 
+@pytest.mark.parametrize("use_heuristic", [False, True])
+def test_match_different_element_case(use_heuristic):
+    """
+    Check if a molecule can be matched to the same molecule, if the element names are
+    capitalized differently, as it happens if reference and pose come from different
+    file formats.
+    """
+    # A molecule containing elements whose name is longer than one character
+    COMP_NAME = "DIF"
+
+    reference = struc.info.residue(COMP_NAME)
+    reference = reference[reference.element != "H"]
+    reference.hetero[:] = True
+    _annotate_atom_order(reference)
+
+    pose = reference.copy()
+    # Some formats write element names in title case (e.g. 'Cl' instead of 'CL')
+    reference.element = np.char.capitalize(reference.element)
+
+    matched_reference, matched_pose = peppr.find_optimal_match(
+        reference, pose, use_heuristic=use_heuristic
+    )
+
+    _check_match(matched_reference, matched_pose, reference, pose)
+
+
+@pytest.mark.parametrize("use_heuristic", [False, True])
+def test_match_different_element_case_incompatible_bonds(use_heuristic):
+    """
+    Check if a molecule can be matched to the same molecule with an incompatible bond
+    graph, if the element names are capitalized differently.
+    In this case the atom mapping relies on the comparison of elements alone.
+    """
+    COMP_NAME = "DIF"
+    # Removing this aromatic bond keeps the molecule connected
+    REMOVED_BOND = ("C1", "C2")
+
+    reference = struc.info.residue(COMP_NAME)
+    reference = reference[reference.element != "H"]
+    reference.hetero[:] = True
+    _annotate_atom_order(reference)
+
+    pose = reference.copy()
+    pose.bonds.remove_bond(*np.where(np.isin(pose.atom_name, REMOVED_BOND))[0])
+    reference.element = np.char.capitalize(reference.element)
+
+    with pytest.warns(peppr.GraphMatchWarning):
+        matched_reference, matched_pose = peppr.find_optimal_match(
+            reference, pose, use_heuristic=use_heuristic
+        )
+
+    _check_match(matched_reference, matched_pose, reference, pose)
+
+
 @pytest.mark.xfail(
     reason="There is a fallback with 'useChirality=False', whichmakes this test fail"
 )
